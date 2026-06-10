@@ -221,6 +221,86 @@ function ConnectionCard({ kind, title, sub, fields }: {
   );
 }
 
+// ── api tokens (HA integration) ─────────────────────────────────────────────
+
+type TokenInfo = {
+  id: number; name: string; scope: string;
+  created_at: string | null; last_used_at: string | null; revoked: boolean;
+};
+
+function ApiTokens() {
+  const [tokens, setTokens] = useState<TokenInfo[]>([]);
+  const [name, setName] = useState("Home Assistant");
+  const [fresh, setFresh] = useState<string | null>(null);   // plaintext, shown once
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = () => fetch("/api/tokens").then(j).then(setTokens).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const mint = async () => {
+    setBusy(true); setFresh(null); setCopied(false);
+    try {
+      const r = await post("/api/tokens", { name }).then(j);
+      setFresh(r.token);
+      load();
+    } catch { /* surfaced by absence of token */ }
+    setBusy(false);
+  };
+  const revoke = async (t: TokenInfo) => {
+    if (!window.confirm(`Revoke “${t.name}”? Anything using it (your HA integration) stops working until you paste a new token there.`)) return;
+    await fetch(`/api/tokens/${t.id}`, { method: "DELETE" });
+    load();
+  };
+  const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString() : "never";
+  return (
+    <Card title="API tokens"
+          sub="For the Home Assistant integration. Mint one here, paste it into HA when the Hearth integration asks. Tokens can only read predictions and receive notification answers.">
+      {tokens.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {tokens.map((t) => (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12,
+                                     padding: "8px 12px", border: "1px solid var(--border)",
+                                     borderRadius: 10, fontSize: 13.5,
+                                     opacity: t.revoked ? 0.5 : 1 }}>
+              <Icon name="key" size={15} />
+              <span style={{ fontWeight: 500 }}>{t.name}</span>
+              <span style={{ color: "var(--text-dim)" }}>
+                created {fmt(t.created_at)} · last used {fmt(t.last_used_at)}
+              </span>
+              {t.revoked
+                ? <span style={{ marginLeft: "auto", color: "var(--text-dim)" }}>revoked</span>
+                : <button className="btn btn-ghost" style={{ marginLeft: "auto", minHeight: 28, padding: "2px 10px", fontSize: 12.5, color: "var(--danger)" }}
+                          onClick={() => revoke(t)}>Revoke</button>}
+            </div>
+          ))}
+        </div>
+      )}
+      {fresh && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <code style={{ flex: 1, padding: "10px 12px", background: "var(--surface-2)",
+                           border: "1px solid var(--accent)", borderRadius: 8, fontSize: 13,
+                           overflowWrap: "anywhere" }}>{fresh}</code>
+            <button className="btn btn-secondary" aria-label="Copy token"
+                    onClick={() => { navigator.clipboard.writeText(fresh); setCopied(true); }}>
+              {copied ? "Copied ✓" : <Icon name="copy" size={16} />}
+            </button>
+          </div>
+          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+            Copy it now — for your security it's shown only this once.
+          </p>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <input value={name} onChange={(e) => setName(e.target.value)}
+               placeholder="Token name" style={{ maxWidth: 220 }} />
+        <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={mint}>
+          {busy ? "Generating…" : "Generate token"}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
 // ── appearance ──────────────────────────────────────────────────────────────
 
 function Appearance() {
@@ -342,6 +422,7 @@ export default function Settings() {
           { key: "model", label: "Model", fromOptions: true },
           { key: "token", label: "API key", hint: "Leave empty to keep the current one." },
         ]} />
+      <ApiTokens />
       <Appearance />
       <Account />
       <System />
