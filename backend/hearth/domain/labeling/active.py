@@ -18,6 +18,8 @@ from ..schemas import Person, Prediction, Question
 log = logging.getLogger(__name__)
 
 ASK_THRESHOLD = 0.75
+MARGIN_THRESHOLD = 0.25  # top-2 gap: cooking 55% vs eating 43% is a GREAT
+                         # question even though 0.55 > naive uncertainty alone
 EPSILON = 0.07
 COOLDOWN_MIN = 30
 REPEAT_MIN = 90
@@ -59,7 +61,11 @@ async def maybe_ask(pred: Prediction, person: Person, repo, notifier) -> Questio
     now = _utcnow()
     tz = repo.get_setting("timezone", "UTC") or "UTC"
 
-    uncertain = pred.confidence < ASK_THRESHOLD
+    # margin sampling (active-learning standard): ask when the top two
+    # classes are CLOSE, not only when the winner is weak
+    ranked_p = sorted(pred.probabilities.values(), reverse=True)
+    margin = (ranked_p[0] - ranked_p[1]) if len(ranked_p) > 1 else 1.0
+    uncertain = pred.confidence < ASK_THRESHOLD or margin < MARGIN_THRESHOLD
     explore = random.random() < EPSILON
     if not (uncertain or explore):
         return None

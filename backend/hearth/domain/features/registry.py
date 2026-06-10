@@ -45,9 +45,13 @@ def all_recipes() -> dict[Role, Recipe]:
     return dict(_REGISTRY)
 
 
+PIPELINE_VERSION = "2"  # bump when extract_windows adds/changes columns
+
+
 def feature_set_version(extra: list[dict] | None = None) -> str:
     """Deterministic hash of recipes (+ composite definitions). 'v' + 10 hex."""
     h = hashlib.sha256()
+    h.update(PIPELINE_VERSION.encode())
     for role in sorted(_REGISTRY, key=lambda r: r.value):
         r = _REGISTRY[role]
         h.update(role.value.encode())

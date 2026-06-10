@@ -150,3 +150,20 @@ async def test_milestones_respect_system_channel():
 
     await check_milestones(Repo(), Tsdb(), Notifier())
     assert sent == ["admin"]          # quiet member never pinged
+
+
+@pytest.mark.asyncio
+async def test_margin_sampling_asks_on_close_race(monkeypatch):
+    """0.55 confidence but a 3-point gap to #2: classic great question."""
+    repo, notifier = AskRepo(), SpyNotifier()
+    monkeypatch.setattr(active.random, "random", lambda: 0.99)
+    pred = _pred(0.78)                              # above ASK_THRESHOLD…
+    pred.probabilities = {"cooking": 0.78, "eating": 0.60, "home": 0.05}
+    # (unnormalized on purpose — margin uses the gap, 0.18 < 0.25)
+    q = await active.maybe_ask(pred, _person(), repo, notifier)
+    assert q is not None                            # …but margin says ask
+
+    repo2, notifier2 = AskRepo(), SpyNotifier()
+    sure = _pred(0.9)
+    sure.probabilities = {"cooking": 0.9, "eating": 0.07, "home": 0.03}
+    assert await active.maybe_ask(sure, _person(), repo2, notifier2) is None

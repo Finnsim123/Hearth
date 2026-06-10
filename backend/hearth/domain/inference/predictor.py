@@ -67,9 +67,20 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         explains = pd.DataFrame(index=todo.index)
         version = RULES_VERSION
 
+    trans = repo.get_setting(f"transitions.{person_id}") or None
     out: list[Prediction] = []
     for ts in todo.index:
         row = probs.loc[ts]
+        # learned-transition forward filter: the previous window's state sets
+        # a prior (sleeping is sticky; sleeping→cooking at 3am is rare)
+        if trans and history:
+            prev = history[0]
+            prev_ts = prev.window_ts if prev.window_ts.tzinfo else \
+                prev.window_ts.replace(tzinfo=timezone.utc)
+            if abs((ts.to_pydatetime() - prev_ts).total_seconds() - 1800) < 1:
+                from .smoothing import transition_filter
+                prev_state = prev.parent or prev.predicted
+                row = transition_filter(row, prev_state, trans)
         predicted = str(row.idxmax())
         confidence = float(row.max())
         parent = None

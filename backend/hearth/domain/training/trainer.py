@@ -62,6 +62,9 @@ def train_person(person_id: str, tsdb, repo, store,
 
     record = _fit_node(person_id, "root", feats, coarse_labels, provenance,
                        repo, store, fset, end, excluded, force)
+    if record is not None:
+        from ..inference.smoothing import learn_transitions
+        repo.set_setting(f"transitions.{person_id}", learn_transitions(coarse_labels))
 
     for parent in parents_with_children(activities):
         fine = fine_label_series(labels, parent, pmap)
@@ -114,6 +117,11 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
     train_acc = float((est.predict_proba(X_train).idxmax(axis=1) == y_train).mean())
     metrics["accuracy_train"] = round(train_acc, 4)
     metrics["hyperparams"] = params
+    if len(X_val) >= 100 and hasattr(est, "calibrate"):
+        # AFTER evaluation (metrics stay honest): isotonic per class on the
+        # held-out split, so 0.75 confidence actually means ~75% downstream
+        est.calibrate(X_val, y_val)
+        metrics["calibrated"] = True
     if excluded:
         metrics["excluded_features"] = sorted(excluded)
     try:                                   # glass-box: top-15 feature importances

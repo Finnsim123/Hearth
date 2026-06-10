@@ -13,13 +13,37 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from ..schemas import Binding
+from ..schemas import Binding, Role
 from .composites import apply_composites
 from .registry import all_recipes, feature_set_version, recipe_for
 
 log = logging.getLogger(__name__)
 
 WINDOW = timedelta(minutes=30)
+
+# Event-dynamics features (CASAS baseline: Cook & Krishnan, "Activity
+# Recognition on Streaming Sensor Data"): event COUNT, dominant sensor and
+# IDLENESS discriminate activities better than aggregates alone — 40 silent
+# minutes at 23:30 says "sleeping" louder than any CO2 curve.
+EVENT_ROLES = {Role.PRESENCE, Role.DOOR, Role.MEDIA}
+IDLE_CAP_MIN = 240.0  # read_raw lookback bounds what we can know
+
+
+def event_dynamics(prepared: pd.DataFrame, bindings: list[Binding]):
+    """Precompute, on the 1-min grid: per-column change masks for direct
+    event sensors + a running 'minutes since ANY direct event' series."""
+    cols = [b.name for b in bindings
+            if b.role in EVENT_ROLES and b.name in prepared.columns
+            and pd.api.types.is_numeric_dtype(prepared[b.name])]
+    if not cols or prepared.empty:
+        return None
+    changes = prepared[cols].diff().abs().gt(0.5)
+    any_change = changes.any(axis=1)
+    # timestamp of the most recent direct event, forward-filled
+    ts = pd.Series(prepared.index, index=prepared.index)
+    last_event = ts.where(any_change).ffill()
+    idle_min = ((ts - last_event).dt.total_seconds() / 60).clip(upper=IDLE_CAP_MIN)
+    return {"cols": cols, "changes": changes, "idle_min": idle_min}
 
 
 def prepare(raw: pd.DataFrame, bindings: list[Binding]) -> pd.DataFrame:
@@ -52,6 +76,7 @@ def window_grid(start: datetime, end: datetime, stride_min: int) -> list[datetim
 
 def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
                     grid: list[datetime], tz: str = "UTC") -> pd.DataFrame:
+    dyn = event_dynamics(prepared, bindings)
     """One row per window start: temporal features + per-binding recipe outputs
     (columns '{binding.name}_{suffix}'). Person-agnostic — caller filters
     bindings to shared + this person's.
@@ -82,6 +107,26 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
         }
         local_end = we.astimezone(zone)
         end_minutes = local_end.hour * 60 + local_end.minute
+        # event dynamics for this window (0/idle-cap when no event sensors)
+        if dyn is not None:
+            ch = dyn["changes"].loc[(dyn["changes"].index >= ws)
+                                    & (dyn["changes"].index < we)] \
+                if not aligned else dyn["changes"].reindex(sl.index).fillna(False)
+            per_sensor = ch.sum()
+            total = float(per_sensor.sum())
+            row["evt_count"] = total
+            row["evt_active_sensors"] = float((per_sensor > 0).sum())
+            row["evt_dominant_share"] = (float(per_sensor.max() / total)
+                                         if total > 0 else 0.0)
+            idle_at_end = dyn["idle_min"].loc[:we].iloc[-1] \
+                if len(dyn["idle_min"].loc[:we]) else IDLE_CAP_MIN
+            row["evt_idle_minutes"] = float(idle_at_end if pd.notna(idle_at_end)
+                                            else IDLE_CAP_MIN)
+        else:
+            row["evt_count"] = 0.0
+            row["evt_active_sensors"] = 0.0
+            row["evt_dominant_share"] = 0.0
+            row["evt_idle_minutes"] = IDLE_CAP_MIN
         for b in bindings:
             series = sl[b.name] if b.name in sl.columns else pd.Series(dtype=object)
             series.attrs["window_end_local_minutes"] = end_minutes

@@ -221,3 +221,29 @@ carries parent + coarse_confidence; the HA sensor exposes `state_level`
 (stable, for automations) alongside the fine state. Asking targets the
 UNCERTAIN level: sure-of-home + unsure-of-cooking asks "cooking or eating?"
 with sibling alternatives, never re-asks the state.
+
+
+## Accuracy pack (added June 2026)
+
+Survey of how published smart-home HAR systems reach 95–98% (CASAS line,
+Cook & Krishnan "Activity Recognition on Streaming Sensor Data") vs Hearth:
+
+1. **Event dynamics** — the canonical feature set is built on event COUNTS,
+   dominant sensor and TIME-SINCE-LAST-EVENT, not only window aggregates.
+   Added: `evt_count`, `evt_active_sensors`, `evt_dominant_share`,
+   `evt_idle_minutes` (idleness clock, capped 240 min) over direct event
+   roles (presence/door/media). PIPELINE_VERSION=2 bumps the feature-set
+   hash — old and new schemas never mix (ADR-7).
+2. **Learned transition smoothing** — discriminative temporal smoothing:
+   a Laplace-smoothed transition matrix learned from the household's own
+   coarse-label history (stored per person at train time), applied as a
+   forward filter over the classifier's probability stream at inference.
+   15% uniform mix = decisive observations can always override the prior.
+   Targets the prototype's known error class (bedtime transitions).
+3. **Margin sampling** — ask when the top-2 gap < 0.25, not only when the
+   winner is weak; the active-learning literature shows margin queries are
+   the most label-efficient early on.
+4. **Calibration** — per-class isotonic regression fitted on the held-out
+   validation split AFTER honest evaluation (metrics never see calibrated
+   probabilities); every downstream threshold (ask, evidence cap, gates)
+   reads confidence as a real probability. Only fitted when n_val ≥ 100.

@@ -70,7 +70,31 @@ class RandomForestEstimator:
 
     def predict_proba(self, X: pd.DataFrame) -> pd.DataFrame:
         probs = self.model.predict_proba(self._align(X))
-        return pd.DataFrame(probs, index=X.index, columns=self.classes_)
+        df = pd.DataFrame(probs, index=X.index, columns=self.classes_)
+        if getattr(self, "calibrators", None):
+            for cls, iso in self.calibrators.items():
+                if cls in df.columns:
+                    df[cls] = iso.predict(df[cls].to_numpy())
+            row_sums = df.sum(axis=1).replace(0, 1.0)
+            df = df.div(row_sums, axis=0)
+        return df
+
+    def calibrate(self, X_val: pd.DataFrame, y_val: pd.Series) -> None:
+        """Per-class isotonic regression on a held-out split — forests are
+        systematically mis-calibrated and every downstream threshold (asking,
+        evidence cap, promotion) reads confidence as a probability."""
+        from sklearn.isotonic import IsotonicRegression
+        raw = self.model.predict_proba(self._align(X_val))
+        raw = pd.DataFrame(raw, index=X_val.index, columns=self.classes_)
+        self.calibrators = {}
+        for cls in self.classes_:
+            target = (y_val == cls).astype(float)
+            if target.nunique() < 2:
+                continue
+            iso = IsotonicRegression(y_min=0.001, y_max=0.999,
+                                     out_of_bounds="clip")
+            iso.fit(raw[cls].to_numpy(), target.to_numpy())
+            self.calibrators[cls] = iso
 
     def explain(self, X: pd.DataFrame) -> pd.DataFrame:
         """Per-row SHAP for the predicted class; empty df if shap unavailable."""
