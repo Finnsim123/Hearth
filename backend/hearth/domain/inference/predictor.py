@@ -22,16 +22,17 @@ RULES_VERSION = "rules-v0"
 RULES_CONFIDENCE = 0.55  # below ask-threshold by design: rules want feedback
 
 
-def _rules_predict(repo, feats: pd.DataFrame, person_id: str) -> pd.DataFrame:
+def _rules_predict(repo, feats: pd.DataFrame, person_id: str):
     default_activity = repo.get_setting("default_activity", "home") or "home"
-    labels = bootstrap_labels(repo.rules(), feats, person_id, default_activity)
+    labels, basis = bootstrap_labels(repo.rules(), feats, person_id,
+                                     default_activity, return_basis=True)
     slugs = sorted({a.slug for a in repo.activities()} | set(labels.unique()))
     probs = pd.DataFrame(0.0, index=feats.index, columns=slugs)
     rest = (1 - RULES_CONFIDENCE) / max(len(slugs) - 1, 1)
     for ts, lab in labels.items():
         probs.loc[ts] = rest
         probs.loc[ts, lab] = RULES_CONFIDENCE
-    return probs
+    return probs, basis
 
 
 def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
@@ -63,7 +64,7 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
             except Exception:
                 log.exception("child model %s failed to load", child.version)
     else:
-        probs = _rules_predict(repo, todo, person_id)
+        probs, rule_basis = _rules_predict(repo, todo, person_id)
         explains = pd.DataFrame(index=todo.index)
         version = RULES_VERSION
 
@@ -99,6 +100,10 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
             row = fine_row                  # alternatives/asking use siblings
         explanation: list[tuple[str, float]] = []
         evidence = None
+        if version == RULES_VERSION:
+            why = rule_basis.get(ts)
+            why = why if isinstance(why, str) else None   # pandas None→NaN trap
+            explanation = [(f"rule: {why}" if why else "default (no rule matched)", 1.0)]
         if not explains.empty and ts in explains.index:
             top = explains.loc[ts].abs().nlargest(3)
             explanation = [(f, float(explains.loc[ts, f])) for f in top.index]

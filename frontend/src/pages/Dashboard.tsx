@@ -9,7 +9,10 @@ import Avatar from "../components/Avatar";
 import { Icon, type IconName } from "../icons";
 
 type Pred = { time: string; predicted: string; smoothed: string; confidence: number;
-              model_version: string; probs: Record<string, number> };
+              model_version: string; probs: Record<string, number>
+  evidence?: number | null; parent?: string | null;
+  explanation?: [string, number][];
+};
 type Person = { id: string; name: string; avatar?: string | null; enabled: boolean };
 type Journey = { recording_since: string | null; days: number; events_24h: number;
                  sensors_bound: number; milestones: { recording: boolean; patterns: boolean; model: boolean } };
@@ -110,6 +113,60 @@ function Ribbon({ preds, ruleBased, personId }: { preds: Pred[]; ruleBased: bool
   );
 }
 
+/** What the current prediction rests on — SHAP signals for models, the
+ *  fired rule for the rules fallback, plus the evidence-strength chip. */
+function BasedOn({ latest }: { latest: Pred }) {
+  const ex = latest.explanation ?? [];
+  const ev = latest.evidence;
+  const ruleBased = latest.model_version?.startsWith("rules");
+  if (ex.length === 0 && (ev === null || ev === undefined)) return null;
+  const evLabel = ev === null || ev === undefined ? null
+    : ev >= 0.5 ? ["strong", "var(--ok, #34D399)"]
+    : ev >= 0.25 ? ["mixed", "var(--accent)"]
+    : ["weak", "var(--danger)"];
+  const nice = (f: string) =>
+    f.replace(/_/g, " ").replace(/\b(frac|max|mean|delta|last)\b/g, "$1");
+  return (
+    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10,
+                  display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={{ fontSize: 11.5, color: "var(--text-dim)", fontWeight: 600,
+                     letterSpacing: "0.04em", textTransform: "uppercase" }}>
+        Based on
+      </span>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        {evLabel && (
+          <span title={`${Math.round((ev as number) * 100)}% of this prediction rests on direct sensors (bed, presence, doors…) — weak predictions are held below the ask threshold`}
+                style={{ fontSize: 11.5, padding: "2px 9px", borderRadius: 99, fontWeight: 600,
+                         color: evLabel[1],
+                         background: `color-mix(in srgb, ${evLabel[1]} 14%, transparent)` }}>
+            {evLabel[0]} evidence
+          </span>
+        )}
+        {ruleBased && ex[0] ? (
+          <code style={{ fontSize: 11.5, color: "var(--text-dim)", overflowWrap: "anywhere" }}>
+            {ex[0][0]}
+          </code>
+        ) : (
+          ex.slice(0, 3).map(([feat, v]) => (
+            <span key={feat}
+                  title={`SHAP ${v >= 0 ? "+" : ""}${v.toFixed(3)} toward “${latest.predicted}”`}
+                  style={{ fontSize: 11.5, padding: "2px 9px", borderRadius: 99,
+                           background: "var(--surface-2)", border: "1px solid var(--border)",
+                           color: "var(--text-dim)" }}>
+              {nice(feat)} {v >= 0 ? "↑" : "↓"}
+            </span>
+          ))
+        )}
+        {latest.parent && (
+          <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+            · within {latest.parent}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PersonCard({ person, preds }: { person: Person; preds: Pred[] }) {
   const latest = preds[0];
   const ruleBased = latest?.model_version?.startsWith("rules");
@@ -136,6 +193,7 @@ function PersonCard({ person, preds }: { person: Person; preds: Pred[] }) {
         </div>
       )}
       <Ribbon preds={preds} ruleBased={!!ruleBased} personId={person.id} />
+      {latest && <BasedOn latest={latest} />}
     </div>
   );
 }

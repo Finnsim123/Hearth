@@ -7,6 +7,8 @@ Schema: docs/DATA_MODEL.md §1. Invariants enforced here:
 """
 from __future__ import annotations
 
+import json
+
 import logging
 import warnings
 from datetime import datetime, timedelta, timezone
@@ -235,6 +237,9 @@ from(bucket: "{FEAT_BUCKET}")
             p = p.field("evidence", float(pred.evidence))
         if pred.parent:
             p = p.field("parent", pred.parent)
+        if pred.explanation:
+            import json as _json
+            p = p.field("explanation", _json.dumps(pred.explanation[:3]))
         if pred.coarse_confidence is not None:
             p = p.field("coarse_confidence", float(pred.coarse_confidence))
         for cls, prob in pred.probabilities.items():
@@ -317,6 +322,9 @@ from(bucket: "{ML_BUCKET}")
                 "parent": (str(r["parent"])
                            if "parent" in df.columns and pd.notna(r.get("parent"))
                            else None),
+                "explanation": (json.loads(r["explanation"])
+                                if "explanation" in df.columns
+                                and pd.notna(r.get("explanation")) else []),
             })
         return out
 

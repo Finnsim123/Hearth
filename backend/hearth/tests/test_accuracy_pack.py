@@ -89,3 +89,18 @@ def test_calibration_fixes_overconfidence():
     conf = probs.max(axis=1)
     acc = (probs.idxmax(axis=1) == y.iloc[400:]).mean()
     assert abs(conf.mean() - acc) < 0.12
+
+
+def test_bootstrap_basis_names_the_fired_rule():
+    from hearth.domain.labeling.rules import bootstrap_labels, predicate_text
+    from hearth.domain.schemas import Rule
+    idx = pd.DatetimeIndex([datetime(2026, 6, 1, h, 0, tzinfo=timezone.utc)
+                            for h in (10, 23)])
+    feats = pd.DataFrame({"bed_max": [0.0, 2.0], "hour_of_day": [10, 23]}, index=idx)
+    rules = [Rule(activity_slug="sleeping", priority=10,
+                  predicate={"all": [{"feat": "bed_max", "op": ">", "value": 1}]})]
+    labels, basis = bootstrap_labels(rules, feats, "alice", "home", return_basis=True)
+    assert labels.tolist() == ["home", "sleeping"]
+    assert pd.isna(basis.iloc[0])                      # default — no rule fired
+    assert basis.iloc[1] == "bed_max > 1"
+    assert predicate_text({"any": [{"feat": "a", "op": "==", "value": 1}]}) == "(a == 1)"
