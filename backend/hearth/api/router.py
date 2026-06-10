@@ -47,9 +47,11 @@ def build_api_router(deps: dict) -> APIRouter:
 
     @api.get("/health")
     def health() -> dict:
+        import os
         return {"status": "ok", "time": datetime.now(timezone.utc).isoformat(),
                 "tsdb": deps.get("tsdb") is not None,
                 "ha": deps.get("events") is not None,
+                "build": os.getenv("HEARTH_BUILD_SHA", "dev"),
                 "needs_setup": repo.user_count() == 0}
 
     # ── connections ────────────────────────────────────────────────────────
@@ -428,6 +430,37 @@ def build_api_router(deps: dict) -> APIRouter:
                                         label=body["answer"], provenance=Provenance.CONFIRMED,
                                         source="inbox"))
         return {"ok": True}
+
+    # ── in-app updates (host updater writes status; we write the trigger) ──
+    @api.get("/system/update")
+    def update_status() -> dict:
+        import json as _json
+        import os
+        from pathlib import Path
+        shared = Path(os.getenv("HEARTH_SHARED_DIR", "/shared"))
+        out = {"build": os.getenv("HEARTH_BUILD_SHA", "dev"),
+               "updater": False, "behind": 0}
+        status_file = shared / "update_status.json"
+        if status_file.is_file():
+            try:
+                out.update(_json.loads(status_file.read_text()))
+                out["updater"] = True
+            except Exception:
+                pass
+        out["pending"] = (shared / "update_requested").is_file()
+        return out
+
+    @api.post("/system/update")
+    def request_update() -> dict:
+        import os
+        from pathlib import Path
+        shared = Path(os.getenv("HEARTH_SHARED_DIR", "/shared"))
+        if not (shared / "update_status.json").is_file():
+            raise HTTPException(409, "Host updater not installed — run "
+                                     "bash install.sh once on the host")
+        (shared / "update_requested").touch()
+        return {"ok": True, "note": "the host updater picks this up within a "
+                                    "minute; Hearth rebuilds and restarts"}
 
     # ── system ─────────────────────────────────────────────────────────────
     @api.get("/system/status")

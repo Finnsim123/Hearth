@@ -50,10 +50,13 @@ const themeLabel: Record<ThemeMode, string> = {
 };
 
 type AuthState = "loading" | "setup" | "login" | "ready";
+type UpdateInfo = { build: string; behind: number; latest_subject?: string; pending?: boolean };
 
 export default function App() {
   const [mode, setMode] = useState<ThemeMode>(getTheme());
   const [auth, setAuth] = useState<AuthState>("loading");
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updating, setUpdating] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -70,6 +73,44 @@ export default function App() {
     } catch { setAuth("login"); }
   };
   useEffect(() => { checkAuth(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, []);
+
+  useEffect(() => {
+    if (auth !== "ready") return;
+    const poll = () => fetch("/api/system/update").then((r) => r.json())
+      .then(setUpdate).catch(() => {});
+    poll();
+    const id = setInterval(poll, 5 * 60_000);
+    return () => clearInterval(id);
+  }, [auth]);
+
+  const runUpdate = async () => {
+    if (!update) return;
+    if (!window.confirm(`Update Hearth to the latest version?\n\n${update.behind} commit(s) behind — latest: "${update.latest_subject ?? ""}"\n\nHearth rebuilds and restarts (~2 min).`)) return;
+    await fetch("/api/system/update", { method: "POST" });
+    setUpdating(true);
+    const startBuild = update.build;
+    const id = setInterval(async () => {
+      try {
+        const h = await fetch("/api/health").then((r) => r.json());
+        if (h.build && h.build !== startBuild) {
+          clearInterval(id);
+          window.location.reload();
+        }
+      } catch { /* rebuilding */ }
+    }, 5000);
+  };
+
+  if (updating) {
+    return (
+      <div style={{ padding: "120px 16px", maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
+        <h2>Updating Hearth…</h2>
+        <p style={{ color: "var(--text-dim)", fontSize: 14.5 }}>
+          The host is pulling the latest version and rebuilding — about two minutes.
+          This page reloads automatically when the new version is up.
+        </p>
+      </div>
+    );
+  }
 
   if (auth === "loading") return null;
   if (auth === "setup") {
@@ -112,9 +153,19 @@ export default function App() {
             {label}
           </NavLink>
         ))}
+        {update && update.behind > 0 && (
+          <button
+            className="btn btn-primary"
+            style={{ marginLeft: "auto", minHeight: 32, padding: "4px 12px", fontSize: 13 }}
+            onClick={runUpdate}
+            title={update.latest_subject}
+          >
+            Update available ({update.behind})
+          </button>
+        )}
         <button
           className="btn btn-ghost"
-          style={{ marginLeft: "auto", minHeight: 36, padding: "6px 10px" }}
+          style={{ marginLeft: update && update.behind > 0 ? 0 : "auto", minHeight: 36, padding: "6px 10px" }}
           onClick={() => setMode(cycleTheme())}
           title="Cycle theme: system → light → dark"
         >

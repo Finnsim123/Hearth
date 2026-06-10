@@ -7,6 +7,8 @@ COPY frontend/ ./
 RUN npm run build
 
 FROM python:3.12-slim
+ARG GIT_SHA=dev
+ENV HEARTH_BUILD_SHA=$GIT_SHA
 WORKDIR /app
 COPY backend/pyproject.toml ./pyproject.toml
 COPY backend/hearth ./hearth

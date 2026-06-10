@@ -99,3 +99,22 @@ async def test_post_restart_seed_creates_bindings_and_rules(client):
     assert len(repo.rules()) > 0
     assert repo.get_setting("seed.pending") is None       # cleared on success
     assert repo.get_setting("seed.status")["stage"] == "done"
+
+
+def test_update_endpoints(client, tmp_path, monkeypatch):
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)        # signs us in
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    monkeypatch.setenv("HEARTH_SHARED_DIR", str(shared))
+    # no updater installed yet
+    assert c.get("/api/system/update").json()["updater"] is False
+    assert c.post("/api/system/update").status_code == 409
+    # updater wrote a status file
+    (shared / "update_status.json").write_text(
+        '{"local": "abc", "remote": "def", "behind": 3, "latest_subject": "feat: x"}')
+    st = c.get("/api/system/update").json()
+    assert st["behind"] == 3 and st["updater"] is True
+    # trigger drops the flag
+    assert c.post("/api/system/update").json()["ok"] is True
+    assert (shared / "update_requested").is_file()

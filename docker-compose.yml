@@ -36,11 +36,14 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
     restart: unless-stopped
     # No depends_on: Hearth boots without any database and the wizard
     # connects either the bundled influxdb (profile) or an external one.
     volumes:
       - hearth-data:/data          # SQLite, models, logs
+      - ./.hearth-shared:/shared   # host updater <-> UI (status + trigger)
     environment:
       HEARTH_SECRET: ${HEARTH_SECRET:?set in .env}   # encrypts tokens at rest
       HEARTH_DATA_DIR: /data

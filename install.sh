@@ -46,8 +46,17 @@ if [[ ! -f .env ]]; then
   echo -e "${OK}✓${NC} .env created (HEARTH_SECRET generated)"
 fi
 
+# ── in-app updates: register the host updater (cron, every minute) ──────────
+mkdir -p .hearth-shared
+if command -v crontab >/dev/null && [[ -d /etc/cron.d ]]; then
+  echo "* * * * * root bash $(pwd)/deploy/hearth-updater.sh" > /etc/cron.d/hearth-updater
+  chmod 644 /etc/cron.d/hearth-updater
+  echo -e "${OK}✓${NC} in-app updates enabled (host updater cron installed)"
+fi
+
 # ── build + start ────────────────────────────────────────────────────────────
 echo -e "${DIM}Building and starting the stack (first build takes a few minutes)…${NC}"
+export GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
 docker compose "${PROFILE_ARGS[@]}" up -d --build
 
 # ── wait for health ──────────────────────────────────────────────────────────
