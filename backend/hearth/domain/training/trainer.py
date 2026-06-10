@@ -74,6 +74,12 @@ def train_person(person_id: str, tsdb, repo, store,
     train_acc = float((est.predict_proba(X_train).idxmax(axis=1) == y_train).mean())
     metrics["accuracy_train"] = round(train_acc, 4)
     metrics["hyperparams"] = params
+    try:                                   # glass-box: top-15 feature importances
+        imp = est.model.feature_importances_
+        ranked = sorted(zip(est.columns, imp), key=lambda kv: -kv[1])[:15]
+        metrics["feature_importances"] = {c: round(float(v), 4) for c, v in ranked}
+    except Exception:                      # non-tree estimators have none
+        pass
 
     version = f"{person_id}-v{len(repo.models(person_id)) + 1}"
     record = ModelRecord(person_id=person_id, version=version, algo="random_forest",

@@ -277,8 +277,8 @@ class AppDb:
             r.phrase = a.phrase
             r.parent_id, r.enabled, r.silent = a.parent_id, a.enabled, a.silent
             s.commit()
-            return Activity(id=r.id, slug=r.slug, name=r.name, icon=r.icon,
-                            color=r.color, silent=r.silent,
+            return Activity(id=r.id, slug=r.slug, name=r.name, phrase=r.phrase,
+                            icon=r.icon, color=r.color, silent=r.silent,
                             parent_id=r.parent_id, enabled=r.enabled)
 
     def rules(self) -> list[Rule]:
