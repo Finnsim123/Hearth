@@ -3,6 +3,10 @@
 #
 #   bash install.sh                    Hearth only (connect your own InfluxDB)
 #   bash install.sh --with-influxdb    include the bundled InfluxDB
+#   bash install.sh --reset            FACTORY RESET: wipe accounts, household,
+#                                      bindings, connections (Hearth's SQLite
+#                                      volume) and start fresh at the wizard.
+#                                      InfluxDB data is NOT touched.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,6 +15,15 @@ EMBER='\033[38;5;214m'; OK='\033[0;32m'; DIM='\033[2m'; NC='\033[0m'
 PROFILE_ARGS=()
 if [[ "${1:-}" == "--with-influxdb" ]]; then
   PROFILE_ARGS=(--profile influxdb)
+fi
+
+if [[ "${1:-}" == "--reset" ]]; then
+  echo "Factory reset: removing Hearth's app data (accounts, household,"
+  echo "bindings, connections). Time-series data in InfluxDB is kept."
+  read -r -p "Type 'reset' to confirm: " CONFIRM
+  [[ "$CONFIRM" == "reset" ]] || { echo "aborted"; exit 1; }
+  docker compose down
+  docker volume rm "$(basename "$PWD")_hearth-data" 2>/dev/null     || docker volume rm hearth_hearth-data 2>/dev/null || true
 fi
 
 command -v docker >/dev/null || { echo "Docker is required: curl -fsSL https://get.docker.com | sh"; exit 1; }

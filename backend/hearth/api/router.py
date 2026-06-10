@@ -138,11 +138,22 @@ def build_api_router(deps: dict) -> APIRouter:
             repo.save_activity(Activity(slug=slug, name=name, phrase=phrase))
         repo.set_setting("default_activity", "home")
 
-        # seed bindings from heuristics over the live inventory (reviewable in
-        # the Sensors page later) + person-entity bindings for each member
+        # seed bindings: heuristics always; LLM proposals merged ON TOP when a
+        # key was given (the LLM is the name->role brain across languages)
         try:
             inventory = await rest_inventory(ha["url"], ha["token"])
-            for b in heuristic_bindings(inventory):
+            merged = {b.entity_id: b for b in heuristic_bindings(inventory)}
+            if body.get("llmKey"):
+                try:
+                    from ..adapters.openrouter_llm import OpenRouterAdvisor
+                    advisor = OpenRouterAdvisor(repo)
+                    for b in await advisor.propose_bindings(inventory):
+                        merged[b.entity_id] = b          # LLM wins ties
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception(
+                        "LLM binding proposal failed — heuristics only")
+            for b in merged.values():
                 repo.save_binding(b)
         except Exception:
             pass
@@ -156,10 +167,21 @@ def build_api_router(deps: dict) -> APIRouter:
                 except Exception:
                     pass
 
-        # starter labeling rules from the seeded bindings (role templates)
+        # starter labeling rules: role templates always; LLM rules on top
         from ..domain.labeling.starter_rules import starter_rules
         for rule in starter_rules(repo.bindings(), repo.activities()):
             repo.save_rule(rule)
+        if body.get("llmKey"):
+            try:
+                from ..adapters.openrouter_llm import OpenRouterAdvisor
+                advisor = OpenRouterAdvisor(repo)
+                for rule in await advisor.propose_rules(repo.bindings(),
+                                                        repo.activities()):
+                    repo.save_rule(rule)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "LLM rule proposal failed — templates only")
 
         if influx.get("mode") == "external" and influx.get("sourceBucket"):
             repo.set_setting("fasttrack.pending",
