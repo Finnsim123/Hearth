@@ -48,6 +48,15 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
 
         scheduler.add_job(_train_all, "cron", day_of_week="sun", hour=3,
                           id="weekly_training", max_instances=1)
+
+        def _discover_all() -> None:
+            from .domain.discovery.clustering import run_discovery
+            run_discovery(tsdb, repo)
+
+        # Saturday: fresh pattern candidates waiting in the UI before Sunday's
+        # retrain — name one and the very next training run learns from it.
+        scheduler.add_job(_discover_all, "cron", day_of_week="sat", hour=4,
+                          id="weekly_discovery", max_instances=1)
         scheduler.add_job(expire_stale_questions, "interval", hours=6,
                           args=[repo], id="question_expiry")
 

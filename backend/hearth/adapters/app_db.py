@@ -136,6 +136,8 @@ class ModelRow(Base):
 class ClusterRow(Base):
     __tablename__ = "clusters"
     id: Mapped[int] = mapped_column(primary_key=True)
+    person_id: Mapped[str] = mapped_column(String, default="", index=True)
+    suggested_slug: Mapped[str | None] = mapped_column(String, nullable=True)
     run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     algo: Mapped[str] = mapped_column(String, default="hdbscan")
     n_windows: Mapped[int] = mapped_column(Integer, default=0)
@@ -459,30 +461,54 @@ class AppDb:
 
     def save_cluster(self, c: ClusterCard) -> ClusterCard:
         with Session(self.engine) as s:
-            r = ClusterRow(algo=c.algo, n_windows=c.n_windows,
-                           signature_json=json.dumps(c.signature),
-                           hour_hist_json=json.dumps(c.hour_histogram),
-                           examples_json=json.dumps([t.isoformat() for t in c.example_windows]),
-                           status=c.status, named_activity_slug=c.named_activity_slug)
-            s.add(r)
+            r = s.get(ClusterRow, c.id) if c.id else None
+            if r is None:
+                r = ClusterRow()
+                s.add(r)
+            r.person_id, r.algo, r.n_windows = c.person_id, c.algo, c.n_windows
+            r.signature_json = json.dumps(c.signature)
+            r.hour_hist_json = json.dumps(c.hour_histogram)
+            r.examples_json = json.dumps([t.isoformat() for t in c.example_windows])
+            r.status, r.named_activity_slug = c.status, c.named_activity_slug
+            r.suggested_slug = c.suggested_slug
             s.commit()
             c.id = r.id
             return c
 
-    def clusters(self, status: str | None = None) -> list[ClusterCard]:
+    def _cluster(self, r: ClusterRow) -> ClusterCard:
+        return ClusterCard(
+            id=r.id, person_id=r.person_id or "", run_at=r.run_at, algo=r.algo,
+            n_windows=r.n_windows, suggested_slug=r.suggested_slug,
+            signature=[tuple(x) for x in json.loads(r.signature_json)],
+            hour_histogram=json.loads(r.hour_hist_json),
+            example_windows=[datetime.fromisoformat(t) for t in json.loads(r.examples_json)],
+            status=r.status, named_activity_slug=r.named_activity_slug)
+
+    def clusters(self, status: str | None = None,
+                 person_id: str | None = None) -> list[ClusterCard]:
         with Session(self.engine) as s:
             stmt = select(ClusterRow)
             if status:
                 stmt = stmt.where(ClusterRow.status == status)
-            out = []
-            for r in s.scalars(stmt).all():
-                out.append(ClusterCard(
-                    id=r.id, run_at=r.run_at, algo=r.algo, n_windows=r.n_windows,
-                    signature=[tuple(x) for x in json.loads(r.signature_json)],
-                    hour_histogram=json.loads(r.hour_hist_json),
-                    example_windows=[datetime.fromisoformat(t) for t in json.loads(r.examples_json)],
-                    status=r.status, named_activity_slug=r.named_activity_slug))
-            return out
+            if person_id:
+                stmt = stmt.where(ClusterRow.person_id == person_id)
+            return [self._cluster(r) for r in s.scalars(stmt).all()]
+
+    def get_cluster(self, cluster_id: int) -> ClusterCard | None:
+        with Session(self.engine) as s:
+            r = s.get(ClusterRow, cluster_id)
+            return self._cluster(r) if r else None
+
+    def clear_clusters(self, person_id: str, status: str = "new") -> int:
+        """Replace-run semantics: a fresh discovery run owns the 'new' pile."""
+        with Session(self.engine) as s:
+            rows = s.scalars(select(ClusterRow).where(
+                ClusterRow.person_id == person_id,
+                ClusterRow.status == status)).all()
+            for r in rows:
+                s.delete(r)
+            s.commit()
+            return len(rows)
 
     # ── users (auth — consumed by Phase 2 middleware) ──────────────────────
     # ── api tokens (integration auth — docs/SECURITY.md) ──────────────────

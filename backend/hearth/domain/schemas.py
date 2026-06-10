@@ -187,9 +187,11 @@ class ClusterCard(BaseModel):
     """A discovered pattern awaiting a human name (see ARCHITECTURE.md §6)."""
 
     id: int | None = None
+    person_id: str = ""
     run_at: datetime | None = None
     algo: str = "hdbscan"
     n_windows: int = 0
+    suggested_slug: str | None = None  # LLM's guess, shown as a hint only
     signature: list[tuple[str, float]] = Field(default_factory=list)  # (feature, z)
     hour_histogram: list[int] = Field(default_factory=lambda: [0] * 24)
     example_windows: list[datetime] = Field(default_factory=list)

@@ -388,6 +388,79 @@ def build_api_router(deps: dict) -> APIRouter:
         repo.skip_question(question_id)
         return {"ok": True}
 
+    # ── pattern discovery: cluster → name → labels ─────────────────────────
+    @api.get("/clusters")
+    def clusters(status: str | None = None, person: str | None = None) -> list:
+        return repo.clusters(status=status, person_id=person)
+
+    @api.post("/discovery/run")
+    async def discovery_run(body: dict | None = None) -> dict:
+        tsdb = deps.get("tsdb")
+        if tsdb is None:
+            raise HTTPException(409, "Connect InfluxDB first")
+        import asyncio
+
+        from ..domain.discovery.clustering import run_discovery
+        days = int((body or {}).get("days", 30))
+        cards = await asyncio.to_thread(run_discovery, tsdb, repo, days)
+        # optional: ask the LLM which existing activity each pattern looks like
+        adv = None
+        if repo.get_connection("llm"):
+            from ..adapters.openrouter_llm import OpenRouterAdvisor
+            adv = OpenRouterAdvisor(repo)
+        if adv is not None:
+            acts = repo.activities()
+            for c in cards:
+                try:
+                    c.suggested_slug = await adv.suggest_cluster_name(c, acts)
+                    if c.suggested_slug:
+                        repo.save_cluster(c)
+                except Exception:
+                    pass
+        return {"found": len(cards),
+                "persons": sorted({c.person_id for c in cards})}
+
+    @api.post("/clusters/{cluster_id}/name")
+    def name_cluster(cluster_id: int, body: dict) -> dict:
+        """Name a pattern: pick an existing activity slug OR a new name.
+        Emits provenance=discovered labels for every member window — the
+        next training run learns from them (confirmed labels still outrank)."""
+        tsdb = deps.get("tsdb")
+        card = repo.get_cluster(cluster_id)
+        if card is None:
+            raise HTTPException(404, "no such pattern")
+        if tsdb is None:
+            raise HTTPException(409, "Connect InfluxDB first")
+        slug = (body.get("activity_slug") or "").strip()
+        if not slug and body.get("name"):
+            import re as _re
+            name = str(body["name"]).strip()
+            slug = _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+            if not slug:
+                raise HTTPException(400, "name needed")
+            if slug not in {a.slug for a in repo.activities()}:
+                repo.save_activity(Activity(slug=slug, name=name))
+        if not slug:
+            raise HTTPException(400, "activity_slug or name required")
+
+        from ..domain.schemas import LabelEvent, Provenance
+        for ts in card.example_windows:
+            tsdb.write_label(LabelEvent(
+                person_id=card.person_id, window_ts=ts, label=slug,
+                provenance=Provenance.DISCOVERED, source=f"cluster:{card.id}"))
+        card.status, card.named_activity_slug = "named", slug
+        repo.save_cluster(card)
+        return {"ok": True, "activity": slug, "labeled_windows": len(card.example_windows)}
+
+    @api.post("/clusters/{cluster_id}/dismiss")
+    def dismiss_cluster(cluster_id: int) -> dict:
+        card = repo.get_cluster(cluster_id)
+        if card is None:
+            raise HTTPException(404, "no such pattern")
+        card.status = "dismissed"
+        repo.save_cluster(card)
+        return {"ok": True}
+
     # ── api tokens (for the HA integration) ────────────────────────────────
     @api.post("/tokens")
     def create_token(body: dict | None = None) -> dict:
