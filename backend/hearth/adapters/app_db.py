@@ -521,6 +521,23 @@ class AppDb:
                 s.delete(r)
                 s.commit()
 
+    def change_password(self, user_id: int, current: str, new: str) -> bool:
+        """Verify `current`, set `new`, revoke every session (caller re-mints
+        one for the active browser). Returns False if `current` is wrong."""
+        with Session(self.engine) as s:
+            r = s.get(UserRow, user_id)
+            if r is None:
+                return False
+            ok, _ = security.verify_password(current, r.password_hash)
+            if not ok:
+                return False
+            r.password_hash = security.hash_password(new)
+            for row in s.scalars(select(SessionRow).where(
+                    SessionRow.user_id == user_id)).all():
+                s.delete(row)
+            s.commit()
+            return True
+
     def verify_login(self, email: str, password: str) -> User | None:
         with Session(self.engine) as s:
             r = s.scalars(select(UserRow).where(

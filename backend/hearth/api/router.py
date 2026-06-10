@@ -45,6 +45,24 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(401, "Not signed in")
         return {"email": user.email, "name": user.display_name, "role": user.role}
 
+    @api.post("/auth/password")
+    def change_password(body: dict, request: Request, response: Response) -> dict:
+        user = getattr(request.state, "user", None)
+        if user is None:
+            raise HTTPException(401, "Not signed in")
+        new_pw = body.get("new") or ""
+        if len(new_pw) < 10:
+            raise HTTPException(400, "New password must be at least 10 characters")
+        if not repo.change_password(user.id, body.get("current") or "", new_pw):
+            raise HTTPException(403, "Current password is wrong")
+        # every session was revoked — keep THIS browser signed in
+        from .. import security
+        cookie, sha = security.mint_session()
+        repo.create_session(user.id, sha)
+        response.set_cookie("hearth_session", cookie, httponly=True,
+                            samesite="lax", max_age=30 * 86400)
+        return {"ok": True}
+
     @api.get("/health")
     def health() -> dict:
         import os
@@ -69,7 +87,9 @@ def build_api_router(deps: dict) -> APIRouter:
         conn = repo.get_connection(kind)
         if conn is None:
             return {"configured": False}
-        return {"configured": True, "url": conn["url"], "options": conn["options"]}
+        from .. import security
+        return {"configured": True, "url": conn["url"], "options": conn["options"],
+                "token_masked": security.mask(conn["token"]) if conn["token"] else None}
 
     # ── setup completion: persist EVERYTHING the wizard collected ──────────
     TAXONOMY_PRESETS = {

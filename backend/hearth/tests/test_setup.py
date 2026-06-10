@@ -118,3 +118,28 @@ def test_update_endpoints(client, tmp_path, monkeypatch):
     # trigger drops the flag
     assert c.post("/api/system/update").json()["ok"] is True
     assert (shared / "update_requested").is_file()
+
+
+def test_change_password_revokes_other_sessions(client):
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)        # auto-signs in
+    email, pw = "a@b.c", "averylongpassword"
+
+    # second "device"
+    other = TestClient(c.app)
+    other.post("/api/auth/login", json={"email": email, "password": pw})
+    assert other.get("/api/auth/me").status_code == 200
+
+    # wrong current password rejected; too-short new password rejected
+    assert c.post("/api/auth/password",
+                  json={"current": "nope", "new": "x" * 12}).status_code == 403
+    assert c.post("/api/auth/password",
+                  json={"current": pw, "new": "short"}).status_code == 400
+
+    r = c.post("/api/auth/password",
+               json={"current": pw, "new": "brand-new-password-456"})
+    assert r.status_code == 200
+    assert c.get("/api/auth/me").status_code == 200       # this browser stays in
+    assert other.get("/api/auth/me").status_code == 401   # other device kicked
+    assert c.post("/api/auth/login", json={
+        "email": email, "password": "brand-new-password-456"}).status_code == 200
