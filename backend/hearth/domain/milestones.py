@@ -48,8 +48,8 @@ async def check_milestones(repo, tsdb, notifier) -> None:
             await fire("patterns_found")
 
     if not repo.get_setting("milestone.model_live"):
-        for person in repo.persons():
-            if person.enabled and tsdb.read_predictions(
-                    person.id, now - timedelta(days=1), now):
-                await fire("model_live")
-                break
+        promoted = [m for m in repo.models() if m.promoted]
+        if promoted and any(
+                tsdb.read_predictions(p.id, now - timedelta(days=1), now)
+                for p in repo.persons() if p.enabled):
+            await fire("model_live")

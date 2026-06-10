@@ -156,6 +156,11 @@ def build_api_router(deps: dict) -> APIRouter:
                 except Exception:
                     pass
 
+        # starter labeling rules from the seeded bindings (role templates)
+        from ..domain.labeling.starter_rules import starter_rules
+        for rule in starter_rules(repo.bindings(), repo.activities()):
+            repo.save_rule(rule)
+
         if influx.get("mode") == "external" and influx.get("sourceBucket"):
             repo.set_setting("fasttrack.pending",
                              {"source_bucket": influx["sourceBucket"]})
@@ -283,6 +288,23 @@ def build_api_router(deps: dict) -> APIRouter:
     @api.post("/activities")
     def save_activity(a: Activity) -> Activity:
         return repo.save_activity(a)
+
+    @api.post("/rules/regenerate")
+    def regenerate_rules(body: dict | None = None) -> dict:
+        """Regenerate starter rules from current bindings. Replaces previous
+        auto-generated rules; user-edited ones (changed predicate/priority)
+        are simply replaced too in v1 — the Activities page is the editor."""
+        from ..domain.labeling.starter_rules import starter_rules
+        existing = repo.rules()
+        for r in existing:
+            if r.origin == "user" and r.id is not None:
+                # v1: regenerate replaces all; refine when Activities UI lands
+                pass
+        rules = starter_rules(repo.bindings(), repo.activities())
+        saved = [repo.save_rule(r) for r in rules]
+        return {"generated": len(saved),
+                "rules": [{"activity": r.activity_slug, "person": r.person_id,
+                           "predicate": r.predicate} for r in saved]}
 
     @api.get("/rules")
     def rules() -> list[Rule]:
