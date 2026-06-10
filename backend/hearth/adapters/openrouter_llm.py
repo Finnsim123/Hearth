@@ -174,7 +174,9 @@ class OpenRouterAdvisor:
         for it in items if isinstance(items, list) else []:
             slug = _slugify(str(it.get("slug", "")))
             if _SLUG.match(slug):
-                out.append(Activity(slug=slug, name=str(it.get("name", slug)).strip()[:40],
+                from ..domain.labeling.active import _is_sleep_like
+                out.append(Activity(silent=_is_sleep_like(slug),
+                                    slug=slug, name=str(it.get("name", slug)).strip()[:40],
                                     phrase=str(it.get("phrase", "")).strip()[:60] or None))
         return out
 

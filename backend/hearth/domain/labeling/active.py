@@ -22,6 +22,28 @@ EPSILON = 0.07
 COOLDOWN_MIN = 30
 REPEAT_MIN = 90
 
+# Fallback when the activity has no explicit `silent` flag (old DBs, LLM
+# taxonomies in other languages): slugs that obviously mean "asleep".
+_SLEEP_WORDS = ("sleep", "slaap", "schlaf", "nap", "dormi", "sommeil", "sueno", "sueño")
+
+
+def _is_sleep_like(slug: str) -> bool:
+    s = slug.lower()
+    return any(w in s for w in _SLEEP_WORDS)
+
+
+def _is_silent(pred_slug: str, repo) -> bool:
+    """True = never push about this prediction. You can't answer "are you
+    asleep?" while asleep — the question goes to the Inbox instead, so the
+    label can still be confirmed next morning."""
+    try:
+        for a in repo.activities():
+            if a.slug == pred_slug:
+                return bool(getattr(a, "silent", False)) or _is_sleep_like(a.slug)
+    except Exception:
+        pass
+    return _is_sleep_like(pred_slug)
+
 
 def _in_quiet_hours(person: Person, now: datetime, tz: str) -> bool:
     h = now.astimezone(ZoneInfo(tz)).hour
@@ -55,13 +77,22 @@ async def maybe_ask(pred: Prediction, person: Person, repo, notifier) -> Questio
         if last.predicted == pred.predicted and age_min < REPEAT_MIN:
             return None
 
+    # Never push "are you sleeping?" — if they are, they can't answer; if the
+    # push wakes them up, we've done harm. The question still lands in the
+    # Inbox so the window can be confirmed next morning.
+    silent = _is_silent(pred.predicted, repo)
+
     ranked = sorted(pred.probabilities.items(), key=lambda kv: -kv[1])
     alternatives = [s for s, _ in ranked[:3]] or [pred.predicted]
     q = Question(person_id=person.id, window_ts=pred.window_ts,
                  predicted=pred.predicted, confidence=pred.confidence,
                  alternatives=alternatives, probabilities=pred.probabilities,
-                 channel="notification" if person.has_device else "inbox")
+                 channel="notification" if (person.has_device and not silent) else "inbox")
     q = repo.save_question(q)
+    if silent:
+        log.info("silent activity %s — question for %s goes to inbox only",
+                 pred.predicted, person.id)
+        return q
     if person.has_device and notifier is not None:
         try:
             await notifier.ask(q, person)

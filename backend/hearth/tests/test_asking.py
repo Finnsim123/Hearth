@@ -88,6 +88,33 @@ async def test_no_device_lands_in_inbox_only(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_sleep_prediction_never_pushes(monkeypatch):
+    """You can't answer "are you asleep?" while asleep — and the push itself
+    could wake you. Sleep-like predictions go to the Inbox only."""
+    repo, notifier = AskRepo(), SpyNotifier()
+    monkeypatch.setattr(active.random, "random", lambda: 0.99)
+    pred = _pred(0.5)
+    pred.predicted = "sleeping"
+    pred.probabilities = {"sleeping": 0.5, "home": 0.45, "movie": 0.05}
+    q = await active.maybe_ask(pred, _person(), repo, notifier)
+    assert q is not None and q.channel == "inbox"   # label still confirmable
+    assert notifier.asked == []                     # but NO push went out
+
+
+@pytest.mark.asyncio
+async def test_custom_silent_activity_respected(monkeypatch):
+    """Households can mark any activity silent (e.g. "meditating")."""
+    from hearth.domain.schemas import Activity
+    repo, notifier = AskRepo(), SpyNotifier()
+    repo.activities = lambda: [Activity(slug="meditating", name="Meditating", silent=True)]
+    monkeypatch.setattr(active.random, "random", lambda: 0.99)
+    pred = _pred(0.5)
+    pred.predicted = "meditating"
+    q = await active.maybe_ask(pred, _person(), repo, notifier)
+    assert q is not None and q.channel == "inbox" and notifier.asked == []
+
+
+@pytest.mark.asyncio
 async def test_milestones_respect_system_channel():
     from hearth.domain.milestones import check_milestones
     sent = []

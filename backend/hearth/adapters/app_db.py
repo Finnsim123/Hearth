@@ -90,6 +90,7 @@ class ActivityRow(Base):
     color: Mapped[str] = mapped_column(String, default="#888888")
     parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    silent: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class RuleRow(Base):
@@ -189,6 +190,23 @@ class AppDb:
 
     def migrate(self) -> None:
         Base.metadata.create_all(self.engine)
+        # lightweight forward migration: add columns that new versions
+        # introduced to tables that already exist (SQLite ALTER ADD only)
+        from sqlalchemy import inspect, text
+        insp = inspect(self.engine)
+        with self.engine.begin() as conn:
+            for table in Base.metadata.sorted_tables:
+                have = {c["name"] for c in insp.get_columns(table.name)}
+                for col in table.columns:
+                    if col.name in have:
+                        continue
+                    ddl = f'ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type.compile(self.engine.dialect)}'
+                    if col.default is not None and getattr(col.default, "arg", None) is not None \
+                            and not callable(col.default.arg):
+                        v = col.default.arg
+                        v = int(v) if isinstance(v, bool) else v
+                        ddl += f" DEFAULT {v!r}" if isinstance(v, str) else f" DEFAULT {v}"
+                    conn.execute(text(ddl))
 
     # ── bindings ───────────────────────────────────────────────────────────
     def bindings(self) -> list[Binding]:
@@ -244,7 +262,7 @@ class AppDb:
     def activities(self) -> list[Activity]:
         with Session(self.engine) as s:
             return [Activity(id=r.id, slug=r.slug, name=r.name, phrase=r.phrase,
-                             icon=r.icon, color=r.color,
+                             icon=r.icon, color=r.color, silent=r.silent,
                              parent_id=r.parent_id, enabled=r.enabled)
                     for r in s.scalars(select(ActivityRow)).all()]
 
@@ -257,10 +275,11 @@ class AppDb:
                 s.add(r)
             r.slug, r.name, r.icon, r.color = a.slug, a.name, a.icon, a.color
             r.phrase = a.phrase
-            r.parent_id, r.enabled = a.parent_id, a.enabled
+            r.parent_id, r.enabled, r.silent = a.parent_id, a.enabled, a.silent
             s.commit()
             return Activity(id=r.id, slug=r.slug, name=r.name, icon=r.icon,
-                            color=r.color, parent_id=r.parent_id, enabled=r.enabled)
+                            color=r.color, silent=r.silent,
+                            parent_id=r.parent_id, enabled=r.enabled)
 
     def rules(self) -> list[Rule]:
         with Session(self.engine) as s:

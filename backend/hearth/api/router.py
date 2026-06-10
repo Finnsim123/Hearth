@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from ..domain.onboarding.advisor import heuristic_bindings
 from ..domain.schemas import Activity, Binding, Person, Rule
+from ..domain.labeling.active import _is_sleep_like
 
 
 def build_api_router(deps: dict) -> APIRouter:
@@ -159,7 +160,8 @@ def build_api_router(deps: dict) -> APIRouter:
                                     ask_budget_per_day=int(m.get("askBudget", 8))))
 
         for slug, name, phrase in TAXONOMY_PRESETS.get(body.get("taxonomyPreset", "standard"), []):
-            repo.save_activity(Activity(slug=slug, name=name, phrase=phrase))
+            repo.save_activity(Activity(slug=slug, name=name, phrase=phrase,
+                                        silent=_is_sleep_like(slug)))
         repo.set_setting("default_activity", "home")
 
         # SLOW work (inventory, LLM mapping, rules) is deferred to the next

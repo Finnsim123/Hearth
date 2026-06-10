@@ -59,3 +59,20 @@ def test_email_normalized_both_ways(db):
                    "longpassword1")
     assert db.verify_login("alice@b.c", "longpassword1") is not None
     assert db.verify_login(" ALICE@B.C  ", "longpassword1") is not None
+
+
+def test_migrate_adds_new_columns_to_existing_db(tmp_path):
+    """Upgrades must not crash older installs: migrate() ALTERs missing columns."""
+    from sqlalchemy import text
+    db = AppDb(tmp_path / "old.db")
+    db.migrate()
+    with db.engine.begin() as conn:                 # simulate a pre-upgrade DB
+        conn.execute(text("ALTER TABLE activities DROP COLUMN silent"))
+        conn.execute(text("ALTER TABLE persons DROP COLUMN notify_system"))
+    db2 = AppDb(tmp_path / "old.db")
+    db2.migrate()                                   # must re-add them
+    db2.save_person(Person(id="a", name="A", notify_system=True))
+    assert db2.persons()[0].notify_system is True
+    from hearth.domain.schemas import Activity
+    db2.save_activity(Activity(slug="sleeping", name="Sleeping", silent=True))
+    assert db2.activities()[0].silent is True

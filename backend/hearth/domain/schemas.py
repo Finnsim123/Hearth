@@ -102,6 +102,9 @@ class Activity(BaseModel):
     color: str = "#888888"
     parent_id: int | None = None
     enabled: bool = True
+    silent: bool = False  # never push about this activity (e.g. sleeping —
+                          # nobody can answer "are you asleep?"); questions
+                          # land in the Inbox for next-morning confirmation
 
 
 class Rule(BaseModel):
