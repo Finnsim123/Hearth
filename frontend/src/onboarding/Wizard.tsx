@@ -94,7 +94,7 @@ export default function Wizard() {
         <h2>{applying === "saving" ? "Applying your setup…" : "That took too long"}</h2>
         <p style={{ color: "var(--text-dim)", fontSize: 14.5 }}>
           {applying === "saving"
-            ? "Saving everything and restarting Hearth with your connections — about ten seconds."
+            ? "Saving your setup and restarting Hearth — about fifteen seconds. Sensor mapping and model training continue in the background after that."
             : "Hearth didn't come back up. Check: docker compose logs hearth — your wizard answers are still here."}
         </p>
       </div>

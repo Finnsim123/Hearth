@@ -99,8 +99,11 @@ class OpenRouterAdvisor:
                 r.raise_for_status()
                 data = await r.json()
         usage = data.get("usage", {})
-        log.info("LLM call: %s in=%s out=%s", model,
-                 usage.get("prompt_tokens"), usage.get("completion_tokens"))
+        finish = data["choices"][0].get("finish_reason")
+        log.info("LLM call: %s in=%s out=%s finish=%s", model,
+                 usage.get("prompt_tokens"), usage.get("completion_tokens"), finish)
+        if finish == "length":
+            log.warning("LLM response TRUNCATED at max_tokens — items may be lost")
         return _extract_json(data["choices"][0]["message"]["content"])
 
     # ── bindings: the name->role brain ──────────────────────────────────────
@@ -120,12 +123,14 @@ class OpenRouterAdvisor:
             f"Valid roles: {roles}.\n"
             "Reply with ONLY a JSON array: [{\"entity_id\": str, \"role\": str, "
             "\"name\": short_snake_case_slug, \"room\": str|null, "
-            "\"reason\": str}] — nothing else.")
+            "\"reason\": str}] — nothing else. Keep each reason under 8 words; "
+            "omit the reason field entirely when the mapping is obvious.")
         out: list[Binding] = []
         seen: set[str] = set()
-        for i in range(0, len(lines), 400):           # chunk large homes
+        for i in range(0, len(lines), 300):           # chunk large homes
             try:
-                items = await self._chat(system, "\n".join(lines[i:i + 400]))
+                items = await self._chat(system, "\n".join(lines[i:i + 300]),
+                                         max_tokens=8000)
             except Exception as exc:
                 log.warning("propose_bindings chunk failed: %s", exc)
                 continue

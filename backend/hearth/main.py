@@ -103,11 +103,17 @@ def create_app() -> FastAPI:
         scheduler.start()
         if deps.get("ingest_coro"):
             app.state.ingest_task = asyncio.create_task(deps["ingest_coro"]())
-        if deps["repo"].get_setting("fasttrack.pending") and deps.get("tsdb"):
-            from .domain.fasttrack import run_fast_track
-            app.state.fasttrack_task = asyncio.create_task(
-                run_fast_track(deps["repo"], deps["tsdb"], deps["models"],
-                               deps.get("notifier")))
+        repo = deps["repo"]
+        if repo.get_setting("seed.pending") or repo.get_setting("fasttrack.pending"):
+            async def _seed_then_fasttrack() -> None:
+                if repo.get_setting("seed.pending") and deps.get("events"):
+                    from .domain.onboarding.seed import run_seed
+                    await run_seed(repo, deps["events"])
+                if repo.get_setting("fasttrack.pending") and deps.get("tsdb"):
+                    from .domain.fasttrack import run_fast_track
+                    await run_fast_track(repo, deps["tsdb"], deps["models"],
+                                         deps.get("notifier"))
+            app.state.setup_task = asyncio.create_task(_seed_then_fasttrack())
         log.info("Hearth up on :%s (tsdb=%s, ha=%s)", settings.port,
                  bool(deps["tsdb"]), bool(deps["events"]))
 

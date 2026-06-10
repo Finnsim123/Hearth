@@ -106,7 +106,7 @@ def build_api_router(deps: dict) -> APIRouter:
         repo.set_connection("ha", ha["url"].rstrip("/"), ha["token"])
 
         # home timezone from HA config (probe), fallback UTC
-        from ..adapters.ha_probe import probe, rest_inventory
+        from ..adapters.ha_probe import probe
         info = await probe(ha["url"], ha["token"])
         repo.set_setting("timezone", info.get("timezone") or "UTC")
 
@@ -138,57 +138,10 @@ def build_api_router(deps: dict) -> APIRouter:
             repo.save_activity(Activity(slug=slug, name=name, phrase=phrase))
         repo.set_setting("default_activity", "home")
 
-        # seed bindings: heuristics always; LLM proposals merged ON TOP when a
-        # key was given (the LLM is the name->role brain across languages)
-        try:
-            inventory = await rest_inventory(ha["url"], ha["token"])
-            merged = {b.entity_id: b for b in heuristic_bindings(inventory)}
-            if body.get("llmKey"):
-                try:
-                    from ..adapters.openrouter_llm import OpenRouterAdvisor
-                    advisor = OpenRouterAdvisor(repo)
-                    for b in await advisor.propose_bindings(inventory):
-                        merged[b.entity_id] = b          # LLM wins ties
-                except Exception:
-                    import logging
-                    logging.getLogger(__name__).exception(
-                        "LLM binding proposal failed — heuristics only")
-            for b in merged.values():
-                repo.save_binding(b)
-        except Exception:
-            pass
-        for m in body.get("members", []):
-            ent = m.get("personEntity")
-            if not ent:
-                continue
-            existing = next((b for b in repo.bindings() if b.entity_id == ent), None)
-            if existing is not None:
-                existing.role = Role.PERSON
-                existing.person_id = _slug(m["name"])
-                repo.save_binding(existing)
-            else:
-                try:
-                    repo.save_binding(Binding(entity_id=ent, role=Role.PERSON,
-                                              name=f"{_slug(m['name'])}_loc",
-                                              person_id=_slug(m["name"])))
-                except Exception:
-                    pass
-
-        # starter labeling rules: role templates always; LLM rules on top
-        from ..domain.labeling.starter_rules import starter_rules
-        for rule in starter_rules(repo.bindings(), repo.activities()):
-            repo.save_rule(rule)
-        if body.get("llmKey"):
-            try:
-                from ..adapters.openrouter_llm import OpenRouterAdvisor
-                advisor = OpenRouterAdvisor(repo)
-                for rule in await advisor.propose_rules(repo.bindings(),
-                                                        repo.activities()):
-                    repo.save_rule(rule)
-            except Exception:
-                import logging
-                logging.getLogger(__name__).exception(
-                    "LLM rule proposal failed — templates only")
+        # SLOW work (inventory, LLM mapping, rules) is deferred to the next
+        # boot (domain/onboarding/seed.py) so this request answers in
+        # milliseconds and the auto-login cookie reliably reaches the browser.
+        repo.set_setting("seed.pending", {"members": body.get("members", [])})
 
         if influx.get("mode") == "external" and influx.get("sourceBucket"):
             repo.set_setting("fasttrack.pending",
@@ -451,6 +404,7 @@ def build_api_router(deps: dict) -> APIRouter:
             "days": round(days, 1),
             "events_24h": tsdb.count_raw_events(24) if tsdb else 0,
             "sensors_bound": len([b for b in repo.bindings() if b.enabled]),
+            "seed": repo.get_setting("seed.status"),
             "fasttrack": repo.get_setting("fasttrack.status"),
             "milestones": {
                 "recording": bool(repo.get_setting("milestone.recording_started")),

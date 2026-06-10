@@ -56,7 +56,12 @@ function Ribbon({ preds, ruleBased, personId }: { preds: Pred[]; ruleBased: bool
   const qc = useQueryClient();
   const [selected, setSelected] = useState<Pred | null>(null);
   if (!preds.length) return null;
-  const ordered = [...preds].reverse();
+  // fixed 48-slot 24h grid: both cards always time-aligned; gaps stay dim
+  const slotMs = 30 * 60_000;
+  const nowSlot = Math.floor(Date.now() / slotMs) * slotMs;
+  const byTs = new Map(preds.map((p) => [Math.floor(new Date(p.time).getTime() / slotMs) * slotMs, p]));
+  const ordered: (Pred | null)[] = Array.from({ length: 48 }, (_, i) =>
+    byTs.get(nowSlot - (47 - i) * slotMs) ?? null);
   const correct = async (slug: string) => {
     if (!selected) return;
     const start = new Date(selected.time);
@@ -71,7 +76,9 @@ function Ribbon({ preds, ruleBased, personId }: { preds: Pred[]; ruleBased: bool
   return (
     <div>
       <div style={{ display: "flex", gap: 1, height: 16, borderRadius: 4, overflow: "hidden" }}>
-        {ordered.map((p, i) => (
+        {ordered.map((p, i) => p === null ? (
+          <span key={i} style={{ flex: 1, background: "var(--surface-2)" }} />
+        ) : (
           <span key={i} role="button"
                 title={`${t(p.time)} · ${p.smoothed} (${Math.round(p.confidence * 100)}%) — tap to correct`}
                 onClick={() => setSelected(selected?.time === p.time ? null : p)}

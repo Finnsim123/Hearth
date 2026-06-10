@@ -223,8 +223,11 @@ from(bucket: "{FEAT_BUCKET}")
 
     # ── ml ─────────────────────────────────────────────────────────────────
     def write_prediction(self, pred: Prediction) -> None:
+        # model version is a FIELD, not a tag: tags define series identity and
+        # would duplicate the same window across versions (the ribbon bug)
         p = (Point("predictions").tag("person", pred.person_id)
-             .tag("model_version", pred.model_version).time(pred.window_ts)
+             .time(pred.window_ts)
+             .field("model", pred.model_version)
              .field("predicted", pred.predicted)
              .field("smoothed", pred.smoothed or pred.predicted)
              .field("confidence", float(pred.confidence)))
@@ -280,16 +283,27 @@ from(bucket: "{ML_BUCKET}")
             df = pd.concat(df, ignore_index=True) if df else pd.DataFrame()
         if df.empty or "predicted" not in df.columns:
             return []
+        # dedupe legacy duplicates (model_version-as-tag era): one row per
+        # window, preferring rows written with the new 'model' field
+        if "model" in df.columns:
+            df["_pref"] = df["model"].notna().astype(int)
+        else:
+            df["_pref"] = 0
+        df = (df.sort_values(["_time", "_pref"])
+                .drop_duplicates(subset="_time", keep="last"))
         out = []
         for _, r in df.sort_values("_time", ascending=False).iterrows():
             probs = {c[5:]: float(r[c]) for c in df.columns
                      if c.startswith("prob_") and pd.notna(r[c])}
+            version = r.get("model")
+            if version is None or pd.isna(version):
+                version = r.get("model_version", "")
             out.append({
                 "time": pd.to_datetime(r["_time"]).isoformat(),
                 "predicted": str(r["predicted"]),
                 "smoothed": str(r.get("smoothed", r["predicted"])),
                 "confidence": float(r["confidence"]),
-                "model_version": str(r.get("model_version", "")),
+                "model_version": str(version),
                 "probs": probs,
             })
         return out

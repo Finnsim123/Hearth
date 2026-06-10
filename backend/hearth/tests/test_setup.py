@@ -55,8 +55,10 @@ def test_setup_complete_persists_everything(client):
     assert persons[0].id == "alex" and persons[0].avatar == "preset:ember"
     slugs = {a.slug for a in repo.activities()}
     assert {"sleeping", "cooking", "movie"} <= slugs
-    names = {b.name for b in repo.bindings()}
-    assert "kitchen" in names and "alex_loc" in names      # heuristic + person binding
+    # slow seeding is DEFERRED to the post-restart boot (the setup request
+    # must answer instantly so the login cookie reaches the browser)
+    assert repo.bindings() == []
+    assert repo.get_setting("seed.pending")["members"][0]["name"] == "Alex"
     assert repo.get_setting("fasttrack.pending")["source_bucket"] == "homeassistant"
     # second run refused
     assert c.post("/api/setup/complete", json=PAYLOAD).status_code == 409
@@ -69,3 +71,31 @@ def test_setup_refuses_missing_password(client):
     bad = dict(PAYLOAD, account={"name": "A", "email": "a@b.c", "password": ""})
     assert c.post("/api/setup/complete", json=bad).status_code == 400
     assert repo.user_count() == 0          # nothing half-created
+
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_post_restart_seed_creates_bindings_and_rules(client):
+    c, repo = client
+    assert c.post("/api/setup/complete", json=PAYLOAD).status_code == 200
+
+    class FakeEvents:
+        async def discover_entities(self):
+            return [{"entity_id": "light.kitchen", "domain": "light",
+                     "friendly_name": None, "device_class": None, "unit": None,
+                     "area": "Kitchen", "disabled": False, "state": "off"},
+                    {"entity_id": "binary_sensor.bed_left", "domain": "binary_sensor",
+                     "friendly_name": "Bed left", "device_class": "occupancy",
+                     "unit": None, "area": "Bedroom", "disabled": False, "state": "off"}]
+
+    from hearth.domain.onboarding.seed import run_seed
+    await run_seed(repo, FakeEvents())
+    names = {b.name for b in repo.bindings()}
+    assert "kitchen" in names and "alex_loc" in names
+    alex = next(b for b in repo.bindings() if b.name == "alex_loc")
+    assert alex.person_id == "alex"                       # the person_id fix
+    assert len(repo.rules()) > 0
+    assert repo.get_setting("seed.pending") is None       # cleared on success
+    assert repo.get_setting("seed.status")["stage"] == "done"
