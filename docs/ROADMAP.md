@@ -10,11 +10,13 @@ Docker compose brings up InfluxDB + backend; `/api/health` green; UI shell
 renders; CI runs lint + tests on the stubs.
 **Accept:** `docker compose up` → healthy stack on a clean machine.
 
-## Phase 1 — Data pipeline end-to-end (pillar 1)
-HA WebSocket ingest → `hearth_raw`; bindings CRUD + suggestion heuristics;
-window builder + role recipes (port the prototype's extractors); features land
-in `hearth_features`; Sensors page shows freshness. History importer from an
-existing HA→Influx bucket (validates against har-homelab's 185k points).
+## Phase 1 — Data pipeline end-to-end (pillar 1) — ✅ backend implemented
+Done: HA WebSocket ingest (+ gap-fill), InfluxDB store (3 buckets), SQLite repo
+(+ encrypted connections, users), security.py, role recipes + composites-as-data
+AST + window builder + semantic imputation, binding suggestion heuristics,
+history importer (both HA→Influx schemas), scheduler + API wiring, 27 unit
+tests. Remaining for acceptance: Sensors page freshness UI, live validation
+against a real HA + InfluxDB (run on the homelab; sandbox has neither).
 **Accept:** for a configured home, features for the last hour are queryable in
 Influx and visible in the UI within 5 min of events happening.
 

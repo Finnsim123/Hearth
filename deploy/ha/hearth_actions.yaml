@@ -1,4 +1,8 @@
-# Hearth — Home Assistant automation blueprint
+# Hearth — LEGACY fallback blueprint
+#
+# ⚠ Not needed when the Hearth integration is installed — the integration
+#   listens for notification actions on the event bus itself (zero YAML).
+#   Use this only if you deliberately run without the integration.
 # Forwards every HEARTH_* notification action to the Hearth backend.
 # This is the ONLY automation Hearth needs in HA — all parsing is server-side
 # (iOS does not return notification tags; action ids are the reliable channel).

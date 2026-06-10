@@ -6,6 +6,7 @@
  * endpoints — the flow, copy, fields and validation are final.
  */
 import { useEffect, useState } from "react";
+import { PRESET_HUES } from "../components/Avatar";
 import { Icon } from "../icons";
 import {
   Callout, ChoiceCard, Field, FooterNav, Progress, StepShell, TestRow, type TestState,
@@ -14,7 +15,7 @@ import {
 const TOTAL = 10;
 const STORE = "hearth.onboarding";
 
-type Member = { name: string; personEntity: string; hasDevice: boolean; notifyService: string };
+type Member = { name: string; personEntity: string; hasDevice: boolean; notifyService: string; avatar: string };
 
 type WizardData = {
   account: { name: string; email: string; password: string; confirm: string };
@@ -31,7 +32,7 @@ const empty: WizardData = {
   ha: { url: "http://homeassistant.local:8123", token: "" },
   influx: { mode: null, url: "", org: "", token: "" },
   mqtt: { use: "ha-broker", host: "" },
-  members: [{ name: "", personEntity: "", hasDevice: true, notifyService: "" }],
+  members: [{ name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:ember" }],
   llmKey: "",
   taxonomyPreset: "standard",
 };
@@ -229,6 +230,17 @@ function StepHousehold({ d, set, next, back }: StepProps) {
                 <input placeholder="person.alex" value={m.personEntity} onChange={(e) => upd(idx, { personEntity: e.target.value })} />
               </Field>
             </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <span style={{ fontSize: 14, fontWeight: 500 }}>Avatar</span>
+              {Object.entries(PRESET_HUES).map(([key, hue]) => (
+                <button key={key} aria-label={`avatar color ${key}`}
+                  onClick={() => upd(idx, { avatar: `preset:${key}` })}
+                  style={{ width: 26, height: 26, borderRadius: "50%", cursor: "pointer",
+                           background: `color-mix(in srgb, ${hue} 30%, transparent)`,
+                           border: m.avatar === `preset:${key}` ? `2px solid ${hue}` : "2px solid transparent" }} />
+              ))}
+              <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>photo upload in Settings later</span>
+            </div>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
               <input type="checkbox" checked={m.hasDevice} onChange={(e) => upd(idx, { hasDevice: e.target.checked })} style={{ width: 16, height: 16 }} />
               Has a phone with the HA companion app
@@ -246,7 +258,7 @@ function StepHousehold({ d, set, next, back }: StepProps) {
           </div>
         ))}
         <button className="btn btn-secondary" style={{ alignSelf: "flex-start" }}
-          onClick={() => set("members", [...ms, { name: "", personEntity: "", hasDevice: true, notifyService: "" }])}>
+          onClick={() => set("members", [...ms, { name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:indigo" }])}>
           + Add another person
         </button>
         <Callout icon="household">
@@ -413,14 +425,14 @@ function StepOutput({ d, next, back }: StepProps) {
 
 function StepDone() {
   const items: [string, string][] = [
-    ["Right now", "Hearth is recording your sensors. The dashboard fills up within the hour."],
-    ["In ~3 days", "First patterns appear on the Patterns page — name the ones you recognize."],
-    ["In ~1 week", "Enough data for a first model. Hit “Train now” on the Models page, predictions go live in HA."],
+    ["Right now", "Hearth is recording. Close this tab, go live your normal life around the house — that IS the training data."],
+    ["In ~3 days", "First patterns appear — we'll send a phone notification when they're ready to name."],
+    ["In ~1 week", "Enough data for a first model. You'll get a “Hearth is live ✨” notification when predictions start flowing into HA."],
     ["Ongoing", "Hearth occasionally asks “was this right?” — every answer makes next week's model better."],
   ];
   return (
-    <StepShell step={10} total={TOTAL} title="You're all set"
-      explainer="Setup is done — from here Hearth works mostly on its own. This is what the next days look like:">
+    <StepShell step={10} total={TOTAL} title="You're all set — come back in a few days"
+      explainer="Setup is done. Hearth learns by watching normal life, so the best thing you can do now is nothing at all. We'll notify your phone at each milestone:">
       {items.map(([when, what]) => (
         <div key={when} style={{ display: "flex", gap: 12 }}>
           <span style={{ minWidth: 90, fontWeight: 500, fontSize: 14 }}>{when}</span>

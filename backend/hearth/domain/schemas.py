@@ -54,6 +54,7 @@ class Person(BaseModel):
 
     id: str  # slug, e.g. "alice"
     name: str
+    avatar: str | None = None  # "preset:<hue>" or "upload:<path>" — UI renders both
     ha_person_entity: str | None = None
     notify_service: str | None = None  # e.g. "mobile_app_alice_phone"
     has_device: bool = True
@@ -94,6 +95,7 @@ class Activity(BaseModel):
     id: int | None = None
     slug: str
     name: str
+    phrase: str | None = None  # verb phrase for notifications: "watching a movie"
     icon: str = "mdi:help"
     color: str = "#888888"
     parent_id: int | None = None
@@ -155,6 +157,8 @@ class Question(BaseModel):
     window_ts: datetime
     predicted: str
     confidence: float
+    alternatives: list[str] = Field(default_factory=list)  # button slugs, index-mapped
+    probabilities: dict[str, float] = Field(default_factory=dict)  # drives phrasing mode
     channel: Literal["notification", "inbox"] = "inbox"
     status: Literal["open", "answered", "expired"] = "open"
     answer: str | None = None

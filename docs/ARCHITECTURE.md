@@ -248,12 +248,21 @@ API tokens are minted/revoked in Hearth's UI (hashed at rest, scoped:
 Lesson learned the hard way: iOS drops the notification `tag` in action events.
 Hearth's ask flow assumes only **action identifiers** round-trip:
 
-1. Backend mints a short-lived `question` row (id, person, window_ts, predicted).
-2. Notification actions encode the question id: `HEARTH_<qid>_CONFIRM`,
-   `HEARTH_<qid>_ALT1`… An HA automation blueprint (shipped in `deploy/ha/`)
-   forwards *any* `HEARTH_*` action to Hearth's `/api/feedback/action` webhook —
-   one dumb automation, all parsing server-side.
-3. Every notification also carries a URI deep link to the UI's labeling page
+1. Backend mints a `question` row (id, person, window_ts, predicted,
+   alternatives, probabilities) and phrases it DYNAMICALLY
+   (`labeling/phrasing.py`): confident → "Are you watching a movie right
+   now?"; two classes neck-and-neck → "I can't tell if you're cooking or
+   lying in bed — which is it?"; flat → "What are you up to?". Templates
+   rotate per window so questions never feel canned; each activity carries an
+   editable verb phrase.
+2. Notification action ids encode question id + option index:
+   `HEARTH_<qid>_<idx>`. **The Hearth integration handles the return path
+   itself**: on setup it registers an event-bus listener for
+   `mobile_app_notification_action`, filters `HEARTH_*`, and POSTs to
+   `/api/feedback/action` over its existing authenticated connection — zero
+   automations, zero YAML, works the moment the integration is installed.
+   (A legacy blueprint remains in `deploy/ha/` only for integration-less setups.)
+3. Every notification also carries a URI deep link to `/inbox?q=<id>`
    (works even if actions fail).
 4. The **UI inbox** is the primary labeling surface: a timeline of recent windows
    with predicted activity, one-tap correct/confirm, bulk-label a time range

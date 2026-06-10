@@ -76,15 +76,31 @@ passwords are never persisted.
 10. **Done** — ingest starts; card explains what happens over the next days
    (record → patterns appear → name them → first training).
 
-## 2. Dashboard
+## 2. Dashboard (implemented in pages/Dashboard.tsx)
 
-- **Live cards per person**: current activity (icon, since-when), confidence
-  gauge, top-3 class probabilities, "because" strip = top-3 SHAP contributions
-  in plain language ("in bed · lights off · 23:40").
-- **Today timeline**: horizontal activity ribbon per person (smoothed), tap any
-  segment → correct it (feeds Inbox flow).
-- **System strip**: ingest lag, last window built, last prediction age,
-  heartbeat, label counts this week.
+Answers one question in two seconds: "what does Hearth think is happening —
+and can I trust it?" Two modes:
+
+**Cold start** (no predictions yet): a single "Hearth is learning your home"
+journey card — day counter, events/24 h, sensors bound, progress bar to day 7,
+three milestone rows (recording → first patterns → first model) that tick off
+as they fire. Paired with milestone PHONE NOTIFICATIONS (domain/milestones.py):
+"recording started", "first patterns — come name them", "Hearth is live ✨".
+The closing wizard screen sets the expectation: go live your life, we'll ping you.
+
+**Steady state**:
+- **Hero: avatar scene cards per person** — the member's avatar (photo or
+  preset disc) badged onto the current activity's icon tile in its palette
+  color: you SEE Alice on the bed, not just text. Confidence micro-bar,
+  since-when, "because" SHAP strip (Phase 2).
+- **Today ribbon** per person (smoothed, opacity = confidence), tap a segment
+  to correct → highest-volume labeling surface. Badged "rule-based until
+  trained" while inference runs on bootstrap rules (model_version rules-*).
+- **Needs you** (max 3, hidden when empty): top open questions answered inline.
+- **Trust strip** (Phase 2): confirmed accuracy ± CI, labels this week, next
+  retrain, drift dot.
+- **System pulse** footer: database / ingest / bindings dots — quiet when
+  green, loud when red.
 
 ## 3. Inbox (the feedback loop surface)
 
@@ -98,7 +114,9 @@ passwords are never persisted.
 
 ## 4. Activities
 
-- Taxonomy editor: two-level tree, CRUD, icon/color, per-person enable.
+- Taxonomy editor: two-level tree, CRUD, icon/color, per-person enable,
+  and a **notification phrase** per activity ("watching a movie") used by
+  the dynamic question engine (labeling/phrasing.py).
 - **Rules tab** per activity: list of labeling rules (predicate builder UI —
   feature dropdown, operator, threshold, AND/OR groups), priority ordering,
   origin badge (user / discovered), live "matches last 7 d: 23 windows" preview.
