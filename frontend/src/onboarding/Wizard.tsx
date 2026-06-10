@@ -20,7 +20,7 @@ type Member = { name: string; personEntity: string; hasDevice: boolean; notifySe
 type WizardData = {
   account: { name: string; email: string; password: string; confirm: string };
   ha: { url: string; token: string };
-  influx: { mode: "external" | "bundled" | null; url: string; org: string; token: string };
+  influx: { mode: "external" | "bundled" | null; url: string; org: string; token: string; sourceBucket: string; importHistory: boolean };
   mqtt: { use: "ha-broker" | "custom" | "skip"; host: string };
   members: Member[];
   llmKey: string;
@@ -30,7 +30,7 @@ type WizardData = {
 const empty: WizardData = {
   account: { name: "", email: "", password: "", confirm: "" },
   ha: { url: "http://homeassistant.local:8123", token: "" },
-  influx: { mode: null, url: "", org: "", token: "" },
+  influx: { mode: null, url: "", org: "", token: "", sourceBucket: "", importHistory: true },
   mqtt: { use: "ha-broker", host: "" },
   members: [{ name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:ember" }],
   llmKey: "",
@@ -139,8 +139,22 @@ function StepHA({ d, set, next, back }: StepProps) {
   );
 }
 
+type Inspect = { reachable: boolean; authed: boolean; error: string | null;
+                 buckets: { name: string; measurements: number | null;
+                            points_24h: number | null; earliest: string | null }[] };
+
+function Stage({ ok, okText, failText }: { ok: boolean; okText: string; failText: string }) {
+  return (
+    <span style={{ display: "flex", gap: 8, alignItems: "center",
+                   color: ok ? "var(--ok)" : "var(--danger)" }}>
+      <Icon name={ok ? "check" : "x"} size={15} /> {ok ? okText : failText}
+    </span>
+  );
+}
+
 function StepInflux({ d, set, next, back }: StepProps) {
   const [test, setTest] = useState<TestState>("idle");
+  const [inspect, setInspect] = useState<Inspect | null>(null);
   const [bundled, setBundled] = useState<"checking" | "found" | "missing">("missing");
   const i = d.influx;
   const cmd = "docker compose --profile influxdb up -d";
@@ -157,13 +171,66 @@ function StepInflux({ d, set, next, back }: StepProps) {
 
         {i.mode === "external" && (
           <>
-            <Field label="InfluxDB URL"><input placeholder="http://192.168.1.240:8086" value={i.url} onChange={(e) => { setTest("idle"); set("influx", { ...i, url: e.target.value }); }} /></Field>
+            <Field label="InfluxDB URL"><input placeholder="http://192.168.1.240:8086" value={i.url} onChange={(e) => { setTest("idle"); setInspect(null); set("influx", { ...i, url: e.target.value }); }} /></Field>
             <Field label="Organization"><input placeholder="homelab" value={i.org} onChange={(e) => set("influx", { ...i, org: e.target.value })} /></Field>
             <Field label="API token" hint="Needs read/write. InfluxDB UI → Load Data → API Tokens.">
-              <input type="password" value={i.token} onChange={(e) => { setTest("idle"); set("influx", { ...i, token: e.target.value }); }} />
+              <input type="password" value={i.token} onChange={(e) => { setTest("idle"); setInspect(null); set("influx", { ...i, token: e.target.value }); }} />
             </Field>
-            <TestRow state={test} okText="Connected — buckets created" failText="Couldn't connect — check URL, org and token"
-              onTest={async () => { setTest("testing"); setTest((await fakeApi()) ? "ok" : "fail"); }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <button className="btn btn-secondary" disabled={test === "testing"}
+                onClick={async () => {
+                  setTest("testing");
+                  try {
+                    const r = await fetch("/api/influx/inspect", { method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ url: i.url, org: i.org, token: i.token }) });
+                    const j: Inspect = await r.json();
+                    setInspect(j);
+                    setTest(j.authed ? "ok" : "fail");
+                    const guess = (j.buckets ?? []).filter((b) => !b.name.startsWith("hearth_"))
+                      .sort((a, b) => (b.points_24h ?? 0) - (a.points_24h ?? 0))[0];
+                    if (guess && !i.sourceBucket) set("influx", { ...i, sourceBucket: guess.name });
+                  } catch { setTest("fail"); setInspect(null); }
+                }}>
+                {test === "testing" ? "Checking…" : "Check connection"}
+              </button>
+            </div>
+            {inspect && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14 }}>
+                <Stage ok={inspect.reachable} okText="Instance reachable" failText={inspect.error ?? "No InfluxDB at this URL"} />
+                <Stage ok={inspect.authed} okText="Token accepted" failText={inspect.error ?? "Token rejected"} />
+                {inspect.authed && (
+                  <Stage ok={(inspect.buckets ?? []).length > 0}
+                         okText={`${inspect.buckets.length} buckets found — Hearth will add its own three`}
+                         failText="No buckets visible to this token" />
+                )}
+              </div>
+            )}
+            {inspect?.authed && (inspect.buckets ?? []).length > 0 && (
+              <>
+                <Field label="Import existing history from"
+                  hint="Your HA→InfluxDB bucket, if you have one — months of history mean patterns and a first model on day one.">
+                  <select value={i.sourceBucket}
+                          onChange={(e) => set("influx", { ...i, sourceBucket: e.target.value })}>
+                    <option value="">— no import —</option>
+                    {inspect.buckets.map((b) => (
+                      <option key={b.name} value={b.name}>
+                        {b.name}
+                        {b.measurements != null ? ` · ${b.measurements} measurements` : ""}
+                        {b.points_24h != null ? ` · ${b.points_24h.toLocaleString()} pts/24h` : ""}
+                        {b.earliest ? ` · since ${b.earliest.slice(0, 10)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {i.sourceBucket && (
+                  <Callout icon="check">
+                    Data found in “{i.sourceBucket}” — after setup Hearth imports it for your
+                    bound sensors, so the journey can skip straight ahead.
+                  </Callout>
+                )}
+              </>
+            )}
           </>
         )}
 

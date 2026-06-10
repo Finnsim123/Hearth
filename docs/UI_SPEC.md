@@ -31,8 +31,12 @@ passwords are never persisted.
 2. **Connect Home Assistant** — URL + long-lived token; live validation; shows
    discovered entity count.
 3. **Time-series database** — explicit fork:
-   - "I already run InfluxDB" → URL + org + token form, Test connection,
-     Hearth creates its three buckets in the existing instance.
+   - "I already run InfluxDB" → URL + org + token form, then a STAGED check
+     (real endpoint /api/influx/inspect): instance reachable ✓ → token
+     accepted ✓ → N buckets found ✓. Then a source-bucket picker for history
+     import (auto-suggests the busiest bucket, shows measurements · points/24h
+     · history-since per bucket, "no import" opt-out). Hearth's own three
+     buckets are created automatically — never asked for.
    - "Set it up for me" → wizard checks whether the bundled container is
      running (compose `influxdb` profile). If yes: auto-connects, done. If
      not: shows the exact command (`docker compose --profile influxdb up -d`)

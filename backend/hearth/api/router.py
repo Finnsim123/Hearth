@@ -37,6 +37,13 @@ def build_api_router(deps: dict) -> APIRouter:
             return {"configured": False}
         return {"configured": True, "url": conn["url"], "options": conn["options"]}
 
+    @api.post("/influx/inspect")
+    def influx_inspect(body: dict) -> dict:
+        """Staged wizard check; body {url, org, token}. Read-only, saves nothing."""
+        from ..adapters.influx_store import inspect_influx
+        return inspect_influx(body.get("url", ""), body.get("org", ""),
+                              body.get("token", ""))
+
     # ── persons ────────────────────────────────────────────────────────────
     @api.get("/persons")
     def persons() -> list[Person]:

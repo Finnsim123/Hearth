@@ -49,6 +49,61 @@ def coerce_value(binding: Binding, state) -> tuple[str, float | str | None]:
     return "str", str(state)
 
 
+def inspect_influx(url: str, org: str, token: str, max_buckets: int = 25) -> dict:
+    """Staged connection check for the wizard: reachable -> authed -> buckets
+    -> per-bucket data stats. Never raises; every stage reports its own truth.
+    """
+    out: dict = {"reachable": False, "authed": False, "buckets": [], "error": None}
+    try:
+        client = InfluxDBClient(url=url, token=token, org=org, timeout=10_000)
+    except Exception as exc:
+        out["error"] = str(exc)
+        return out
+    try:
+        out["reachable"] = bool(client.ping())
+        if not out["reachable"]:
+            out["error"] = "No InfluxDB at this URL"
+            return out
+        try:
+            buckets = client.buckets_api().find_buckets(limit=max_buckets).buckets
+            out["authed"] = True
+        except Exception as exc:
+            out["error"] = f"Token rejected or wrong org: {exc}"
+            return out
+        q = client.query_api()
+        for b in buckets:
+            if b.name.startswith("_"):
+                continue
+            info = {"name": b.name, "measurements": None,
+                    "points_24h": None, "earliest": None}
+            try:
+                flux = (f'import "influxdata/influxdb/schema" '
+                        f'schema.measurements(bucket: "{b.name}")')
+                info["measurements"] = sum(len(t.records) for t in q.query(flux))
+            except Exception:
+                pass
+            try:
+                flux = (f'from(bucket: "{b.name}") |> range(start: -24h) '
+                        f'|> group() |> count()')
+                for t in q.query(flux):
+                    for rec in t.records:
+                        info["points_24h"] = int(rec.get_value() or 0)
+            except Exception:
+                pass
+            try:
+                flux = (f'from(bucket: "{b.name}") |> range(start: -2y) '
+                        f'|> group() |> first() |> keep(columns: ["_time"])')
+                for t in q.query(flux):
+                    for rec in t.records:
+                        info["earliest"] = rec["_time"].isoformat()
+            except Exception:
+                pass
+            out["buckets"].append(info)
+    finally:
+        client.close()
+    return out
+
+
 class InfluxStore:
     """Implements domain.ports.TimeSeriesStore."""
 
