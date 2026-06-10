@@ -406,6 +406,21 @@ in SQLite (volume-mounted). Backend is one image; UI is built into it at image
 build time. Health endpoints + heartbeat measurement for alerting. A HA add-on
 wrapper is a later thin packaging of the same image (Frigate model).
 
+### 8.1 Sizing (minimums)
+
+| Setup | Cores | RAM | Swap |
+|---|---|---|---|
+| Hearth only (external InfluxDB) | 1–2 | 1 GB | 1 GB |
+| Hearth + bundled InfluxDB | 2 | 2 GB | 1–2 GB |
+| Comfortable (+ Grafana, Phase 4 discovery, HEPA) | 4 | 4 GB | 2 GB |
+
+Steady state is light (~300–400 MB backend, ~50 events/min ingest, one
+inference row/person/5 min). The spikes: weekly RF training (~1 GB peak,
+seconds–minutes; `n_jobs=-1` scales to available cores), monthly tuning
+(45 small fits), nightly UMAP/HDBSCAN in Phase 4 (~+500 MB), optional HEPA
+pretraining (CPU, 2–4 GB, overnight). Swap exists so the 3 AM retrain can't
+OOM a tight box — steady-state swapping means undersized.
+
 ## 9. Architecture decision records (condensed)
 
 | ADR | Decision | Why (alternatives rejected) |

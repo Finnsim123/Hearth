@@ -52,7 +52,9 @@ def create_app() -> FastAPI:
     app.state.deps = deps
     app.include_router(build_api_router(deps), prefix="/api")
 
-    static_dir = settings.data_dir.parent / "static"
+    import os
+    from pathlib import Path
+    static_dir = Path(os.getenv("HEARTH_STATIC_DIR", "/app/static"))
     if static_dir.is_dir():
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="ui")
 

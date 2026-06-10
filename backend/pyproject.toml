@@ -17,8 +17,6 @@ dependencies = [
     "scikit-learn>=1.5",
     "joblib>=1.4",
     "shap>=0.46",
-    "hdbscan>=0.8.38",
-    "umap-learn>=0.5.6",
     "aiohttp>=3.10",          # HA WebSocket client
     "paho-mqtt>=2.1",
     "cryptography>=43.0",     # token encryption at rest (Fernet via security.py)
@@ -26,7 +24,15 @@ dependencies = [
     "zeroconf>=0.132",        # mDNS announce for HA auto-discovery
 ]
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["hearth*"]
+
 [project.optional-dependencies]
+discovery = ["hdbscan>=0.8.38", "umap-learn>=0.5.6"]  # Phase 4; needs build tools
 dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "ruff>=0.5", "mypy>=1.10"]
 
 [tool.ruff]

@@ -33,7 +33,9 @@ services:
       retries: 10
 
   hearth:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     # No depends_on: Hearth boots without any database and the wizard
     # connects either the bundled influxdb (profile) or an external one.
