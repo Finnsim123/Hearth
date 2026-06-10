@@ -7,17 +7,21 @@ cd "$(dirname "$0")/.."
 SHARED=".hearth-shared"
 mkdir -p "$SHARED"
 LOG="$SHARED/updater.log"
+LOCK="$SHARED/deploy.lock"
 
 # ── 1. update requested from the UI? ────────────────────────────────────────
+# flock: never rebuild while install.sh (or a previous cron run) is mid-deploy
+# — concurrent `compose up` calls collide on the container name.
 if [[ -f "$SHARED/update_requested" ]]; then
   rm -f "$SHARED/update_requested"
   {
+    flock -w 600 9 || { echo "[$(date -Is)] another deploy holds the lock — skipped"; exit 0; }
     echo "[$(date -Is)] update requested — pulling"
     git pull --ff-only
     export GIT_SHA="$(git rev-parse --short HEAD)"
-    docker compose up -d --build
+    docker compose up -d --build --remove-orphans
     echo "[$(date -Is)] updated to $GIT_SHA"
-  } >>"$LOG" 2>&1
+  } 9>"$LOCK" >>"$LOG" 2>&1
 fi
 
 # ── 2. report status for the UI ─────────────────────────────────────────────

@@ -55,9 +55,13 @@ if command -v crontab >/dev/null && [[ -d /etc/cron.d ]]; then
 fi
 
 # ── build + start ────────────────────────────────────────────────────────────
+# Same lock the updater cron uses — a manual install must never race it.
 echo -e "${DIM}Building and starting the stack (first build takes a few minutes)…${NC}"
 export GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
-docker compose "${PROFILE_ARGS[@]}" up -d --build
+(
+  flock -w 600 9 || { echo "Another deploy is running (updater cron?) — try again in a minute."; exit 1; }
+  docker compose "${PROFILE_ARGS[@]}" up -d --build --remove-orphans
+) 9>.hearth-shared/deploy.lock
 
 # ── wait for health ──────────────────────────────────────────────────────────
 printf "Waiting for Hearth to come up"
