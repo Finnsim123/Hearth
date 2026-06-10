@@ -5,8 +5,11 @@ ember dot fixed at `#F59E0B`. The outline adapts to theme; the ember never
 changes color (it's the brand constant).
 
 Files:
-- `logo.svg` — canonical mark (square, 32 viewBox)
-- `logo-ember.svg` — same file, kept under its concept name
+- `logo.svg` — canonical mark (square, 32 viewBox); **self-theming** via an
+  internal `prefers-color-scheme` rule so it renders correctly inside `<img>`
+  (GitHub READMEs, docs sites) on both themes
+- `wordmark.svg` — mark + lowercase wordmark, same self-theming
+- `logo-ember.svg` — `currentColor` variant for inlining in app code
 - `explorations/` — rejected concepts (monogram, glow, roofline), kept for reference
 
 Usage rules (see also docs/DESIGN.md §5):

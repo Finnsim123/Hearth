@@ -1,5 +1,7 @@
 # Hearth — Data Model
 
+> Part of the [Hearth](../README.md) docs · design language in [DESIGN.md](DESIGN.md)
+
 Two stores, strict separation of concerns:
 
 - **InfluxDB** — everything that is a time series (raw states, features,

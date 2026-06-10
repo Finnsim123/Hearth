@@ -1,5 +1,7 @@
 # Hearth — Research Notes
 
+> Part of the [Hearth](../README.md) docs · design language in [DESIGN.md](DESIGN.md)
+
 Where the hard problems are, what prior art says, and which bets we're making.
 
 ## 1. Lessons already paid for (har-homelab prototype, Apr–Jun 2026)

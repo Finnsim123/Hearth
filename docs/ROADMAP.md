@@ -1,5 +1,7 @@
 # Hearth — Roadmap
 
+> Part of the [Hearth](../README.md) docs · design language in [DESIGN.md](DESIGN.md)
+
 Each phase ends in something a stranger could run. Don't start phase N+1 with
 phase N's acceptance unmet.
 

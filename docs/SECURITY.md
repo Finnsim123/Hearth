@@ -1,5 +1,7 @@
 # Hearth — Security Model
 
+> Part of the [Hearth](../README.md) docs · design language in [DESIGN.md](DESIGN.md)
+
 One page that answers: where does every secret live, and which code touches it.
 
 ## The one rule

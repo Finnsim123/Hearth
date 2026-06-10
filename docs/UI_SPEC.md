@@ -1,5 +1,7 @@
 # Hearth — Web UI Specification
 
+> Part of the [Hearth](../README.md) docs · design language in [DESIGN.md](DESIGN.md)
+
 React + TypeScript SPA at `:8420`, served by the backend. REST for CRUD,
 WebSocket (`/ws`) for live predictions, ingest status, and training logs.
 Design language: dark-first dashboard, dense but calm; every ML number links to

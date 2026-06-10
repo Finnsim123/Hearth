@@ -1,7 +1,9 @@
+<img src="../brand/logo.svg" width="56" align="right" alt="Hearth — Ember mark" />
+
 # Hearth Architecture
 
 > Status: accepted · June 2026
-> Companion docs: [DATA_MODEL.md](DATA_MODEL.md) · [RESEARCH.md](RESEARCH.md) · [UI_SPEC.md](UI_SPEC.md) · [ROADMAP.md](ROADMAP.md)
+> Companion docs: [DATA_MODEL.md](DATA_MODEL.md) · [UI_SPEC.md](UI_SPEC.md) · [DESIGN.md](DESIGN.md) · [SECURITY.md](SECURITY.md) · [RESEARCH.md](RESEARCH.md) · [ROADMAP.md](ROADMAP.md)
 
 ## 1. System context
 
@@ -371,7 +373,10 @@ the data speak after a few days of recording.
 ## 7. Web UI (summary — full spec in UI_SPEC.md)
 
 React + TypeScript SPA, served by the backend container at `:8420`; REST for CRUD,
-WebSocket for live predictions/training logs. Pages: **Onboarding wizard** ·
+WebSocket for live predictions/training logs. Everything user-facing follows the
+Hearth design language (DESIGN.md): warm ember `#F59E0B` on cool slate, one
+accent that always carries meaning, the 47-icon outline set sharing the Ember
+mark's stroke language, and dark/light/system theming via CSS tokens. Pages: **Onboarding wizard** ·
 **Dashboard** (live activity per person, confidence, SHAP "because" strip) ·
 **Inbox** (label/confirm) · **Activities** (taxonomy + rules) · **Patterns**
 (cluster cards) · **Models** (registry, metrics, confusion matrix, AUC curves,

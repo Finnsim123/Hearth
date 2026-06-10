@@ -1,5 +1,7 @@
 # Hearth — Design Language
 
+> Part of the [Hearth](../README.md) docs · brand assets in [`brand/`](../brand/)
+
 One visual language across every user touchpoint: web UI, onboarding wizard,
 docs site, README badges, HA integration branding, notification copy.
 Reference aesthetic: budgero.app — calm, private, minimal SaaS. Hearth keeps
