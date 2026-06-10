@@ -8,6 +8,7 @@ steady-state ingest continues regardless.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -34,7 +35,8 @@ async def run_fast_track(repo, tsdb, store, notifier=None) -> None:
         _status(repo, "importing", source_bucket=source_bucket)
         from ..adapters.influx_import import import_history
         bindings = [b for b in repo.bindings() if b.enabled]
-        results = import_history(tsdb, source_bucket, bindings, start, end)
+        results = await asyncio.to_thread(
+            import_history, tsdb, source_bucket, bindings, start, end)
         imported = sum(results.values())
         _status(repo, "imported", points=imported)
         log.info("fast track: %d points imported", imported)
@@ -44,8 +46,10 @@ async def run_fast_track(repo, tsdb, store, notifier=None) -> None:
         n_windows = 0
         for person in repo.persons():
             if person.enabled:
-                feats = build_windows(tsdb, repo, person.id, start, end, stride_min=30)
+                feats = await asyncio.to_thread(
+                    build_windows, tsdb, repo, person.id, start, end, 30)
                 n_windows += len(feats)
+                log.info("fast track: %s -> %d windows", person.id, len(feats))
         _status(repo, "features_built", windows=n_windows)
 
         _status(repo, "training")
@@ -53,7 +57,8 @@ async def run_fast_track(repo, tsdb, store, notifier=None) -> None:
         trained = []
         for person in repo.persons():
             if person.enabled:
-                record = train_person(person.id, tsdb, repo, store, weeks=12, force=True)
+                record = await asyncio.to_thread(
+                    train_person, person.id, tsdb, repo, store, 12, True)
                 if record is not None:
                     trained.append(record.version)
         _status(repo, "trained", models=trained)

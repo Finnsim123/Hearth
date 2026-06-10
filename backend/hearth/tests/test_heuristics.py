@@ -37,3 +37,13 @@ def test_unique_slugs():
     out = heuristic_bindings([_e("light.lamp"), _e("switch.lamp", dc="power")])
     names = [b.name for b in out]
     assert len(names) == len(set(names))
+
+
+def test_diagnostics_blocklisted():
+    for eid in ("sensor.wifi0_signal_quality", "sensor.home_assistant_core_cpu_percent",
+                "sensor.temperatuur_5d", "sensor.regenkans_3d",
+                "sensor.a1mini_print_progress", "sensor.openwrt_ping_drop_rate"):
+        assert suggest_role(_e(eid)) is None, eid
+    assert suggest_role(_e("sensor.plug_rssi", dc="signal_strength")) is None
+    # real signals still bind
+    assert suggest_role(_e("sensor.bedroom_temperature_temperatuur")) is not None

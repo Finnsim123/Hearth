@@ -8,7 +8,12 @@ Schema: docs/DATA_MODEL.md §1. Invariants enforced here:
 from __future__ import annotations
 
 import logging
+import warnings
 from datetime import datetime, timedelta, timezone
+
+from influxdb_client.client.warnings import MissingPivotFunction
+
+warnings.simplefilter("ignore", MissingPivotFunction)
 
 import pandas as pd
 from influxdb_client import InfluxDBClient, Point

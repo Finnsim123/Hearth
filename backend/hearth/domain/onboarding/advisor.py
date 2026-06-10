@@ -31,16 +31,35 @@ _DEVICE_CLASS_ROLES = {"occupancy": Role.PRESENCE, "motion": Role.PRESENCE,
                        "battery": Role.BATTERY, "temperature": Role.ENV,
                        "humidity": Role.ENV, "carbon_dioxide": Role.ENV,
                        "illuminance": Role.ENV, "pm25": Role.ENV, "timestamp": Role.ALARM_TIME}
+# device_tracker is deliberately ABSENT: homes have dozens of network
+# trackers (laptops, cameras, IoT) — only person.* entities mean a human.
 _DOMAIN_ROLES = {"light": Role.LIGHT, "media_player": Role.MEDIA, "person": Role.PERSON,
-                 "device_tracker": Role.PERSON, "input_datetime": Role.ALARM_TIME}
+                 "input_datetime": Role.ALARM_TIME}
 
 
 def _slugify(entity_id: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", entity_id.split(".", 1)[-1].lower()).strip("_")
 
 
+# Diagnostics / infrastructure / forecasts — never useful for activity sensing.
+_BLOCKLIST = re.compile(
+    r"rssi|lqi|signal_quality|signal_strength|packet_loss|ping|uptime|"
+    r"cpu|memory|processor|supervisor|core_|watchman|last_updated|last_parse|"
+    r"_[1-5]d$|forecast|regenkans|zonkans|next_dawn|next_dusk|next_noon|"
+    r"next_rising|next_setting|battery_plus|daily_energy|spanning|"
+    r"print_progress|firmware|update_available|last_response|failed_pings|"
+    r"_slope$|_ema_|preset_|regulated_")
+_BLOCK_DEVICE_CLASSES = {"signal_strength", "timestamp", "update", "data_size",
+                         "data_rate", "duration", "monetary"}
+
+
 def suggest_role(entity: dict) -> Role | None:
     """entity: one inventory item (entity_id, domain, device_class, unit, name)."""
+    text_all = f"{entity['entity_id']} {entity.get('friendly_name', '')}".lower()
+    if _BLOCKLIST.search(text_all):
+        return None
+    if entity.get("device_class") in _BLOCK_DEVICE_CLASSES:
+        return None
     domain = entity.get("domain") or entity["entity_id"].split(".")[0]
     if domain in _DOMAIN_ROLES:
         return _DOMAIN_ROLES[domain]

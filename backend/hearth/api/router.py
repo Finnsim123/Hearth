@@ -218,6 +218,23 @@ def build_api_router(deps: dict) -> APIRouter:
         repo.delete_binding(binding_id)
         return {"ok": True}
 
+    @api.post("/bindings/cleanup")
+    def bindings_cleanup() -> dict:
+        """Prune seeded bindings the improved heuristics would no longer
+        suggest: device_tracker noise + diagnostics blocklist. Person bindings
+        for household members (person.*) are always kept."""
+        from ..domain.onboarding.advisor import _BLOCKLIST
+        removed = []
+        for b in repo.bindings():
+            domain = b.entity_id.split(".")[0]
+            keep_person = domain == "person"
+            if keep_person:
+                continue
+            if domain == "device_tracker" or _BLOCKLIST.search(b.entity_id.lower()):
+                repo.delete_binding(b.id)
+                removed.append(b.entity_id)
+        return {"removed": len(removed), "entities": removed}
+
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:
         events = deps.get("events")
