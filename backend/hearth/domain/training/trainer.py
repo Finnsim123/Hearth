@@ -86,6 +86,10 @@ def train_person(person_id: str, tsdb, repo, store,
         imp = est.model.feature_importances_
         ranked = sorted(zip(est.columns, imp), key=lambda kv: -kv[1])[:15]
         metrics["feature_importances"] = {c: round(float(v), 4) for c, v in ranked}
+        # evidence profile: where the model's weight sits across trust tiers
+        from ..features.evidence import evidence_profile
+        metrics["evidence_profile"] = evidence_profile(
+            dict(zip(est.columns, imp)), repo.bindings())
     except Exception:                      # non-tree estimators have none
         pass
 

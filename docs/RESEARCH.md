@@ -160,3 +160,35 @@ Hearth never lets either system write ground truth on its own.
   registry à la HACS — distribution question, post-v1.
 - Grafana: keep, or is the in-app model/feature explorer enough? Ship as
   optional profile, decide on usage.
+
+
+## Evidence tiers (added June 2026)
+
+**Question:** can we tell whether a prediction rests on reliable first-degree
+signals, and act on it? (Raised after the partner-alarm incident.)
+
+**Literature:**
+- HAR surveys split sensors into wearable / object / ambient; ambient
+  (temp, CO2, humidity) is environment-sensitive and only weakly
+  activity-specific. CASAS — the canonical smart-home corpus — is built
+  almost entirely on *binary event* sensors (motion, door) for this reason.
+- Home Assistant's Bayesian sensor expresses signal strength numerically
+  (prob_given_true / prob_given_false): strong evidence = high likelihood
+  ratio, ambient evidence ≈ 1. Tiers are likelihood-ratio buckets.
+- The spurious-correlation literature: models latch onto proxies that
+  co-vary with the target in one period; the remedy is grouping features
+  by trustworthiness and auditing reliance — not blanket exclusion.
+- Hierarchical feature-selection work: per-activity subsets beat one global
+  subset → keep ambient features (CO2 delta genuinely helps cooking), but
+  MEASURE the reliance.
+
+**Design (features/evidence.py):** tier per role, overridable per binding
+(options.tier — appealable like all gates): 1 direct (bed/presence/person/
+media/door/own-phone), 2 behavioral (power/light/steps), 3 ambient
+(env/battery), 0 prior (time features & composites). Consumers:
+- trainer → metrics.evidence_profile (importance mass per tier; Models page
+  renders it as a stacked bar)
+- inference → per-window direct-SHAP share stored on every prediction; if
+  < 0.25 while confidence > 0.70, confidence is capped to 0.70 — below the
+  ask threshold, so weakly-evidenced predictions ASK instead of assert.
+  The HA sensor exposes `evidence` as an attribute for automations.

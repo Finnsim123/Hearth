@@ -19,6 +19,7 @@ type Metrics = {
   per_class?: Record<string, PerClass>;
   confusion?: { labels: string[]; matrix: number[][] };
   feature_importances?: Record<string, number>;
+  evidence_profile?: Record<string, number>;
   hyperparams?: Record<string, unknown>;
 };
 type Model = {
@@ -71,6 +72,48 @@ function Confusion({ c }: { c: { labels: string[]; matrix: number[][] } }) {
       <p style={{ fontSize: 12, color: "var(--text-dim)", margin: "6px 0 0" }}>
         Green diagonal = correct. Off-diagonal red = confusion between two activities.
       </p>
+    </div>
+  );
+}
+
+const TIER_COLORS: Record<string, string> = {
+  direct: "var(--ok, #34D399)", behavioral: "var(--accent)",
+  ambient: "#F472B6", prior: "var(--text-dim)",
+};
+const TIER_HINTS: Record<string, string> = {
+  direct: "bed, presence, person, media, door, own phone — a human did something",
+  behavioral: "power, lights, steps — usually human-caused, automations too",
+  ambient: "temperature, CO2, humidity, battery — drifts and correlates with everything",
+  prior: "time-of-day & composites — 'usually X at 23:00' is a prior, not evidence",
+};
+
+function EvidenceBar({ profile }: { profile: Record<string, number> }) {
+  const order = ["direct", "behavioral", "ambient", "prior"];
+  return (
+    <div>
+      <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>What the trust rests on</h4>
+      <div style={{ display: "flex", height: 12, borderRadius: 6, overflow: "hidden" }}>
+        {order.map((t) => (profile[t] ?? 0) > 0.001 && (
+          <div key={t} title={`${t} ${(profile[t] * 100).toFixed(0)}% — ${TIER_HINTS[t]}`}
+               style={{ width: `${profile[t] * 100}%`, background: TIER_COLORS[t] }} />
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 6 }}>
+        {order.map((t) => (profile[t] ?? 0) > 0.001 && (
+          <span key={t} title={TIER_HINTS[t]}
+                style={{ fontSize: 12, color: "var(--text-dim)", display: "inline-flex",
+                         alignItems: "center", gap: 5 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: TIER_COLORS[t] }} />
+            {t} {(profile[t] * 100).toFixed(0)}%
+          </span>
+        ))}
+      </div>
+      {(profile.direct ?? 0) < 0.4 && (
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-dim)" }}>
+          Low direct share — this model leans on indirect signals. Predictions with weak
+          per-window evidence are automatically held below the ask threshold.
+        </p>
+      )}
     </div>
   );
 }
@@ -169,6 +212,9 @@ function ModelCard({ m, onAction }: { m: Model; onAction: () => void }) {
             </div>
           )}
           {mt.confusion && <Confusion c={mt.confusion} />}
+          {mt.evidence_profile && Object.keys(mt.evidence_profile).length > 0 && (
+            <EvidenceBar profile={mt.evidence_profile} />
+          )}
           {mt.feature_importances ? (
             <div>
               <h4 style={{ margin: "0 0 8px", fontSize: 13.5 }}>What the model looks at</h4>

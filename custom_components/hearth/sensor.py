@@ -57,6 +57,7 @@ class HearthActivitySensor(CoordinatorEntity, SensorEntity):
         p = self._pred or {}
         return {
             "confidence": p.get("confidence"),
+            "evidence": p.get("evidence"),     # direct-signal share, 0–1
             "probabilities": p.get("probs") or {},
             "raw_prediction": p.get("predicted"),
             "model": p.get("model_version") or p.get("model"),

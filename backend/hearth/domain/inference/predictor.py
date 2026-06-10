@@ -48,10 +48,11 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         return []
 
     record = next((m for m in repo.models(person_id) if m.promoted), None)
+    bindings = repo.bindings()
     if record is not None:
         est = store.load(record)
         probs = est.predict_proba(todo)
-        explains = est.explain(todo.tail(1))
+        explains = est.explain(todo)        # all windows: explanation + evidence
         version = record.version
     else:
         probs = _rules_predict(repo, todo, person_id)
@@ -64,15 +65,26 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         predicted = str(row.idxmax())
         confidence = float(row.max())
         explanation: list[tuple[str, float]] = []
+        evidence = None
         if not explains.empty and ts in explains.index:
             top = explains.loc[ts].abs().nlargest(3)
             explanation = [(f, float(explains.loc[ts, f])) for f in top.index]
+            from ..features.evidence import (
+                WEAK_CONFIDENCE_CAP, WEAK_DIRECT_SHARE, window_evidence)
+            evidence = round(window_evidence(explains.loc[ts], bindings), 4)
+            if evidence < WEAK_DIRECT_SHARE and confidence > WEAK_CONFIDENCE_CAP:
+                # the model is confident but not anchored on direct signal —
+                # don't assert; the capped confidence triggers a question
+                log.info("[%s] weak evidence (%.0f%% direct) — confidence "
+                         "%.2f capped to %.2f", person_id, evidence * 100,
+                         confidence, WEAK_CONFIDENCE_CAP)
+                confidence = WEAK_CONFIDENCE_CAP
         smoothed = _apply_smoothing(history, predicted, confidence)
         pred = Prediction(person_id=person_id, window_ts=ts.to_pydatetime(),
                           model_version=version, predicted=predicted,
                           smoothed=smoothed, confidence=confidence,
                           probabilities={c: float(v) for c, v in row.items()},
-                          explanation=explanation)
+                          explanation=explanation, evidence=evidence)
         tsdb.write_prediction(pred)
         history.insert(0, pred)
         out.append(pred)

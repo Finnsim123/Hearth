@@ -152,6 +152,7 @@ class Prediction(BaseModel):
     confidence: float
     probabilities: dict[str, float]
     explanation: list[tuple[str, float]] = Field(default_factory=list)  # (feature, shap)
+    evidence: float | None = None  # direct-tier SHAP share (features/evidence.py)
 
 
 class Question(BaseModel):
