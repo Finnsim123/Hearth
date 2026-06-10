@@ -43,15 +43,21 @@ HA sensors ──► Hearth pipeline ──► features ──► model ──�
 
 ```bash
 git clone https://github.com/you/hearth && cd hearth
-cp .env.example .env                        # set HEARTH_SECRET, done
 
 # Already running InfluxDB somewhere? (the wizard will ask for URL + token)
-docker compose up -d
+bash install.sh
 
 # No InfluxDB yet? Include the bundled one:
-docker compose --profile influxdb up -d
+bash install.sh --with-influxdb
+```
 
-open http://<host>:8420   # create your admin account, wizard takes it from here
+The installer generates secrets, builds the stack, waits for it to come up,
+and prints exactly where to go:
+
+```
+  Install is complete.
+
+  Go to:  http://192.168.1.241:8420  to set up your Hearth instance
 ```
 
 The 10-step wizard walks you through everything else: create your account →

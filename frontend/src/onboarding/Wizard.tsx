@@ -67,7 +67,7 @@ export default function Wizard() {
       {step === 3 && <StepInflux d={data} set={set} next={next} back={back} />}
       {step === 4 && <StepMqtt d={data} set={set} next={next} back={back} />}
       {step === 5 && <StepHousehold d={data} set={set} next={next} back={back} />}
-      {step === 6 && <StepInventory next={next} back={back} />}
+      {step === 6 && <StepInventory d={data} set={set} next={next} back={back} />}
       {step === 7 && <StepAiAssist d={data} set={set} next={next} back={back} />}
       {step === 8 && <StepActivities d={data} set={set} next={next} back={back} />}
       {step === 9 && <StepOutput d={data} set={set} next={next} back={back} />}
@@ -115,6 +115,8 @@ function StepAccount({ d, set, next }: StepProps) {
 
 function StepHA({ d, set, next, back }: StepProps) {
   const [test, setTest] = useState<TestState>("idle");
+  const [okMsg, setOkMsg] = useState("Connected");
+  const [failMsg, setFailMsg] = useState("Couldn't reach HA — check the URL and token");
   const h = d.ha;
   return (
     <>
@@ -127,8 +129,23 @@ function StepHA({ d, set, next, back }: StepProps) {
           hint={<>Create one in HA: click your user (bottom-left) → Security → “Long-lived access tokens” → Create token. Paste it here.</>}>
           <input type="password" value={h.token} placeholder="eyJhbGciOi…" onChange={(e) => { setTest("idle"); set("ha", { ...h, token: e.target.value }); }} />
         </Field>
-        <TestRow state={test} okText="Connected — 214 entities found" failText="Couldn't reach HA — check the URL and token"
-          onTest={async () => { setTest("testing"); setTest((await fakeApi()) ? "ok" : "fail"); }} />
+        <TestRow state={test} okText={okMsg} failText={failMsg}
+          onTest={async () => {
+            setTest("testing");
+            try {
+              const r = await fetch("/api/ha/test", { method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url: h.url, token: h.token }) });
+              const j = await r.json();
+              if (j.authed) {
+                setOkMsg(`Connected — HA ${j.version ?? ""}, ${j.entities.toLocaleString()} entities found`);
+                setTest("ok");
+              } else {
+                setFailMsg(j.error ?? "Couldn't reach HA — check the URL and token");
+                setTest("fail");
+              }
+            } catch { setFailMsg("Hearth backend unreachable"); setTest("fail"); }
+          }} />
         <Callout>
           What happens with this: Hearth subscribes to live state changes over HA's WebSocket and
           stores them in your time-series database. The token is encrypted before it touches disk.
@@ -338,26 +355,51 @@ function StepHousehold({ d, set, next, back }: StepProps) {
   );
 }
 
-function StepInventory({ next, back }: { next: () => void; back: () => void }) {
-  const [state, setState] = useState<"scanning" | "done">("scanning");
-  useEffect(() => { fakeApi().then(() => setState("done")); }, []);
+function StepInventory({ d, next, back }: StepProps & { back: () => void }) {
+  const [state, setState] = useState<"scanning" | "done" | "error">("scanning");
+  const [scan, setScan] = useState<{ count: number; bindable: number; domains: number;
+                                     inventory: unknown[] } | null>(null);
+  useEffect(() => {
+    fetch("/api/ha/inventory", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: d.ha.url, token: d.ha.token }) })
+      .then((r) => r.json())
+      .then((j) => { setScan(j); setState("done"); })
+      .catch(() => setState("error"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const download = () => {
+    const blob = new Blob([JSON.stringify(scan?.inventory ?? [], null, 2)],
+                          { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "inventory.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
   return (
     <>
       <StepShell step={6} total={TOTAL} title="Scanning your home"
         explainer="Hearth is reading your entity list and — where history exists — computing per-sensor statistics. Nothing to fill in; this takes a few seconds.">
-        {state === "scanning" ? (
-          <Callout icon="refresh">Pulling entities, areas and device classes from Home Assistant…</Callout>
-        ) : (
+        {state === "scanning" && (
+          <Callout icon="refresh">Pulling entities and device classes from Home Assistant…</Callout>
+        )}
+        {state === "error" && (
+          <Callout icon="warning">Scan failed — go back a step and re-test the HA connection.</Callout>
+        )}
+        {state === "done" && scan && (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-              {[["214", "entities found"], ["31", "with useful signal"], ["14 d", "of history"]].map(([n, l]) => (
+              {[[scan.count.toLocaleString(), "entities found"],
+                [scan.bindable.toLocaleString(), "look useful for activity sensing"],
+                [scan.domains.toLocaleString(), "entity types"]].map(([n, l]) => (
                 <div key={l} className="card" style={{ textAlign: "center", padding: 16 }}>
                   <div style={{ fontSize: 25, fontWeight: 600 }}>{n}</div>
                   <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{l}</div>
                 </div>
               ))}
             </div>
-            <button className="btn btn-secondary" style={{ alignSelf: "flex-start" }}>
+            <button className="btn btn-secondary" style={{ alignSelf: "flex-start" }} onClick={download}>
               <Icon name="download" size={16} /> Download inventory.json
             </button>
             <Callout>

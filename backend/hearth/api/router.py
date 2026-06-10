@@ -38,6 +38,23 @@ def build_api_router(deps: dict) -> APIRouter:
             return {"configured": False}
         return {"configured": True, "url": conn["url"], "options": conn["options"]}
 
+    @api.post("/ha/test")
+    async def ha_test(body: dict) -> dict:
+        """Staged wizard check; body {url, token}. Read-only, saves nothing."""
+        from ..adapters.ha_probe import probe
+        return await probe(body.get("url", ""), body.get("token", ""))
+
+    @api.post("/ha/inventory")
+    async def ha_inventory(body: dict) -> dict:
+        """Pre-save inventory scan: full metadata + heuristic suggestions count."""
+        from ..adapters.ha_probe import rest_inventory
+        inventory = await rest_inventory(body.get("url", ""), body.get("token", ""))
+        suggested = heuristic_bindings(inventory)
+        return {"count": len(inventory),
+                "bindable": len(suggested),
+                "domains": len({e["domain"] for e in inventory}),
+                "inventory": inventory}
+
     @api.post("/influx/inspect")
     def influx_inspect(body: dict) -> dict:
         """Staged wizard check; body {url, org, token}. Read-only, saves nothing."""
