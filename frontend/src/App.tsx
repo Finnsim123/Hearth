@@ -16,6 +16,7 @@ import Models from "./pages/Models";
 import Sensors from "./pages/Sensors";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
+import Login from "./components/Login";
 
 const tabs = [
   ["/", "Dashboard"],
@@ -48,16 +49,39 @@ const themeLabel: Record<ThemeMode, string> = {
   dark: "Theme: dark",
 };
 
+type AuthState = "loading" | "setup" | "login" | "ready";
+
 export default function App() {
   const [mode, setMode] = useState<ThemeMode>(getTheme());
+  const [auth, setAuth] = useState<AuthState>("loading");
   const navigate = useNavigate();
   const location = useLocation();
-  useEffect(() => {
-    fetch("/api/health").then((r) => r.json()).then((h) => {
-      if (h.needs_setup && location.pathname !== "/onboarding") navigate("/onboarding");
-    }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+  const checkAuth = async () => {
+    try {
+      const h = await fetch("/api/health").then((r) => r.json());
+      if (h.needs_setup) {
+        setAuth("setup");
+        if (location.pathname !== "/onboarding") navigate("/onboarding");
+        return;
+      }
+      const me = await fetch("/api/auth/me");
+      setAuth(me.ok ? "ready" : "login");
+    } catch { setAuth("login"); }
+  };
+  useEffect(() => { checkAuth(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, []);
+
+  if (auth === "loading") return null;
+  if (auth === "setup") {
+    // setup mode: wizard only — no nav, no other routes
+    return (
+      <main style={{ maxWidth: "var(--content-max)", margin: "0 auto", padding: 24 }}>
+        <Onboarding />
+      </main>
+    );
+  }
+  if (auth === "login") return <Login onSuccess={() => { setAuth("ready"); navigate("/"); }} />;
+
   return (
     <div>
       <nav
@@ -95,6 +119,13 @@ export default function App() {
           title="Cycle theme: system → light → dark"
         >
           {themeLabel[mode]}
+        </button>
+        <button
+          className="btn btn-ghost"
+          style={{ minHeight: 36, padding: "6px 10px" }}
+          onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); setAuth("login"); }}
+        >
+          Sign out
         </button>
       </nav>
       <main style={{ maxWidth: "var(--content-max)", margin: "0 auto", padding: 24 }}>

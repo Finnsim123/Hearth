@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from ..domain.onboarding.advisor import heuristic_bindings
 from ..domain.schemas import Activity, Binding, Person, Rule
@@ -13,6 +13,37 @@ from ..domain.schemas import Activity, Binding, Person, Rule
 def build_api_router(deps: dict) -> APIRouter:
     api = APIRouter()
     repo = deps["repo"]
+
+    # ── auth ────────────────────────────────────────────────────────────────
+    @api.post("/auth/login")
+    def login(body: dict, response: Response) -> dict:
+        user = repo.verify_login(body.get("email", ""), body.get("password", ""))
+        if user is None:
+            raise HTTPException(401, "Wrong email or password")
+        from .. import security
+        cookie, sha = security.mint_session()
+        repo.create_session(user.id, sha)
+        response.set_cookie("hearth_session", cookie, httponly=True,
+                            samesite="lax", max_age=30 * 86400)
+        return {"ok": True, "user": {"email": user.email, "name": user.display_name,
+                                     "role": user.role}}
+
+    @api.post("/auth/logout")
+    def logout(request: Request, response: Response) -> dict:
+        from .. import security
+        cookie = request.cookies.get("hearth_session")
+        if cookie:
+            import hashlib
+            repo.delete_session(hashlib.sha256(cookie.encode()).hexdigest())
+        response.delete_cookie("hearth_session")
+        return {"ok": True}
+
+    @api.get("/auth/me")
+    def me(request: Request) -> dict:
+        user = getattr(request.state, "user", None)
+        if user is None:
+            raise HTTPException(401, "Not signed in")
+        return {"email": user.email, "name": user.display_name, "role": user.role}
 
     @api.get("/health")
     def health() -> dict:
@@ -50,7 +81,7 @@ def build_api_router(deps: dict) -> APIRouter:
     }
 
     @api.post("/setup/complete")
-    async def setup_complete(body: dict) -> dict:
+    async def setup_complete(body: dict, response: Response) -> dict:
         """One-shot: create admin, save connections/household/taxonomy/bindings,
         mark fast-track, then restart to apply (docker restarts the container)."""
         import asyncio
@@ -124,6 +155,15 @@ def build_api_router(deps: dict) -> APIRouter:
         if influx.get("mode") == "external" and influx.get("sourceBucket"):
             repo.set_setting("fasttrack.pending",
                              {"source_bucket": influx["sourceBucket"]})
+
+        # sign the new admin in right away (session survives the restart)
+        from .. import security
+        user = repo.verify_login(acct["email"], acct["password"])
+        if user is not None:
+            cookie, sha = security.mint_session()
+            repo.create_session(user.id, sha)
+            response.set_cookie("hearth_session", cookie, httponly=True,
+                                samesite="lax", max_age=30 * 86400)
 
         # restart to (re)build adapters with the saved connections
         if os.getenv("HEARTH_NO_RESTART") != "1":

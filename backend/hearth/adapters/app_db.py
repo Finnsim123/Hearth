@@ -477,6 +477,42 @@ class AppDb:
             u.id = r.id
             return u
 
+    def create_session(self, user_id: int, token_sha256: str, days: int = 30) -> None:
+        from datetime import timedelta
+        with Session(self.engine) as s:
+            s.add(SessionRow(user_id=user_id, token_sha256=token_sha256,
+                             expires_at=_now() + timedelta(days=days)))
+            s.commit()
+
+    def session_user(self, token_sha256: str) -> User | None:
+        with Session(self.engine) as s:
+            r = s.scalars(select(SessionRow).where(
+                SessionRow.token_sha256 == token_sha256)).first()
+            if r is None:
+                return None
+            exp = r.expires_at
+            if exp is not None and exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp is not None and exp < _now():
+                s.delete(r)
+                s.commit()
+                return None
+            r.last_seen_at = _now()
+            u = s.get(UserRow, r.user_id)
+            s.commit()
+            if u is None or u.disabled:
+                return None
+            return User(id=u.id, email=u.email, display_name=u.display_name,
+                        role=u.role, person_id=u.person_id, disabled=u.disabled)
+
+    def delete_session(self, token_sha256: str) -> None:
+        with Session(self.engine) as s:
+            r = s.scalars(select(SessionRow).where(
+                SessionRow.token_sha256 == token_sha256)).first()
+            if r:
+                s.delete(r)
+                s.commit()
+
     def verify_login(self, email: str, password: str) -> User | None:
         with Session(self.engine) as s:
             r = s.scalars(select(UserRow).where(UserRow.email == email)).first()

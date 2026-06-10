@@ -52,6 +52,34 @@ def create_app() -> FastAPI:
     app.state.deps = deps
     app.include_router(build_api_router(deps), prefix="/api")
 
+    # ── auth middleware (docs/SECURITY.md) ──────────────────────────────────
+    # /api/* requires a session, except: health, login, the integration
+    # webhook (TODO: bearer scope check), and — ONLY while no users exist —
+    # the wizard's probe + setup endpoints. The SPA itself is public; it
+    # gates itself on /api/auth/me.
+    PUBLIC = {"/api/health", "/api/auth/login", "/api/feedback/action"}
+    SETUP_ONLY = {"/api/setup/complete", "/api/ha/test", "/api/ha/inventory",
+                  "/api/influx/inspect"}
+
+    @app.middleware("http")
+    async def _auth(request, call_next):
+        import hashlib
+
+        from fastapi.responses import JSONResponse
+        path = request.url.path
+        if not path.startswith("/api/") or path in PUBLIC:
+            return await call_next(request)
+        repo = deps["repo"]
+        if path in SETUP_ONLY and repo.user_count() == 0:
+            return await call_next(request)
+        cookie = request.cookies.get("hearth_session")
+        user = repo.session_user(
+            hashlib.sha256(cookie.encode()).hexdigest()) if cookie else None
+        if user is None:
+            return JSONResponse({"detail": "Not signed in"}, status_code=401)
+        request.state.user = user
+        return await call_next(request)
+
     import os
     from pathlib import Path
     static_dir = Path(os.getenv("HEARTH_STATIC_DIR", "/app/static"))
