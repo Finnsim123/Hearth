@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from "react";
 import { PRESET_HUES } from "../components/Avatar";
+import ProgressWait from "../components/ProgressWait";
 import { Icon } from "../icons";
 import {
   Callout, ChoiceCard, Field, FooterNav, Progress, StepShell, TestRow, type TestState,
@@ -88,14 +89,27 @@ export default function Wizard() {
     setApplying("failed");
   };
 
-  if (applying !== "idle") {
+  if (applying === "saving") {
+    return (
+      <ProgressWait
+        title="Applying your setup…"
+        sub="Saving everything and restarting Hearth — about fifteen seconds. Sensor mapping and model training continue in the background after that."
+        estimateS={15}
+        stages={[
+          [0, "Saving your account, connections and household…"],
+          [5, "Restarting Hearth with your settings…"],
+          [20, "Coming back up…"],
+          [45, "Taking longer than usual — first boot builds caches. Still going."],
+        ]}
+      />
+    );
+  }
+  if (applying === "failed") {
     return (
       <div style={{ padding: "120px 16px", maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
-        <h2>{applying === "saving" ? "Applying your setup…" : "That took too long"}</h2>
+        <h2>That took too long</h2>
         <p style={{ color: "var(--text-dim)", fontSize: 14.5 }}>
-          {applying === "saving"
-            ? "Saving your setup and restarting Hearth — about fifteen seconds. Sensor mapping and model training continue in the background after that."
-            : "Hearth didn't come back up. Check: docker compose logs hearth — your wizard answers are still here."}
+          Hearth didn't come back up. Check: docker compose logs hearth — your wizard answers are still here.
         </p>
       </div>
     );
