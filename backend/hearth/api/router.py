@@ -122,7 +122,7 @@ def build_api_router(deps: dict) -> APIRouter:
 
         if body.get("llmKey"):
             repo.set_connection("llm", "https://openrouter.ai/api/v1", body["llmKey"],
-                                {"model": "auto"})
+                                {"model": body.get("llmModel") or "openai/gpt-4o-mini"})
 
         def _slug(name: str) -> str:
             return _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "member"
@@ -159,7 +159,14 @@ def build_api_router(deps: dict) -> APIRouter:
             pass
         for m in body.get("members", []):
             ent = m.get("personEntity")
-            if ent:
+            if not ent:
+                continue
+            existing = next((b for b in repo.bindings() if b.entity_id == ent), None)
+            if existing is not None:
+                existing.role = Role.PERSON
+                existing.person_id = _slug(m["name"])
+                repo.save_binding(existing)
+            else:
                 try:
                     repo.save_binding(Binding(entity_id=ent, role=Role.PERSON,
                                               name=f"{_slug(m['name'])}_loc",
@@ -254,14 +261,12 @@ def build_api_router(deps: dict) -> APIRouter:
         """Prune seeded bindings the improved heuristics would no longer
         suggest: device_tracker noise + diagnostics blocklist. Person bindings
         for household members (person.*) are always kept."""
-        from ..domain.onboarding.advisor import _BLOCKLIST
+        from ..domain.onboarding.advisor import is_bindable
         removed = []
         for b in repo.bindings():
-            domain = b.entity_id.split(".")[0]
-            keep_person = domain == "person"
-            if keep_person:
+            if b.entity_id.split(".")[0] == "person":
                 continue
-            if domain == "device_tracker" or _BLOCKLIST.search(b.entity_id.lower()):
+            if not is_bindable(b.entity_id, b.role):
                 repo.delete_binding(b.id)
                 removed.append(b.entity_id)
         return {"removed": len(removed), "entities": removed}
@@ -286,6 +291,18 @@ def build_api_router(deps: dict) -> APIRouter:
         targets = [person] if person else [p.id for p in repo.persons() if p.enabled]
         return {"persons": {pid: tsdb.read_predictions(pid, start, end)
                             for pid in targets}}
+
+    @api.post("/fasttrack/rerun")
+    def fasttrack_rerun() -> dict:
+        """Re-run the import->features->train pipeline (e.g. after recipe or
+        binding changes). Takes effect on next container start."""
+        influx = repo.get_connection("influx") or {}
+        source = (influx.get("options") or {}).get("source_bucket")
+        if not source:
+            raise HTTPException(409, "No source bucket configured")
+        repo.set_setting("fasttrack.pending", {"source_bucket": source})
+        return {"ok": True, "note": "restart the container to start the rerun: "
+                                    "docker compose restart hearth"}
 
     # ── history import (wizard "import history" action) ───────────────────
     @api.post("/import/history")

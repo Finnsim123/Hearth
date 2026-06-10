@@ -49,3 +49,23 @@ def test_generated_rules_label_a_day_correctly():
     assert labels[hours == 20].iloc[0] == "movie"
     assert labels[hours == 8].iloc[0] == "home"
     assert labels.nunique() >= 4                   # trainable, not single-class
+
+
+def test_missing_person_data_is_not_away():
+    """Prototype lesson #7: no person data = UNKNOWN (-1), never 'away' (0).
+    The away rule (home_last == 0) must not fire on the sentinel."""
+    from hearth.domain.features.registry import recipe_for
+    from hearth.domain.schemas import Role
+    recipe = recipe_for(Role.PERSON)
+    assert recipe.absence_value == -1.0
+    assert recipe.ffill_limit_min >= 7 * 24 * 60       # fill across the lookback
+    rules = starter_rules(BINDINGS, ACTS)
+    idx = pd.date_range("2026-06-01 12:00", periods=2, freq="30min", tz="UTC")
+    feats = pd.DataFrame({"hour_of_day": [12.0, 12.5],
+                          "alice_loc_home_last": [-1.0, -1.0],   # sentinel
+                          "bed_a_occupied": [0.0, 0.0],
+                          "kitchen_mm_frac": [0.0, 0.0],
+                          "tv_playing": [0.0, 0.0],
+                          "couch_frac": [0.0, 0.0]}, index=idx)
+    labels = bootstrap_labels(rules, feats, "alice")
+    assert (labels != "away").all()

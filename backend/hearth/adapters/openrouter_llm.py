@@ -132,15 +132,22 @@ class OpenRouterAdvisor:
             if not isinstance(items, list):
                 continue
             valid_ids = {e["entity_id"] for e in inventory}
+            from ..domain.onboarding.advisor import is_bindable
             for it in items:
                 try:
                     role = Role(it["role"])
                     name = _slugify(it.get("name") or it["entity_id"].split(".")[-1])
+                    reason = str(it.get("reason", "")).strip()
+                    standard = is_bindable(it["entity_id"], role)
+                    appealed = (not standard and bool(reason)
+                                and is_bindable(it["entity_id"], role, override=True))
                     if (it["entity_id"] in valid_ids and _SLUG.match(name)
-                            and name not in seen):
+                            and name not in seen and (standard or appealed)):
                         seen.add(name)
+                        opts = {"llm_override": reason} if appealed else {}
                         out.append(Binding(entity_id=it["entity_id"], role=role,
-                                           name=name, room=it.get("room")))
+                                           name=name, room=it.get("room"),
+                                           options=opts))
                 except (KeyError, ValueError):
                     continue
         return out

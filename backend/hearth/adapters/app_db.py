@@ -467,9 +467,14 @@ class AppDb:
         with Session(self.engine) as s:
             return len(s.scalars(select(UserRow)).all())
 
+    @staticmethod
+    def _norm_email(email: str) -> str:
+        return email.strip().lower()
+
     def create_user(self, u: User, password: str) -> User:
         with Session(self.engine) as s:
-            r = UserRow(email=u.email, display_name=u.display_name, role=u.role,
+            r = UserRow(email=self._norm_email(u.email),
+                        display_name=u.display_name, role=u.role,
                         password_hash=security.hash_password(password),
                         person_id=u.person_id, disabled=u.disabled)
             s.add(r)
@@ -515,7 +520,8 @@ class AppDb:
 
     def verify_login(self, email: str, password: str) -> User | None:
         with Session(self.engine) as s:
-            r = s.scalars(select(UserRow).where(UserRow.email == email)).first()
+            r = s.scalars(select(UserRow).where(
+                UserRow.email == self._norm_email(email))).first()
             if r is None or r.disabled:
                 return None
             ok, new_hash = security.verify_password(password, r.password_hash)

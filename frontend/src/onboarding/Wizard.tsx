@@ -24,6 +24,7 @@ type WizardData = {
   mqtt: { use: "ha-broker" | "custom" | "skip"; host: string };
   members: Member[];
   llmKey: string;
+  llmModel: string;
   taxonomyPreset: "minimal" | "standard" | "custom";
 };
 
@@ -34,6 +35,7 @@ const empty: WizardData = {
   mqtt: { use: "ha-broker", host: "" },
   members: [{ name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:ember" }],
   llmKey: "",
+  llmModel: "openai/gpt-4o-mini",
   taxonomyPreset: "standard",
 };
 
@@ -464,6 +466,21 @@ function StepAiAssist({ d, set, next, back }: StepProps) {
           hint="Estimated one-time cost for a typical home: a few cents. Stored encrypted, removable in Settings, never needed again after first training.">
           <input type="password" placeholder="sk-or-…" value={d.llmKey} onChange={(e) => set("llmKey", e.target.value)} />
         </Field>
+        {d.llmKey && (
+          <Field label="Model"
+            hint="Smarter models map unusual entity names and write better rules — for a few cents more. Any OpenRouter model id works.">
+            <select value={d.llmModel} onChange={(e) => set("llmModel", e.target.value)}>
+              <option value="openai/gpt-4o-mini">gpt-4o-mini — fast and cheap (default)</option>
+              <option value="anthropic/claude-sonnet-4.6">claude-sonnet — strongest mapping</option>
+              <option value="openai/gpt-4o">gpt-4o — strong all-rounder</option>
+              <option value="google/gemini-2.5-flash">gemini-flash — cheap, large context</option>
+            </select>
+          </Field>
+        )}
+        {d.llmKey && (
+          <input placeholder="…or type any OpenRouter model id" value={d.llmModel}
+                 onChange={(e) => set("llmModel", e.target.value)} />
+        )}
         <Callout icon="lock">
           Privacy: the model receives entity names and aggregate stats from the inventory you just
           saw — never raw sensor history, and never anything after setup unless you ask. Once your

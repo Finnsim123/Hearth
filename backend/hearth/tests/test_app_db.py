@@ -50,3 +50,10 @@ def test_user_login_flow(db):
     assert db.user_count() == 1
     assert db.verify_login("a@b.c", "longpassword1").role == "admin"
     assert db.verify_login("a@b.c", "wrong") is None
+
+
+def test_email_normalized_both_ways(db):
+    db.create_user(User(email="  Alice@B.C ", display_name="A", role="admin"),
+                   "longpassword1")
+    assert db.verify_login("alice@b.c", "longpassword1") is not None
+    assert db.verify_login(" ALICE@B.C  ", "longpassword1") is not None

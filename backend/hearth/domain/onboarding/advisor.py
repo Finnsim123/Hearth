@@ -48,9 +48,58 @@ _BLOCKLIST = re.compile(
     r"_[1-5]d$|forecast|regenkans|zonkans|next_dawn|next_dusk|next_noon|"
     r"next_rising|next_setting|battery_plus|daily_energy|spanning|"
     r"print_progress|firmware|update_available|last_response|failed_pings|"
-    r"_slope$|_ema_|preset_|regulated_")
+    r"_slope$|_ema_|preset_|regulated_|"
+    r"\bhar_|strava|identify|identificeren|trigger_level|trigger_pressure|"
+    r"occupied_pressure|unoccupied_pressure|calibrate|opstartgedrag|"
+    r"power_on_level|power_on_behavior|niveau_bij_opstarten|wake_word|"
+    r"start_up_color|tts_volume|print_bed|nozzle|heatbreak|cooling_fan")
 _BLOCK_DEVICE_CLASSES = {"signal_strength", "timestamp", "update", "data_size",
                          "data_rate", "duration", "monetary"}
+
+
+# Physics whitelist: a role can only come from domains that actually carry
+# that kind of STATE. Buttons/scenes/scripts/updates/config-numbers configure
+# sensors — they aren't sensors. Applies to heuristics AND LLM proposals.
+ROLE_DOMAINS: dict[Role, set[str]] = {
+    Role.PRESENCE: {"binary_sensor", "sensor", "input_boolean"},
+    Role.BED: {"binary_sensor", "sensor", "input_boolean", "switch"},
+    Role.POWER: {"sensor", "switch"},
+    Role.LIGHT: {"light", "switch"},
+    Role.MEDIA: {"media_player"},
+    Role.ENV: {"sensor"},
+    Role.PERSON: {"person", "device_tracker"},  # explicit/override only — never auto
+    Role.FOCUS: {"binary_sensor", "switch", "input_boolean"},
+    Role.ALARM_TIME: {"input_datetime", "sensor", "input_boolean"},
+    Role.DOOR: {"binary_sensor", "lock", "cover", "input_boolean"},
+    Role.STEPS: {"sensor"},
+    Role.BATTERY: {"sensor"},
+    Role.CUSTOM: {"sensor", "binary_sensor", "input_boolean", "input_number",
+                  "switch", "light", "media_player"},
+}
+# Domains with NO state stream to window — commands, configs, one-shots.
+# This is physics, not taste, and it is never overridable.
+_NEVER_DOMAINS = {"button", "scene", "script", "update", "automation",
+                  "camera", "remote", "zone", "tts", "persistent_notification"}
+# Domains that DO carry state and may back any role via an explicit override
+# (LLM-with-reason or user choice in the Sensors page).
+_STATE_DOMAINS = {"sensor", "binary_sensor", "input_boolean", "input_number",
+                  "switch", "light", "media_player", "lock", "cover", "number",
+                  "select", "input_datetime", "person", "device_tracker",
+                  "alarm_control_panel", "input_select", "climate", "fan"}
+
+
+def is_bindable(entity_id: str, role: Role, override: bool = False) -> bool:
+    """The appealable gate: stateless domains and the diagnostics blocklist
+    are hard physics; the role↔domain map is the DEFAULT, overridable when an
+    author (LLM with a reason, or the user) explicitly insists."""
+    domain = entity_id.split(".")[0]
+    if domain in _NEVER_DOMAINS:
+        return False
+    if _BLOCKLIST.search(entity_id.lower()):
+        return False
+    if domain in ROLE_DOMAINS.get(role, set()):
+        return True
+    return override and domain in _STATE_DOMAINS
 
 
 def suggest_role(entity: dict) -> Role | None:
@@ -83,7 +132,7 @@ def heuristic_bindings(inventory: list[dict]) -> list[Binding]:
     seen_names: set[str] = set()
     for e in inventory:
         role = suggest_role(e)
-        if role is None:
+        if role is None or not is_bindable(e["entity_id"], role):
             continue
         name = _slugify(e["entity_id"])
         while name in seen_names:

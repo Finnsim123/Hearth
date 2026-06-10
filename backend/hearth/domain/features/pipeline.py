@@ -54,12 +54,26 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
                     grid: list[datetime], tz: str = "UTC") -> pd.DataFrame:
     """One row per window start: temporal features + per-binding recipe outputs
     (columns '{binding.name}_{suffix}'). Person-agnostic — caller filters
-    bindings to shared + this person's."""
+    bindings to shared + this person's.
+
+    Perf: for grids aligned to the 30-min boundary (training/fast-track), the
+    window slices are precomputed in ONE O(n) groupby pass instead of a boolean
+    mask per window (O(n x windows) — this was a multi-hour stage on 90-day
+    fast-tracks before)."""
     zone = ZoneInfo(tz)
+    aligned = all(g.minute % 30 == 0 and g.second == 0 for g in grid)
+    slices: dict[datetime, pd.DataFrame] = {}
+    if aligned and not prepared.empty:
+        for ws_ts, group in prepared.groupby(prepared.index.floor("30min")):
+            slices[ws_ts.to_pydatetime()] = group
     rows = []
+    empty_slice = prepared.iloc[0:0]
     for ws in grid:
         we = ws + WINDOW
-        sl = prepared.loc[(prepared.index >= ws) & (prepared.index < we)]
+        if aligned:
+            sl = slices.get(ws, empty_slice)
+        else:
+            sl = prepared.loc[(prepared.index >= ws) & (prepared.index < we)]
         local = ws.astimezone(zone)
         row: dict[str, float] = {
             "hour_of_day": float(local.hour),

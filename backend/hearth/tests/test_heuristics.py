@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hearth.domain.onboarding.advisor import heuristic_bindings, suggest_role
+from hearth.domain.onboarding.advisor import heuristic_bindings, is_bindable, suggest_role
 from hearth.domain.schemas import Role
 
 
@@ -47,3 +47,32 @@ def test_diagnostics_blocklisted():
     assert suggest_role(_e("sensor.plug_rssi", dc="signal_strength")) is None
     # real signals still bind
     assert suggest_role(_e("sensor.bedroom_temperature_temperatuur")) is not None
+
+
+def test_role_domain_physics():
+    from hearth.domain.schemas import Role
+    assert not is_bindable("button.bed_sensor_calibrate_left", Role.BED)
+    assert not is_bindable("scene.in_bed_both_home", Role.CUSTOM)
+    assert not is_bindable("script.open_the_door", Role.DOOR)
+    assert not is_bindable("number.bed_left_trigger_level", Role.BED)
+    assert not is_bindable("update.alarmo_update", Role.ALARM_TIME)
+    assert not is_bindable("sensor.har_prob_away", Role.ENV)          # old HAR outputs
+    assert not is_bindable("sensor.strava_unknown_run_power", Role.POWER)
+    assert not is_bindable("sensor.a1mini_print_bed_type", Role.BED)  # 3D printer!
+    assert is_bindable("binary_sensor.bed_sensor_bed_left_occupancy", Role.BED)
+    assert is_bindable("media_player.woonkamer", Role.MEDIA)
+    assert is_bindable("lock.door", Role.DOOR)
+
+
+def test_gate_is_appealable_but_physics_is_not():
+    from hearth.domain.schemas import Role
+    # input_boolean.in_bed helper: standard map now allows it for BED
+    assert is_bindable("input_boolean.in_bed", Role.BED)
+    # role-map mismatch: blocked by default, allowed with explicit override
+    assert not is_bindable("switch.weird_bed_relay", Role.ENV)
+    assert is_bindable("switch.weird_bed_relay", Role.ENV, override=True)
+    # stateless domains: never bindable, override or not
+    assert not is_bindable("scene.in_bed_both_home", Role.BED, override=True)
+    assert not is_bindable("button.calibrate", Role.BED, override=True)
+    # blocklist: never overridable either
+    assert not is_bindable("sensor.har_prob_away", Role.ENV, override=True)

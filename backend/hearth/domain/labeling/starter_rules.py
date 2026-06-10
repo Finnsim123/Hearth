@@ -83,6 +83,10 @@ def starter_rules(bindings: list[Binding], activities: list[Activity],
             conds = [{"feat": f"{m.name}_playing", "op": "==", "value": 1}]
             if presence:
                 conds.append({"feat": f"{presence[0].name}_frac", "op": ">", "value": 0.2})
+            else:
+                # no presence anchor: gate to evening so daytime music/podcasts
+                # don't bootstrap-label as movie
+                conds.append({"feat": "hour_of_day", "op": ">=", "value": 18})
             out.append(Rule(activity_slug="movie", person_id=person_id,
                             priority=40, predicate={"all": conds}))
 
