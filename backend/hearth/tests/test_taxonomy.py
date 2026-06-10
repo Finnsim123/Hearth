@@ -36,7 +36,9 @@ def test_fine_label_series_projects_one_subproblem():
     labels = pd.Series(["sleeping", "home", "cooking", "away", "eating"])
     fine = fine_label_series(labels, "home", pmap)
     # sleeping/away are not home's business; "home" = the unspecified class
-    assert fine.tolist() == [None, "home", "cooking", None, "eating"]
+    # (None vs NaN for missing differs across pandas versions — use isna)
+    assert fine.isna().tolist() == [True, False, False, True, False]
+    assert fine.dropna().tolist() == ["home", "cooking", "eating"]
 
 
 def test_ensure_hierarchy_backfills_known_slugs():
