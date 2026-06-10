@@ -17,6 +17,7 @@ import Sensors from "./pages/Sensors";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import Login from "./components/Login";
+import ProgressWait from "./components/ProgressWait";
 
 const tabs = [
   ["/", "Dashboard"],
