@@ -368,6 +368,43 @@ class AppDb:
                             predicted=r.predicted, confidence=r.confidence,
                             channel=r.channel, status=r.status, answer=r.answer)
 
+    def questions_since(self, person: str, since: datetime) -> int:
+        with Session(self.engine) as s:
+            rows = s.scalars(select(QuestionRow).where(
+                QuestionRow.person_id == person,
+                QuestionRow.created_at >= since)).all()
+            return len(rows)
+
+    def last_question(self, person: str) -> Question | None:
+        with Session(self.engine) as s:
+            r = s.scalars(select(QuestionRow).where(QuestionRow.person_id == person)
+                          .order_by(QuestionRow.created_at.desc())).first()
+            if r is None:
+                return None
+            return Question(id=r.id, person_id=r.person_id, window_ts=r.window_ts,
+                            predicted=r.predicted, confidence=r.confidence,
+                            alternatives=json.loads(r.alternatives_json),
+                            probabilities=json.loads(r.probabilities_json),
+                            channel=r.channel, status=r.status, answer=r.answer,
+                            created_at=r.created_at)
+
+    def skip_question(self, question_id: int) -> None:
+        with Session(self.engine) as s:
+            r = s.get(QuestionRow, question_id)
+            if r and r.status == "open":
+                r.status = "expired"
+                s.commit()
+
+    def expire_questions(self, older_than: datetime) -> int:
+        with Session(self.engine) as s:
+            rows = s.scalars(select(QuestionRow).where(
+                QuestionRow.status == "open",
+                QuestionRow.created_at < older_than)).all()
+            for r in rows:
+                r.status = "expired"
+            s.commit()
+            return len(rows)
+
     def save_model(self, m: ModelRecord) -> ModelRecord:
         with Session(self.engine) as s:
             r = ModelRow(person_id=m.person_id, version=m.version, algo=m.algo,

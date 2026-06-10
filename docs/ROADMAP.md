@@ -20,7 +20,17 @@ against a real HA + InfluxDB (run on the homelab; sandbox has neither).
 **Accept:** for a configured home, features for the last hour are queryable in
 Influx and visible in the UI within 5 min of events happening.
 
-## Phase 2 — Model + training (pillar 2)
+## Phase 2 — Model + training (pillar 2) — ✅ ML core implemented
+Done: provenance label merge, RF estimator (+SHAP normalization), honest
+evaluation (confirmed-vs-bootstrap accuracy, Wilson CIs, PSI drift), trainer +
+registry + CI-aware promotion gate + rollback, inference with BOOTSTRAP-RULES
+FALLBACK (rules-v0 → day-one ribbon), hysteresis smoothing, ε-greedy asking
+policy with budgets/quiet-hours/cooldowns, dynamic question phrasing, weekly
+training cron + 5-min inference job, models/activities/rules API. 43 tests.
+Remaining: HA integration entity platforms (HA-side code), Models UI page,
+MQTT publisher, live validation on a real home.
+
+### original scope (for reference)
 Taxonomy + rule engine (bootstrap labels); trainer + registry + promotion gate;
 metrics report incl. confirmed/bootstrap split, CIs, SHAP; Models page complete;
 inference job writes predictions; **HA integration v1** (config flow host+token,
@@ -31,7 +41,15 @@ upgrading the heuristic suggesters in the wizard.
 predictions show up as `sensor.hearth_<person>_activity` in HA via the
 integration.
 
-## Phase 3 — Feedback loop (pillar 3)
+## Phase 3 — Feedback loop (pillar 3) — ✅ implemented
+Done (partly during the notification work): questions service + ε-greedy
+asking policy (budgets, quiet hours, cooldowns), dynamic phrasing, integration-
+handled action capture (zero YAML), Inbox page (one-tap answers, skip, bulk
+labeler), dashboard ribbon tap-to-correct (source=ribbon), label overlay into
+training, weekly retrain + question expiry jobs. 49 tests.
+Remaining: drift panel UI (Models page), live shakedown.
+
+### original scope (for reference)
 Questions service + asking policy (ε-greedy, budgets, cooldowns); HA blueprint
 webhook for notification actions; Inbox + bulk labeler; labels overlay training;
 weekly retrain schedule; drift panel.

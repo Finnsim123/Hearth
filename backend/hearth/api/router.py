@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 
 from ..domain.onboarding.advisor import heuristic_bindings
-from ..domain.schemas import Binding, Person
+from ..domain.schemas import Activity, Binding, Person, Rule
 
 
 def build_api_router(deps: dict) -> APIRouter:
@@ -95,6 +95,79 @@ def build_api_router(deps: dict) -> APIRouter:
         results = import_history(tsdb, body["source_bucket"], repo.bindings(),
                                  end - timedelta(days=days), end)
         return {"imported": results}
+
+    # ── activities & rules (taxonomy) ──────────────────────────────────────
+    @api.get("/activities")
+    def activities() -> list[Activity]:
+        return repo.activities()
+
+    @api.post("/activities")
+    def save_activity(a: Activity) -> Activity:
+        return repo.save_activity(a)
+
+    @api.get("/rules")
+    def rules() -> list[Rule]:
+        return repo.rules()
+
+    @api.post("/rules")
+    def save_rule(r: Rule) -> Rule:
+        return repo.save_rule(r)
+
+    # ── models (registry + actions) ────────────────────────────────────────
+    @api.get("/models")
+    def models(person: str | None = None) -> list:
+        return repo.models(person)
+
+    @api.post("/models/train")
+    def train_now(body: dict) -> dict:
+        tsdb = deps.get("tsdb")
+        if tsdb is None:
+            raise HTTPException(409, "Connect InfluxDB first")
+        from ..domain.training.trainer import train_person
+        record = train_person(body["person_id"], tsdb, repo, deps["models"],
+                              weeks=int(body.get("weeks", 8)),
+                              force=bool(body.get("force", False)))
+        if record is None:
+            return {"trained": False, "reason": "not enough data or one class only"}
+        return {"trained": True, "version": record.version,
+                "promoted": record.promoted, "metrics": record.metrics}
+
+    @api.post("/models/{model_id}/promote")
+    def promote(model_id: int) -> dict:
+        repo.promote_model(model_id)
+        return {"ok": True}
+
+    @api.post("/models/rollback")
+    def rollback_ep(body: dict) -> dict:
+        from ..domain.training.trainer import rollback
+        record = rollback(body["person_id"], repo)
+        if record is None:
+            raise HTTPException(409, "nothing to roll back to")
+        return {"ok": True, "version": record.version}
+
+    # ── labels: bulk range + question skip ────────────────────────────────
+    @api.post("/labels/bulk")
+    def labels_bulk(body: dict) -> dict:
+        """body: {person_id, start, end (ISO), activity}"""
+        tsdb = deps.get("tsdb")
+        if tsdb is None:
+            raise HTTPException(409, "Connect InfluxDB first")
+        from datetime import datetime
+        from ..domain.labeling.bulk import bulk_label_events
+        events = bulk_label_events(
+            body["person_id"],
+            datetime.fromisoformat(body["start"]),
+            datetime.fromisoformat(body["end"]),
+            body["activity"],
+            source=body.get("source", "bulk"))
+        for ev in events:
+            tsdb.write_label(ev)
+        return {"labeled_windows": len(events)}
+
+    @api.post("/inbox/{question_id}/skip")
+    def skip(question_id: int) -> dict:
+        repo.skip_question(question_id)
+        return {"ok": True}
 
     # ── feedback: notification action taps, forwarded by the HA integration ─
     @api.post("/feedback/action")

@@ -1,22 +1,36 @@
-"""Provenance-aware label merge.
+"""Provenance-aware label merge — trust order decides, latest wins per tier.
 
-Training labels = bootstrap (rules) overlaid by discovered (named clusters)
-overlaid by confirmed (humans). Identity key: (person, window_ts, window).
-Also resolves stage-1 label + stage-2 sub-activity into the leaf slug when a
-sub-activity exists (the prototype lost stage-2 answers entirely — lesson #x:
-read both fields, prefer the leaf).
+bootstrap (rules) < llm (weak annotator) < discovered (named cluster)
+< confirmed (human). Identity key: window start floored to the 30-min grid.
+Also resolves stage-2 sub-activity into the leaf label when present.
 """
 from __future__ import annotations
 
 import pandas as pd
 
-from ..schemas import LabelEvent
+from ..schemas import LabelEvent, Provenance
+
+_TRUST = {Provenance.BOOTSTRAP: 0, Provenance.LLM: 1,
+          Provenance.DISCOVERED: 2, Provenance.CONFIRMED: 3}
 
 
 def merge_labels(
     bootstrap: pd.Series,
     events: list[LabelEvent],
 ) -> tuple[pd.Series, pd.Series]:
-    """Returns (labels, provenance) series aligned to the feature index.
-    Confirmed > discovered > bootstrap; within a provenance, latest wins."""
-    raise NotImplementedError
+    """Returns (labels, provenance) aligned to bootstrap.index (UTC windows)."""
+    labels = bootstrap.copy()
+    provenance = pd.Series(Provenance.BOOTSTRAP.value, index=bootstrap.index, dtype=object)
+    floored = bootstrap.index.floor("30min")
+    by_window: dict[pd.Timestamp, LabelEvent] = {}
+    for ev in events:
+        key = pd.Timestamp(ev.window_ts).tz_convert("UTC").floor("30min")
+        cur = by_window.get(key)
+        if cur is None or _TRUST[ev.provenance] >= _TRUST[cur.provenance]:
+            by_window[key] = ev
+    for key, ev in by_window.items():
+        mask = floored == key
+        if mask.any():
+            labels[mask] = ev.activity or ev.label  # leaf slug wins when present
+            provenance[mask] = ev.provenance.value
+    return labels, provenance

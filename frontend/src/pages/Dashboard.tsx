@@ -3,7 +3,8 @@
  *   cold start: "Hearth is learning your home" journey card + milestones
  *   steady:     avatar hero cards · today ribbon · needs-you · trust · pulse
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import Avatar from "../components/Avatar";
 import { Icon, type IconName } from "../icons";
 
@@ -49,17 +50,50 @@ function Conf({ v }: { v: number }) {
   );
 }
 
-function Ribbon({ preds, ruleBased }: { preds: Pred[]; ruleBased: boolean }) {
+const CORRECTION_SLUGS = ["sleeping", "away", "home", "cooking", "eating", "movie", "working"];
+
+function Ribbon({ preds, ruleBased, personId }: { preds: Pred[]; ruleBased: boolean; personId: string }) {
+  const qc = useQueryClient();
+  const [selected, setSelected] = useState<Pred | null>(null);
   if (!preds.length) return null;
   const ordered = [...preds].reverse();
+  const correct = async (slug: string) => {
+    if (!selected) return;
+    const start = new Date(selected.time);
+    const end = new Date(start.getTime() + 30 * 60_000);
+    await fetch("/api/labels/bulk", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ person_id: personId, activity: slug, source: "ribbon",
+                             start: start.toISOString(), end: end.toISOString() }) });
+    setSelected(null);
+    qc.invalidateQueries({ queryKey: ["predictions"] });
+  };
   return (
     <div>
       <div style={{ display: "flex", gap: 1, height: 16, borderRadius: 4, overflow: "hidden" }}>
         {ordered.map((p, i) => (
-          <span key={i} title={`${t(p.time)} · ${p.smoothed} (${Math.round(p.confidence * 100)}%) — tap to correct`}
-                style={{ flex: 1, background: color(p.smoothed), opacity: 0.35 + 0.65 * p.confidence, cursor: "pointer" }} />
+          <span key={i} role="button"
+                title={`${t(p.time)} · ${p.smoothed} (${Math.round(p.confidence * 100)}%) — tap to correct`}
+                onClick={() => setSelected(selected?.time === p.time ? null : p)}
+                style={{ flex: 1, background: color(p.smoothed), cursor: "pointer",
+                         opacity: 0.35 + 0.65 * p.confidence,
+                         outline: selected?.time === p.time ? "2px solid var(--accent)" : "none" }} />
         ))}
       </div>
+      {selected && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+          <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+            {t(selected.time)} was actually:
+          </span>
+          {CORRECTION_SLUGS.map((slug) => (
+            <button key={slug} className="btn btn-secondary"
+                    style={{ minHeight: 30, padding: "4px 10px", fontSize: 12.5 }}
+                    onClick={() => correct(slug)}>
+              {slug.replace("_", " ")}
+            </button>
+          ))}
+        </div>
+      )}
       {ruleBased && (
         <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-dim)" }}>
           <Icon name="info" size={12} /> rule-based until the first model is trained
@@ -94,7 +128,7 @@ function PersonCard({ person, preds }: { person: Person; preds: Pred[] }) {
           <span style={{ fontSize: 13, color: "var(--text-dim)" }}>no predictions yet</span>
         </div>
       )}
-      <Ribbon preds={preds} ruleBased={!!ruleBased} />
+      <Ribbon preds={preds} ruleBased={!!ruleBased} personId={person.id} />
     </div>
   );
 }

@@ -1,33 +1,76 @@
-"""Asking policy — decides when a prediction becomes a question.
+"""Asking policy — ε-greedy uncertainty sampling with budgets and manners.
 
-ε-greedy uncertainty sampling (lesson #4 from the prototype: uncertainty-only
-never corrects confident mistakes):
-
-    ask if confidence < threshold            (uncertainty)
-    OR with probability ε on any window      (exploration, default 0.07)
-
-subject to: per-person daily budget, cooldown, same-label repeat suppression,
-quiet hours, person.has_device (kids: inbox-only, never notified), and the
-person's HA-exposed opt-out switch.
+ask if confidence < threshold (uncertainty) OR with probability ε (exploration
+— without it, confidently-wrong predictions are never corrected). Subject to:
+daily budget, cooldown, same-label repeat suppression, quiet hours,
+person.has_device. Questions always land in the Inbox; the notification is
+just the push channel.
 """
 from __future__ import annotations
 
-from ..ports import AppRepo, Notifier
+import logging
+import random
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
 from ..schemas import Person, Prediction, Question
 
+log = logging.getLogger(__name__)
 
-def maybe_ask(
-    pred: Prediction,
-    person: Person,
-    repo: AppRepo,
-    notifier: Notifier,
-) -> Question | None:
-    """Create a Question (inbox always; notification if eligible). Returns it,
-    or None if suppressed. Suppression reasons are logged for the UI."""
-    raise NotImplementedError
+ASK_THRESHOLD = 0.75
+EPSILON = 0.07
+COOLDOWN_MIN = 30
+REPEAT_MIN = 90
 
 
-def expire_stale_questions(repo: AppRepo, max_age_hours: int = 12) -> int:
-    """Open questions older than max_age expire (answers to ancient windows
-    are noise). Returns count expired."""
-    raise NotImplementedError
+def _in_quiet_hours(person: Person, now: datetime, tz: str) -> bool:
+    h = now.astimezone(ZoneInfo(tz)).hour
+    start, end = person.quiet_hours
+    return (start <= h or h < end) if start > end else (start <= h < end)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+async def maybe_ask(pred: Prediction, person: Person, repo, notifier) -> Question | None:
+    now = _utcnow()
+    tz = repo.get_setting("timezone", "UTC") or "UTC"
+
+    uncertain = pred.confidence < ASK_THRESHOLD
+    explore = random.random() < EPSILON
+    if not (uncertain or explore):
+        return None
+    if _in_quiet_hours(person, now, tz):
+        return None
+    today = repo.questions_since(person.id, now - timedelta(days=1))
+    if today >= person.ask_budget_per_day:
+        return None
+    last = repo.last_question(person.id)
+    if last and last.created_at:
+        last_at = last.created_at if last.created_at.tzinfo else last.created_at.replace(tzinfo=timezone.utc)
+        age_min = (now - last_at).total_seconds() / 60
+        if age_min < COOLDOWN_MIN:
+            return None
+        if last.predicted == pred.predicted and age_min < REPEAT_MIN:
+            return None
+
+    ranked = sorted(pred.probabilities.items(), key=lambda kv: -kv[1])
+    alternatives = [s for s, _ in ranked[:3]] or [pred.predicted]
+    q = Question(person_id=person.id, window_ts=pred.window_ts,
+                 predicted=pred.predicted, confidence=pred.confidence,
+                 alternatives=alternatives, probabilities=pred.probabilities,
+                 channel="notification" if person.has_device else "inbox")
+    q = repo.save_question(q)
+    if person.has_device and notifier is not None:
+        try:
+            await notifier.ask(q, person)
+        except Exception:
+            log.exception("notification ask failed (question stays in inbox)")
+    log.info("asked %s about %s (%.0f%%, %s)", person.id, pred.predicted,
+             pred.confidence * 100, "explore" if not uncertain else "uncertain")
+    return q
+
+
+def expire_stale_questions(repo, max_age_hours: int = 12) -> int:
+    return repo.expire_questions(datetime.now(timezone.utc) - timedelta(hours=max_age_hours))
