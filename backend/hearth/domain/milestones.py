@@ -35,7 +35,8 @@ async def check_milestones(repo, tsdb, notifier) -> None:
     async def fire(key: str) -> None:
         title, message = _MESSAGES[key]
         for person in repo.persons():
-            await notifier.notify(person, title, message)
+            if person.notify_system:        # system channel is opt-in per member
+                await notifier.notify(person, title, message)
         repo.set_setting(f"milestone.{key}", now.isoformat())
         log.info("milestone fired: %s", key)
 

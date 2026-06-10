@@ -62,6 +62,7 @@ class PersonRow(Base):
     ha_person_entity: Mapped[str | None] = mapped_column(String, nullable=True)
     notify_service: Mapped[str | None] = mapped_column(String, nullable=True)
     has_device: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_system: Mapped[bool] = mapped_column(Boolean, default=False)
     ask_budget_per_day: Mapped[int] = mapped_column(Integer, default=8)
     quiet_hours: Mapped[str] = mapped_column(String, default="22,8")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -222,6 +223,7 @@ class AppDb:
                 out.append(Person(id=r.id, name=r.name, avatar=r.avatar,
                                   ha_person_entity=r.ha_person_entity,
                                   notify_service=r.notify_service, has_device=r.has_device,
+                                  notify_system=r.notify_system,
                                   ask_budget_per_day=r.ask_budget_per_day,
                                   quiet_hours=qh, enabled=r.enabled))
             return out
@@ -233,6 +235,7 @@ class AppDb:
             r.name, r.ha_person_entity, r.notify_service = p.name, p.ha_person_entity, p.notify_service
             r.avatar = p.avatar
             r.has_device, r.ask_budget_per_day, r.enabled = p.has_device, p.ask_budget_per_day, p.enabled
+            r.notify_system = p.notify_system
             r.quiet_hours = f"{p.quiet_hours[0]},{p.quiet_hours[1]}"
             s.commit()
             return p

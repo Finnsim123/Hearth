@@ -15,7 +15,7 @@ import {
 const TOTAL = 10;
 const STORE = "hearth.onboarding";
 
-type Member = { name: string; personEntity: string; hasDevice: boolean; notifyService: string; avatar: string };
+type Member = { name: string; personEntity: string; hasDevice: boolean; notifyService: string; avatar: string; notifySystem: boolean; askBudget: number };
 
 type WizardData = {
   account: { name: string; email: string; password: string; confirm: string };
@@ -33,7 +33,7 @@ const empty: WizardData = {
   ha: { url: "http://homeassistant.local:8123", token: "" },
   influx: { mode: null, url: "", org: "", token: "", sourceBucket: "", importHistory: true },
   mqtt: { use: "ha-broker", host: "" },
-  members: [{ name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:ember" }],
+  members: [{ name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:ember", notifySystem: true, askBudget: 8 }],
   llmKey: "",
   llmModel: "openai/gpt-4o-mini",
   taxonomyPreset: "standard",
@@ -376,6 +376,22 @@ function StepHousehold({ d, set, next, back }: StepProps) {
                 <input placeholder="mobile_app_alexs_iphone" value={m.notifyService} onChange={(e) => upd(idx, { notifyService: e.target.value })} />
               </Field>
             )}
+            {m.hasDevice && (
+              <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+                  <input type="checkbox" checked={m.notifySystem}
+                         onChange={(e) => upd(idx, { notifySystem: e.target.checked })}
+                         style={{ width: 16, height: 16 }} />
+                  System updates (model trained, issues)
+                </label>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+                  Max questions/day
+                  <input type="number" min={0} max={20} value={m.askBudget}
+                         onChange={(e) => upd(idx, { askBudget: Number(e.target.value) })}
+                         style={{ width: 64 }} />
+                </label>
+              </div>
+            )}
             {ms.length > 1 && (
               <button className="btn btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => set("members", ms.filter((_, j) => j !== idx))}>
                 Remove
@@ -384,12 +400,14 @@ function StepHousehold({ d, set, next, back }: StepProps) {
           </div>
         ))}
         <button className="btn btn-secondary" style={{ alignSelf: "flex-start" }}
-          onClick={() => set("members", [...ms, { name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:indigo" }])}>
+          onClick={() => set("members", [...ms, { name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:indigo", notifySystem: false, askBudget: 5 }])}>
           + Add another person
         </button>
         <Callout icon="household">
-          Kids without a phone? Add them with the phone box unchecked — Hearth still predicts their
-          activity, it just never sends them questions. Someone else answers for them in the Inbox.
+          Two notification channels, per person: training questions (capped by max/day — set it
+          low for anyone who wants minimal pings) and system updates (model trained, problems) —
+          usually only whoever runs the homelab wants those. Kids without a phone get neither;
+          someone else answers for them in the Inbox.
         </Callout>
       </StepShell>
       <FooterNav onBack={back} onNext={next} nextDisabled={!ms.every((m) => m.name.trim())} />

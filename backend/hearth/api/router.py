@@ -134,7 +134,9 @@ def build_api_router(deps: dict) -> APIRouter:
                                     avatar=m.get("avatar"),
                                     ha_person_entity=m.get("personEntity") or None,
                                     notify_service=m.get("notifyService") or None,
-                                    has_device=bool(m.get("hasDevice", True))))
+                                    has_device=bool(m.get("hasDevice", True)),
+                                    notify_system=bool(m.get("notifySystem", False)),
+                                    ask_budget_per_day=int(m.get("askBudget", 8))))
 
         for slug, name, phrase in TAXONOMY_PRESETS.get(body.get("taxonomyPreset", "standard"), []):
             repo.save_activity(Activity(slug=slug, name=name, phrase=phrase))

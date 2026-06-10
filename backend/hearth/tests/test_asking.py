@@ -85,3 +85,33 @@ async def test_no_device_lands_in_inbox_only(monkeypatch):
     q = await active.maybe_ask(_pred(0.4), kid, repo, notifier)
     assert q is not None and q.channel == "inbox"
     assert notifier.asked == []                                 # never notified
+
+
+@pytest.mark.asyncio
+async def test_milestones_respect_system_channel():
+    from hearth.domain.milestones import check_milestones
+    sent = []
+
+    class Repo:
+        def __init__(self):
+            self.settings = {}
+        def persons(self):
+            return [Person(id="admin", name="Admin", notify_service="m_a",
+                           notify_system=True),
+                    Person(id="quiet", name="Quiet", notify_service="m_q",
+                           notify_system=False)]
+        def get_setting(self, k, d=None): return self.settings.get(k, d)
+        def set_setting(self, k, v): self.settings[k] = v
+        def clusters(self, status=None): return []
+        def models(self, person=None): return []
+
+    class Tsdb:
+        def count_raw_events(self, hours=2): return 999
+        def read_predictions(self, *a): return []
+
+    class Notifier:
+        async def notify(self, person, title, message, data=None):
+            sent.append(person.id); return True
+
+    await check_milestones(Repo(), Tsdb(), Notifier())
+    assert sent == ["admin"]          # quiet member never pinged

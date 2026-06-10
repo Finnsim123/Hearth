@@ -27,9 +27,11 @@ def test_binding_crud(db):
 
 
 def test_person_quiet_hours_roundtrip(db):
-    db.save_person(Person(id="kid", name="Kid", has_device=False, quiet_hours=(21, 7)))
+    db.save_person(Person(id="kid", name="Kid", has_device=False, quiet_hours=(21, 7),
+                          notify_system=True, ask_budget_per_day=3))
     p = db.persons()[0]
     assert p.has_device is False and p.quiet_hours == (21, 7)
+    assert p.notify_system is True and p.ask_budget_per_day == 3
 
 
 def test_connection_token_encrypted_at_rest(db, tmp_path):

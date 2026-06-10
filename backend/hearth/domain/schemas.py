@@ -58,6 +58,8 @@ class Person(BaseModel):
     ha_person_entity: str | None = None
     notify_service: str | None = None  # e.g. "mobile_app_alice_phone"
     has_device: bool = True
+    notify_system: bool = False  # milestones + ops alerts (admin-types opt in;
+                                 # others get ONLY training questions)
     ask_budget_per_day: int = 8
     quiet_hours: tuple[int, int] = (22, 8)
     enabled: bool = True
