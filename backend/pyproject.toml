@@ -23,6 +23,7 @@ dependencies = [
     "paho-mqtt>=2.1",
     "cryptography>=43.0",     # token encryption at rest (Fernet via security.py)
     "argon2-cffi>=23.1",      # password hashing (security.py only)
+    "zeroconf>=0.132",        # mDNS announce for HA auto-discovery
 ]
 
 [project.optional-dependencies]

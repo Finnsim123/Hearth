@@ -64,9 +64,15 @@ passwords are never persisted.
 8. **Activities** — starter taxonomy presets (minimal: sleeping/away/home;
    standard: +cooking/eating/movie/working; custom), or the LLM's inventory-
    tailored proposal — fully editable later.
-9. **Connect output to HA** — generates an integration API token and shows
-   copy-paste instructions: install the Hearth integration (HACS) → enter
-   host + token → entities appear. MQTT shown as the alternative.
+9. **Connect output to HA** — one-click, in the user's own HA: buttons
+   deep-link via `{ha_url}/_my_redirect/hacs_repository?...` (opens HACS's
+   add-repo dialog) and `/_my_redirect/config_flow_start?domain=hearth`
+   (opens the add-integration flow) — same endpoints the my.home-assistant.io
+   buttons use, but pointed at the HA URL from step 2. Because the backend
+   announces `_hearth._tcp.local.` over mDNS, the config flow arrives with
+   the host pre-filled; the user only pastes the token generated here (shown
+   once). Manual fallback instructions in a callout; MQTT remains the
+   alternative channel.
 10. **Done** — ingest starts; card explains what happens over the next days
    (record → patterns appear → name them → first training).
 

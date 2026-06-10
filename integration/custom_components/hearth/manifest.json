@@ -8,5 +8,6 @@
   "integration_type": "hub",
   "iot_class": "local_push",
   "requirements": [],
-  "version": "0.0.1"
+  "version": "0.0.1",
+  "zeroconf": ["_hearth._tcp.local."]
 }

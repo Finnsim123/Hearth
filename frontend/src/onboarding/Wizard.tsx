@@ -69,7 +69,7 @@ export default function Wizard() {
       {step === 6 && <StepInventory next={next} back={back} />}
       {step === 7 && <StepAiAssist d={data} set={set} next={next} back={back} />}
       {step === 8 && <StepActivities d={data} set={set} next={next} back={back} />}
-      {step === 9 && <StepOutput next={next} back={back} />}
+      {step === 9 && <StepOutput d={data} set={set} next={next} back={back} />}
       {step === 10 && <StepDone />}
     </div>
   );
@@ -348,17 +348,40 @@ function StepActivities({ d, set, next, back }: StepProps) {
   );
 }
 
-function StepOutput({ next, back }: { next: () => void; back: () => void }) {
+function StepOutput({ d, next, back }: StepProps) {
   const [token, setToken] = useState<string | null>(null);
+  // Deep links into the USER'S OWN HA instance (URL from step 2) using the
+  // same /_my_redirect/ endpoints the my.home-assistant.io buttons resolve to.
+  const ha = d.ha.url.replace(/\/+$/, "");
+  const HEARTH_REPO = { owner: "your-org", repository: "hearth" }; // TODO: real repo
+  const hacsLink = `${ha}/_my_redirect/hacs_repository?owner=${HEARTH_REPO.owner}&repository=${HEARTH_REPO.repository}&category=integration`;
+  const flowLink = `${ha}/_my_redirect/config_flow_start?domain=hearth`;
   return (
     <>
       <StepShell step={9} total={TOTAL} title="Send predictions back to Home Assistant"
-        explainer="Install the Hearth integration in HA and it creates one device per person — sensors you can build automations on, like dimming the lights when a movie starts.">
-        <ol style={{ margin: 0, paddingLeft: 20, color: "var(--text-dim)", fontSize: 14.5, lineHeight: 2 }}>
-          <li>In HA, add this repo to HACS and install “Hearth”.</li>
-          <li>Settings → Devices &amp; services → Add integration → Hearth.</li>
-          <li>Enter this Hearth's address and the token below.</li>
-        </ol>
+        explainer="Install the Hearth integration in HA and it creates one device per person — sensors you can build automations on, like dimming the lights when a movie starts. The buttons below open the right screens directly in YOUR Home Assistant.">
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <span className="label" style={{ minWidth: 14 }}>1</span>
+            <a className="btn btn-secondary" href={hacsLink} target="_blank" rel="noreferrer"
+               style={{ display: "inline-flex", gap: 8, alignItems: "center", textDecoration: "none" }}>
+              <Icon name="download" size={16} /> Add Hearth repo to HACS <Icon name="external" size={14} />
+            </a>
+            <span style={{ fontSize: 13, color: "var(--text-dim)" }}>opens in your HA, confirm + install, restart HA</span>
+          </div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <span className="label" style={{ minWidth: 14 }}>2</span>
+            <a className="btn btn-secondary" href={flowLink} target="_blank" rel="noreferrer"
+               style={{ display: "inline-flex", gap: 8, alignItems: "center", textDecoration: "none" }}>
+              <Icon name="plus" size={16} /> Add the Hearth integration <Icon name="external" size={14} />
+            </a>
+            <span style={{ fontSize: 13, color: "var(--text-dim)" }}>host is pre-filled — Hearth announces itself on your network</span>
+          </div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <span className="label" style={{ minWidth: 14 }}>3</span>
+            <span style={{ fontSize: 14, color: "var(--text-dim)" }}>Paste the token below when HA asks for it.</span>
+          </div>
+        </div>
         {token ? (
           <>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -376,6 +399,11 @@ function StepOutput({ next, back }: { next: () => void; back: () => void }) {
             <Icon name="key" size={16} /> Generate integration token
           </button>
         )}
+        <Callout>
+          No HACS, or buttons not opening? Manual path: HACS → custom repositories → add this
+          repo as “Integration”, then Settings → Devices &amp; services → Add integration → Hearth,
+          and enter {`${window.location.origin}`} plus the token.
+        </Callout>
       </StepShell>
       <FooterNav onBack={back} onNext={next} nextLabel="Finish setup"
         skip={{ label: "I'll do this later", onSkip: next }} />

@@ -226,7 +226,11 @@ binary_sensor.hearth_online            stack liveness
 ```
 
 The integration subscribes to Hearth's WebSocket (`/ws`) for push updates —
-no polling, sub-second entity updates, all local. Automations consume
+no polling, sub-second entity updates, all local. Install is one-click from
+the wizard: deep links into the user's own HA via `/_my_redirect/…` (the
+endpoints behind my.home-assistant.io buttons), and the backend announces
+`_hearth._tcp.local.` over mDNS so HA's config flow discovers Hearth and
+pre-fills the host — the token is the only thing typed. Automations consume
 predictions natively: `trigger: state of sensor.hearth_alice_activity to
 'movie' → dim lights`.
 
