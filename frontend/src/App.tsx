@@ -49,6 +49,48 @@ const themeLabel: Record<ThemeMode, string> = {
   dark: "Theme: dark",
 };
 
+/** Full-screen update progress. The real duration depends on the host (git
+ *  pull + docker build), so the bar eases toward an ~2 min estimate and never
+ *  pretends to be done — App reloads the page the moment the new build is up. */
+const UPDATE_ESTIMATE_S = 120;
+
+function UpdatingScreen() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  // asymptotic fill: hits ~63% at the estimate, ~86% at 2× — never 100
+  const pct = Math.min(97, (1 - Math.exp(-elapsed / UPDATE_ESTIMATE_S)) * 100);
+  const stage =
+    elapsed < 15 ? "Asking the host to pull the latest version…"
+    : elapsed < 75 ? "Pulling and rebuilding the container…"
+    : elapsed < 150 ? "Rebuilding — almost there…"
+    : "Taking longer than usual — bigger updates rebuild more layers. Still going.";
+  const mm = String(Math.floor(elapsed / 60));
+  const ss = String(elapsed % 60).padStart(2, "0");
+  return (
+    <div style={{ padding: "120px 16px", maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
+      <h2>Updating Hearth…</h2>
+      <p style={{ color: "var(--text-dim)", fontSize: 14.5 }}>
+        This page reloads automatically when the new version is up — usually about two minutes.
+      </p>
+      <div aria-label="update progress" style={{
+        height: 6, borderRadius: 3, background: "var(--surface-2)",
+        margin: "28px 0 10px", overflow: "hidden",
+      }}>
+        <div style={{
+          height: "100%", width: `${pct}%`, borderRadius: 3,
+          background: "var(--accent)", transition: "width 1s linear",
+        }} />
+      </div>
+      <p style={{ color: "var(--text-dim)", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+        {mm}:{ss} elapsed · {stage}
+      </p>
+    </div>
+  );
+}
+
 type AuthState = "loading" | "setup" | "login" | "ready";
 type UpdateInfo = { build: string; behind: number; latest_subject?: string; pending?: boolean };
 
@@ -100,17 +142,7 @@ export default function App() {
     }, 5000);
   };
 
-  if (updating) {
-    return (
-      <div style={{ padding: "120px 16px", maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
-        <h2>Updating Hearth…</h2>
-        <p style={{ color: "var(--text-dim)", fontSize: 14.5 }}>
-          The host is pulling the latest version and rebuilding — about two minutes.
-          This page reloads automatically when the new version is up.
-        </p>
-      </div>
-    );
-  }
+  if (updating) return <UpdatingScreen />;
 
   if (auth === "loading") return null;
   if (auth === "setup") {
