@@ -192,3 +192,32 @@ media/door/own-phone), 2 behavioral (power/light/steps), 3 ambient
   < 0.25 while confidence > 0.70, confidence is capped to 0.70 — below the
   ask threshold, so weakly-evidenced predictions ASK instead of assert.
   The HA sensor exposes `evidence` as an attribute for automations.
+
+
+## Activity hierarchy — LCPN (added June 2026)
+
+**Question:** sleeping/home/away are easy and mutually exclusive; cooking/
+working/eating are hard and only exist INSIDE "home" — "home and eating" are
+simultaneously true. How do others structure this?
+
+**Literature:** hierarchical classification with a Local Classifier Per
+Parent Node (LCPN) is the standard answer (HHAR-net for HAR specifically;
+HiClass for sklearn tooling). A root classifier picks the coarse state;
+a per-parent classifier distinguishes only that parent's children; prediction
+is top-down so the output is always a consistent PATH (home→eating). Flat
+multi-class over all leaves is known to be worse: it dilutes the easy coarse
+boundary with hard fine distinctions. Truly CONCURRENT activities (eating
+WHILE watching a movie) are a separate multi-label problem (BiLSTM+SCCRF in
+the literature) — deliberately out of scope; the hierarchy covers state+
+activity simultaneity, which is what households actually automate on.
+
+**Design:** Activity.parent_id IS the hierarchy (two levels, user-editable on
+the Activities page via "Within"). Trainer: root model on coarse-projected
+labels (every window) + one child model per parent with ≥60 fine-labeled
+windows ("just home" = the parent slug itself, the abstain class). Registry
+and promotion gates are per node (root and home models never compete).
+Inference is top-down: root → child of the predicted state; Prediction
+carries parent + coarse_confidence; the HA sensor exposes `state_level`
+(stable, for automations) alongside the fine state. Asking targets the
+UNCERTAIN level: sure-of-home + unsure-of-cooking asks "cooking or eating?"
+with sibling alternatives, never re-asks the state.

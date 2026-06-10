@@ -47,13 +47,21 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
     if todo.empty:
         return []
 
-    record = next((m for m in repo.models(person_id) if m.promoted), None)
+    promoted = [m for m in repo.models(person_id) if m.promoted]
+    record = next((m for m in promoted if m.node == "root"), None)
     bindings = repo.bindings()
+    # hierarchy (LCPN): one fine classifier per coarse state that has one
+    child_probs: dict[str, pd.DataFrame] = {}
     if record is not None:
         est = store.load(record)
         probs = est.predict_proba(todo)
         explains = est.explain(todo)        # all windows: explanation + evidence
         version = record.version
+        for child in (m for m in promoted if m.node != "root"):
+            try:
+                child_probs[child.node] = store.load(child).predict_proba(todo)
+            except Exception:
+                log.exception("child model %s failed to load", child.version)
     else:
         probs = _rules_predict(repo, todo, person_id)
         explains = pd.DataFrame(index=todo.index)
@@ -64,6 +72,20 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         row = probs.loc[ts]
         predicted = str(row.idxmax())
         confidence = float(row.max())
+        parent = None
+        coarse_confidence = None
+        if predicted in child_probs:
+            # top-down: the root said e.g. "home"; the home-node classifier
+            # now picks among home's children (or "just home" = parent slug).
+            # "home" and "eating" are simultaneously true — that's the point.
+            fine_row = child_probs[predicted].loc[ts]
+            fine = str(fine_row.idxmax())
+            coarse_confidence = confidence
+            if fine != predicted:
+                parent = predicted
+                predicted = fine
+            confidence = float(fine_row.max())
+            row = fine_row                  # alternatives/asking use siblings
         explanation: list[tuple[str, float]] = []
         evidence = None
         if not explains.empty and ts in explains.index:
@@ -84,7 +106,8 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                           model_version=version, predicted=predicted,
                           smoothed=smoothed, confidence=confidence,
                           probabilities={c: float(v) for c, v in row.items()},
-                          explanation=explanation, evidence=evidence)
+                          explanation=explanation, evidence=evidence,
+                          parent=parent, coarse_confidence=coarse_confidence)
         tsdb.write_prediction(pred)
         history.insert(0, pred)
         out.append(pred)

@@ -124,6 +124,7 @@ class ModelRow(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     person_id: Mapped[str] = mapped_column(String, index=True)
     version: Mapped[str] = mapped_column(String, unique=True)
+    node: Mapped[str] = mapped_column(String, default="root")
     algo: Mapped[str] = mapped_column(String, default="random_forest")
     feature_set: Mapped[str] = mapped_column(String)
     path: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -432,6 +433,7 @@ class AppDb:
     def save_model(self, m: ModelRecord) -> ModelRecord:
         with Session(self.engine) as s:
             r = ModelRow(person_id=m.person_id, version=m.version, algo=m.algo,
+                         node=m.node,
                          feature_set=m.feature_set, path=m.path, trained_at=m.trained_at,
                          label_counts_json=json.dumps(m.label_counts),
                          metrics_json=json.dumps(m.metrics), promoted=m.promoted)
@@ -446,6 +448,7 @@ class AppDb:
             if person:
                 stmt = stmt.where(ModelRow.person_id == person)
             return [ModelRecord(id=r.id, person_id=r.person_id, version=r.version, algo=r.algo,
+                                node=r.node or "root",
                                 feature_set=r.feature_set, path=r.path, trained_at=r.trained_at,
                                 label_counts=json.loads(r.label_counts_json),
                                 metrics=json.loads(r.metrics_json), promoted=r.promoted)
@@ -454,7 +457,11 @@ class AppDb:
     def promote_model(self, model_id: int) -> None:
         with Session(self.engine) as s:
             r = s.get(ModelRow, model_id)
-            for other in s.scalars(select(ModelRow).where(ModelRow.person_id == r.person_id)):
+            # one live model PER HIERARCHY NODE: promoting home-v3 must not
+            # demote the root model (they answer different questions)
+            for other in s.scalars(select(ModelRow).where(
+                    ModelRow.person_id == r.person_id,
+                    ModelRow.node == r.node)):
                 other.promoted = False
             r.promoted = True
             s.commit()

@@ -233,6 +233,10 @@ from(bucket: "{FEAT_BUCKET}")
              .field("confidence", float(pred.confidence)))
         if pred.evidence is not None:
             p = p.field("evidence", float(pred.evidence))
+        if pred.parent:
+            p = p.field("parent", pred.parent)
+        if pred.coarse_confidence is not None:
+            p = p.field("coarse_confidence", float(pred.coarse_confidence))
         for cls, prob in pred.probabilities.items():
             p = p.field(f"prob_{cls}", float(prob))
         self.write_api.write(bucket=ML_BUCKET, record=p)
@@ -310,6 +314,9 @@ from(bucket: "{ML_BUCKET}")
                 "evidence": (float(r["evidence"])
                              if "evidence" in df.columns and pd.notna(r.get("evidence"))
                              else None),
+                "parent": (str(r["parent"])
+                           if "parent" in df.columns and pd.notna(r.get("parent"))
+                           else None),
             })
         return out
 

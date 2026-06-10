@@ -9,6 +9,14 @@ from hearth.domain.labeling import active
 from hearth.domain.schemas import Person, Prediction, Question
 
 
+@pytest.fixture(autouse=True)
+def _pin_clock(monkeypatch):
+    """maybe_ask checks quiet hours against the REAL clock — pin it to 14:00
+    UTC so the suite doesn't fail when CI happens to run at night."""
+    monkeypatch.setattr(active, "_utcnow",
+                        lambda: datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc))
+
+
 class AskRepo:
     def __init__(self):
         self.saved: list[Question] = []

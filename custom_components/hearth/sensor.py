@@ -58,6 +58,9 @@ class HearthActivitySensor(CoordinatorEntity, SensorEntity):
         return {
             "confidence": p.get("confidence"),
             "evidence": p.get("evidence"),     # direct-signal share, 0–1
+            "state_level": p.get("parent") or p.get("smoothed") or p.get("predicted"),
+            # ^ coarse state (home/away/sleeping) — automate on this for
+            #   stability; the main state may be a fine activity (eating)
             "probabilities": p.get("probs") or {},
             "raw_prediction": p.get("predicted"),
             "model": p.get("model_version") or p.get("model"),

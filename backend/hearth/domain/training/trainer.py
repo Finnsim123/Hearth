@@ -49,18 +49,52 @@ def train_person(person_id: str, tsdb, repo, store,
     bootstrap = bootstrap_labels(repo.rules(), feats, person_id, default_activity)
     events = tsdb.read_labels(person_id, start, end)
     labels, provenance = merge_labels(bootstrap, events)
+
+    # ── hierarchy (LCPN, labeling/taxonomy.py) ────────────────────────────
+    # root model: every label projected to its coarse state (eating → home);
+    # then one child model per parent that has enough fine-labeled windows.
+    from ..labeling.taxonomy import (
+        MIN_CHILD_WINDOWS, fine_label_series, parent_map, parents_with_children,
+        to_coarse)
+    activities = repo.activities()
+    pmap = parent_map(activities)
+    coarse_labels = labels.map(lambda lab: to_coarse(lab, pmap))
+
+    record = _fit_node(person_id, "root", feats, coarse_labels, provenance,
+                       repo, store, fset, end, excluded, force)
+
+    for parent in parents_with_children(activities):
+        fine = fine_label_series(labels, parent, pmap)
+        mask = fine.notna()
+        n_fine_children = int((fine[mask] != parent).sum())
+        if mask.sum() < MIN_CHILD_WINDOWS or fine[mask].nunique() < 2 \
+                or n_fine_children < MIN_CHILD_WINDOWS // 3:
+            log.info("[%s] %s-node: %d windows / %d fine — not enough yet",
+                     person_id, parent, int(mask.sum()), n_fine_children)
+            continue
+        _fit_node(person_id, parent, feats[mask], fine[mask], provenance[mask],
+                  repo, store, fset, end, excluded, force)
+    return record
+
+
+def _fit_node(person_id: str, node: str, feats, labels, provenance,
+              repo, store, fset: str, end, excluded, force: bool) -> ModelRecord | None:
+    """Fit + evaluate + register + gate ONE hierarchy node's classifier."""
     label_counts = {f"{prov}": int((provenance == prov).sum())
                     for prov in provenance.unique()}
     label_counts |= {f"class_{c}": int((labels == c).sum()) for c in labels.unique()}
 
     if labels.nunique() < 2:
-        log.info("[%s] only one class present — skip", person_id)
+        log.info("[%s] %s-node: only one class present — skip", person_id, node)
         return None
 
     cutoff = end - timedelta(days=VAL_DAYS)
     train_mask = feats.index < cutoff
     if train_mask.sum() < MIN_TRAIN_WINDOWS // 2 or (~train_mask).sum() < 10:
         train_mask = feats.index < feats.index[int(len(feats) * 0.75)]
+    if train_mask.sum() < 10 or (~train_mask).sum() < 5:
+        log.info("[%s] %s-node: split too small — skip", person_id, node)
+        return None
     X_train, y_train = feats[train_mask], labels[train_mask]
     X_val, y_val, prov_val = feats[~train_mask], labels[~train_mask], provenance[~train_mask]
 
@@ -69,7 +103,7 @@ def train_person(person_id: str, tsdb, repo, store,
     keep = y_val.isin(known)
     X_val, y_val, prov_val = X_val[keep], y_val[keep], prov_val[keep]
 
-    params = _hyperparams(repo, person_id, fset, X_train, y_train, force)
+    params = _hyperparams(repo, f"{person_id}.{node}", fset, X_train, y_train, force)
     est = RandomForestEstimator(**params)
     age_days = (end - X_train.index).total_seconds() / 86400
     weights = 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
@@ -93,14 +127,17 @@ def train_person(person_id: str, tsdb, repo, store,
     except Exception:                      # non-tree estimators have none
         pass
 
-    version = f"{person_id}-v{len(repo.models(person_id)) + 1}"
-    record = ModelRecord(person_id=person_id, version=version, algo="random_forest",
-                         feature_set=fset, trained_at=end,
+    stem = person_id if node == "root" else f"{person_id}-{node}"
+    n_prior = len([m for m in repo.models(person_id) if m.node == node])
+    version = f"{stem}-v{n_prior + 1}"
+    record = ModelRecord(person_id=person_id, version=version, node=node,
+                         algo="random_forest", feature_set=fset, trained_at=end,
                          label_counts=label_counts, metrics=metrics)
     record.path = store.save(est, record)
     record = repo.save_model(record)
 
-    current = next((m for m in repo.models(person_id) if m.promoted), None)
+    current = next((m for m in repo.models(person_id)
+                    if m.promoted and m.node == node), None)
     if force or promotion_gate(record, current):
         repo.promote_model(record.id)
         record.promoted = True
@@ -155,7 +192,8 @@ def promotion_gate(new: ModelRecord, current: ModelRecord | None) -> bool:
 
 def rollback(person_id: str, repo) -> ModelRecord | None:
     """Repoint to the previous (non-promoted) model with the highest id."""
-    models = sorted(repo.models(person_id), key=lambda m: -(m.id or 0))
+    models = sorted((m for m in repo.models(person_id) if m.node == "root"),
+                    key=lambda m: -(m.id or 0))
     current = next((m for m in models if m.promoted), None)
     prev = next((m for m in models if not m.promoted and m is not current), None)
     if prev is None:

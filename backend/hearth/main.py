@@ -109,6 +109,15 @@ def create_app() -> FastAPI:
             return FileResponse(static_dir / "index.html")
 
     @app.on_event("startup")
+    async def _ensure_hierarchy() -> None:
+        # idempotent: existing installs get activity parents without re-seeding
+        try:
+            from .domain.labeling.taxonomy import ensure_hierarchy
+            ensure_hierarchy(deps["repo"])
+        except Exception:
+            pass
+
+    @app.on_event("startup")
     async def _start() -> None:
         scheduler = build_scheduler(deps)
         scheduler.start()

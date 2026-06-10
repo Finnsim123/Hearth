@@ -162,6 +162,8 @@ def build_api_router(deps: dict) -> APIRouter:
         for slug, name, phrase in TAXONOMY_PRESETS.get(body.get("taxonomyPreset", "standard"), []):
             repo.save_activity(Activity(slug=slug, name=name, phrase=phrase,
                                         silent=_is_sleep_like(slug)))
+        from ..domain.labeling.taxonomy import ensure_hierarchy
+        ensure_hierarchy(repo)   # cooking/eating/movie/working → children of home
         repo.set_setting("default_activity", "home")
 
         # SLOW work (inventory, LLM mapping, rules) is deferred to the next

@@ -153,6 +153,9 @@ class Prediction(BaseModel):
     probabilities: dict[str, float]
     explanation: list[tuple[str, float]] = Field(default_factory=list)  # (feature, shap)
     evidence: float | None = None  # direct-tier SHAP share (features/evidence.py)
+    parent: str | None = None  # coarse state when predicted is a fine activity
+                               # ("home" + "eating" are simultaneously true)
+    coarse_confidence: float | None = None  # root model's confidence in parent
 
 
 class Question(BaseModel):
@@ -175,6 +178,9 @@ class ModelRecord(BaseModel):
     id: int | None = None
     person_id: str
     version: str  # e.g. "alice-v7"
+    node: str = "root"  # hierarchy node: "root" = coarse states; a parent
+                        # activity slug (e.g. "home") = the fine classifier
+                        # for that state's children (LCPN, RESEARCH.md)
     algo: str = "random_forest"
     feature_set: str
     path: str | None = None

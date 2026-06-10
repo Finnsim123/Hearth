@@ -34,8 +34,9 @@ function predicateText(p: Record<string, unknown>): string {
   return JSON.stringify(p);
 }
 
-function ActivityCard({ a: initial, rules, persons, onSaved }: {
-  a: Activity; rules: Rule[]; persons: Record<string, string>; onSaved: () => void;
+function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
+  a: Activity; rules: Rule[]; persons: Record<string, string>;
+  parents: Activity[]; onSaved: () => void;
 }) {
   const [a, setA] = useState(initial);
   const [open, setOpen] = useState(false);
@@ -94,6 +95,19 @@ function ActivityCard({ a: initial, rules, persons, onSaved }: {
                    style={{ width: 15, height: 15 }} />
             Enabled — model predicts this activity
           </label>
+          {parents.length > 0 && a.parent_id !== undefined && (
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13.5 }}
+                   title="Fine activities live INSIDE a state: 'home and eating' are simultaneously true. The state model stays accurate; a smaller model picks among the activities within it.">
+              Within
+              <select value={a.parent_id ?? ""} disabled={parents.some((p2) => p2.parent_id === a.id)}
+                      onChange={(e) => u({ parent_id: e.target.value ? Number(e.target.value) : null })}>
+                <option value="">— top-level state —</option>
+                {parents.filter((p2) => p2.id !== a.id && p2.parent_id === null).map((p2) => (
+                  <option key={p2.id} value={p2.id!}>{p2.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </div>
 
@@ -196,9 +210,14 @@ export default function Activities() {
       </p>
       {regenMsg && <p style={{ margin: 0, fontSize: 13.5, color: "var(--accent)" }}>{regenMsg}</p>}
       {activities === null && <p style={{ color: "var(--text-dim)" }}>Loading…</p>}
-      {activities?.map((a) => (
-        <ActivityCard key={a.slug} a={a} rules={rules} persons={persons} onSaved={load} />
-      ))}
+      {activities && [...activities]
+        .sort((x, y) => Number(x.parent_id !== null) - Number(y.parent_id !== null))
+        .map((a) => (
+          <div key={a.slug} style={a.parent_id !== null ? { marginLeft: 24 } : undefined}>
+            <ActivityCard a={a} rules={rules} persons={persons}
+                          parents={activities} onSaved={load} />
+          </div>
+        ))}
       <div style={{ display: "flex", gap: 10 }}>
         <input placeholder="New activity, e.g. Gaming" value={newName}
                onChange={(e) => setNewName(e.target.value)}
