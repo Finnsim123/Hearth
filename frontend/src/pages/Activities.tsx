@@ -106,13 +106,25 @@ function ActivityCard({ a: initial, rules, persons, onSaved }: {
           )}
           {mine.map((r) => (
             <div key={r.id} style={{ padding: "8px 12px", background: "var(--surface-2)",
-                                     borderRadius: 8, fontSize: 12.5,
-                                     opacity: r.enabled ? 1 : 0.5 }}>
-              <code style={{ overflowWrap: "anywhere" }}>{predicateText(r.predicate)}</code>
-              <span style={{ color: "var(--text-dim)", marginLeft: 8 }}>
-                {r.person_id ? `· ${persons[r.person_id] ?? r.person_id}` : "· everyone"}
-                {" "}· priority {r.priority} · {r.origin}
-              </span>
+                                     borderRadius: 8, fontSize: 12.5, display: "flex",
+                                     alignItems: "center", gap: 8,
+                                     opacity: r.enabled ? 1 : 0.55 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <code style={{ overflowWrap: "anywhere" }}>{predicateText(r.predicate)}</code>
+                <span style={{ color: "var(--text-dim)", marginLeft: 8 }}>
+                  {r.person_id ? `· ${persons[r.person_id] ?? r.person_id}` : "· everyone"}
+                  {" "}· priority {r.priority} · {r.origin}
+                  {!r.enabled && r.origin === "discovered" && " · drafted from a pattern — review, then enable"}
+                </span>
+              </div>
+              <button className="btn btn-ghost"
+                      style={{ minHeight: 26, padding: "2px 10px", fontSize: 12, flexShrink: 0 }}
+                      onClick={async () => {
+                        await post("/api/rules", { ...r, enabled: !r.enabled });
+                        onSaved();
+                      }}>
+                {r.enabled ? "Disable" : "Enable"}
+              </button>
             </div>
           ))}
           {mine.length > 0 && (

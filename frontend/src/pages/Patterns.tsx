@@ -55,8 +55,9 @@ function HourHistogram({ hist }: { hist: number[] }) {
   );
 }
 
-function PatternCard({ c, activities, personName, onChange }: {
-  c: Cluster; activities: Activity[]; personName: string; onChange: () => void;
+function PatternCard({ c, activities, personName, siblings, onChange }: {
+  c: Cluster; activities: Activity[]; personName: string;
+  siblings: Cluster[]; onChange: () => void;
 }) {
   const [choice, setChoice] = useState(c.suggested_slug ?? "");
   const [newName, setNewName] = useState("");
@@ -115,6 +116,22 @@ function PatternCard({ c, activities, personName, onChange }: {
                 style={{ color: "var(--text-dim)" }}>
           Not a thing — dismiss
         </button>
+        {siblings.length > 0 && (
+          <select defaultValue="" disabled={busy} title="Fold this pattern into another one"
+                  onChange={async (e) => {
+                    if (!e.target.value) return;
+                    setBusy(true);
+                    await post(`/api/clusters/${c.id}/merge`, { into: Number(e.target.value) });
+                    onChange();
+                  }}>
+            <option value="">Same as…</option>
+            {siblings.map((s2) => (
+              <option key={s2.id} value={s2.id}>
+                #{s2.id} — {s2.signature.slice(0, 2).map(([f]) => f).join(" + ")}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       {msg && <p style={{ margin: 0, fontSize: 13, color: "var(--accent)" }}>{msg}</p>}
     </div>
@@ -174,7 +191,9 @@ export default function Patterns() {
       )}
       {clusters?.map((c) => (
         <PatternCard key={c.id} c={c} activities={activities}
-                     personName={persons[c.person_id] ?? c.person_id} onChange={load} />
+                     personName={persons[c.person_id] ?? c.person_id}
+                     siblings={clusters.filter((s2) => s2.id !== c.id && s2.person_id === c.person_id)}
+                     onChange={load} />
       ))}
     </section>
   );

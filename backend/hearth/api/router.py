@@ -450,7 +450,30 @@ def build_api_router(deps: dict) -> APIRouter:
                 provenance=Provenance.DISCOVERED, source=f"cluster:{card.id}"))
         card.status, card.named_activity_slug = "named", slug
         repo.save_cluster(card)
-        return {"ok": True, "activity": slug, "labeled_windows": len(card.example_windows)}
+        # draft a rule from the signature (disabled until you switch it on in
+        # Activities — auto-enabling a crude threshold rule could poison labels)
+        from ..domain.labeling.rules import draft_rule_from_signature
+        rule = draft_rule_from_signature(card.signature, slug)
+        rule.person_id = card.person_id or None
+        rule = repo.save_rule(rule)
+        return {"ok": True, "activity": slug,
+                "labeled_windows": len(card.example_windows),
+                "drafted_rule_id": rule.id}
+
+    @api.post("/clusters/{cluster_id}/merge")
+    def merge_cluster(cluster_id: int, body: dict) -> dict:
+        """This pattern is the same as that one — fold it in."""
+        from ..domain.discovery.clustering import merge_clusters
+        source = repo.get_cluster(cluster_id)
+        target = repo.get_cluster(int(body.get("into", 0)))
+        if source is None or target is None:
+            raise HTTPException(404, "no such pattern")
+        if source.id == target.id:
+            raise HTTPException(400, "cannot merge a pattern into itself")
+        source, target = merge_clusters(source, target)
+        repo.save_cluster(source)
+        repo.save_cluster(target)
+        return {"ok": True, "into": target.id, "n_windows": target.n_windows}
 
     @api.post("/clusters/{cluster_id}/dismiss")
     def dismiss_cluster(cluster_id: int) -> dict:

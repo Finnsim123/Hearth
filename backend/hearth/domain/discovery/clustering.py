@@ -24,7 +24,7 @@ from ..schemas import ClusterCard, Provenance
 
 log = logging.getLogger(__name__)
 
-MIN_WINDOWS = 200          # below this, clusters are noise
+MIN_WINDOWS = 120          # ≈ 60 h of recording — the 72 h acceptance bar (ROADMAP P4)
 MAX_MEMBER_WINDOWS = 1000  # stored per card (labeling cap)
 TEMPORAL_COLS = ["hour_of_day", "day_of_week", "is_weekend"]
 TOP_K = 6                  # signature size
@@ -88,7 +88,7 @@ def discover_person(person_id: str, tsdb, repo, days: int = 30) -> list[ClusterC
     g_mean, g_std = X.mean(), X.std()
     Xs = ((X - g_mean) / g_std).fillna(0.0)
 
-    min_size = max(10, len(Xs) // 40)              # a pattern ≈ ≥5h of life / month
+    min_size = max(8, len(Xs) // 40)               # small installs still find patterns
     labels = HDBSCAN(min_cluster_size=min_size).fit_predict(Xs.to_numpy())
 
     tz = repo.get_setting("timezone", "UTC") or "UTC"
@@ -107,6 +107,19 @@ def discover_person(person_id: str, tsdb, repo, days: int = 30) -> list[ClusterC
     log.info("[discovery:%s] %d windows → %d pattern candidates",
              person_id, len(X), len(cards))
     return cards
+
+
+def merge_clusters(source: ClusterCard, target: ClusterCard) -> tuple[ClusterCard, ClusterCard]:
+    """Fold `source` into `target`: windows united (deduped), histogram summed.
+    Source survives as status='merged' so re-runs dedupe against it."""
+    seen = set(target.example_windows)
+    target.example_windows = target.example_windows + [
+        t for t in source.example_windows if t not in seen]
+    target.n_windows = len(target.example_windows)
+    target.hour_histogram = [a + b for a, b in
+                             zip(target.hour_histogram, source.hour_histogram)]
+    source.status = "merged"
+    return source, target
 
 
 def run_discovery(tsdb, repo, days: int = 30) -> list[ClusterCard]:

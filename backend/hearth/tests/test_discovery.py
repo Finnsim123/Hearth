@@ -114,3 +114,30 @@ def test_rerun_replaces_new_but_keeps_handled():
     statuses = [c.status for c in repo.saved]
     assert statuses.count("named") == 1
     assert len([s for s in statuses if s == "new"]) == len(again)
+
+
+def test_merge_folds_windows_and_marks_source():
+    from datetime import datetime, timezone, timedelta
+    from hearth.domain.discovery.clustering import merge_clusters
+    t0 = datetime(2026, 6, 1, 20, 0, tzinfo=timezone.utc)
+    a = ClusterCard(id=1, person_id="alice", n_windows=2, status="new",
+                    example_windows=[t0, t0 + timedelta(minutes=30)],
+                    hour_histogram=[0] * 20 + [2, 0, 0, 0])
+    b = ClusterCard(id=2, person_id="alice", n_windows=2, status="new",
+                    example_windows=[t0, t0 + timedelta(hours=1)],   # one overlap
+                    hour_histogram=[0] * 20 + [1, 1, 0, 0])
+    src, tgt = merge_clusters(b, a)
+    assert src.status == "merged"
+    assert tgt.n_windows == 3                       # deduped union
+    assert tgt.hour_histogram[20] == 3 and tgt.hour_histogram[21] == 1
+
+
+def test_drafted_rule_from_signature_is_disabled_and_positive_only():
+    from hearth.domain.labeling.rules import draft_rule_from_signature
+    rule = draft_rule_from_signature(
+        [("sofa_presence_frac", 4.2), ("media_playing", 3.1), ("home_frac", -2.0)],
+        "movie")
+    assert rule.enabled is False                    # never auto-live
+    feats = {c["feat"] for c in rule.predicate["all"]}
+    assert feats == {"sofa_presence_frac", "media_playing"}  # negatives excluded
+    assert rule.origin == "discovered"

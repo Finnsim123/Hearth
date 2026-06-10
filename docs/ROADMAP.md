@@ -58,12 +58,22 @@ label, and the next retrain consumes it; confirmed-accuracy is the headline
 number on the dashboard.
 
 ## Phase 4 — Discovery + research bets
-HDBSCAN pattern cards → name/merge/dismiss → discovered labels + drafted rules.
-Change-point segmentation experiment (P4). HEPA-style embedder behind the
-`Embedder` port (feature-flagged): pretrain on the home's unlabeled stream,
-side-by-side vs RF in the registry; embedding-space clustering for patterns.
-**Accept:** a new user with zero labels gets ≥3 sensible pattern cards after
-72 h of recording; naming one card measurably improves next training run.
+**Core: DONE (June 2026).** HDBSCAN pattern cards (sklearn, per person, weekly
+Sat 04:00 + on-demand) → name/merge/dismiss on the Patterns page → naming emits
+provenance=discovered labels for all member windows AND drafts a disabled Rule
+(review + enable on the Activities page). Confirmed windows excluded from
+clustering; re-runs replace the 'new' pile and dedupe against handled cards by
+signature overlap; optional LLM "AI thinks: <slug>" hint per card.
+**Accept status:** discovery activates at ≥120 windows (~60 h) so the 72 h bar
+is reachable; "≥3 sensible cards" and "naming measurably improves the next
+training run" still need verification on a real fresh install — check the
+Models page confirmed-accuracy before/after naming.
+
+### Research bets — open (deliberately deferred)
+- Change-point segmentation experiment (P4)
+- HEPA-style embedder behind the `Embedder` port (feature-flagged): pretrain on
+  the home's unlabeled stream, side-by-side vs RF in the registry,
+  embedding-space clustering. The port exists; no implementation yet.
 
 ## Phase 5 — Ship it
 Hardening (authn, token encryption audit, backup/restore), docs site, example
