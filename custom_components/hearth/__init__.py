@@ -1,30 +1,82 @@
-"""Hearth — Home Assistant integration (HACS-distributed, ADR-11).
+"""Hearth — Home Assistant integration.
 
-Connects to a local Hearth instance (host + API token), creates one device per
-household member, AND handles the feedback loop end-to-end:
+Connects to a local Hearth instance (host + API token) and closes the loop:
 
-NO AUTOMATIONS, NO YAML. On setup this integration registers a listener on
-HA's event bus for `mobile_app_notification_action` events whose action id
-starts with "HEARTH_" and forwards them to the backend:
-
-    async def _on_action(event):
-        action = event.data.get("action", "")
-        if action.startswith("HEARTH_"):
-            await session.post(f"{host}/api/feedback/action",
-                               json={"action": action,
-                                     "device": event.data.get("device_name")},
-                               headers={"Authorization": f"Bearer {token}"})
-
-    entry.async_on_unload(
-        hass.bus.async_listen("mobile_app_notification_action", _on_action))
-
-So: install integration -> notifications tapped on any phone reach Hearth.
-The legacy blueprint (deploy/ha/hearth_actions.yaml) exists only for setups
-without this integration.
-
-Phase 2 implements: WS client, entity platforms, the listener above.
+* one activity sensor per household member (predictions you can automate on)
+* an event-bus listener that forwards notification action taps
+  (`mobile_app_notification_action`, action id `HEARTH_<qid>_<idx>`) straight
+  to the backend — NO automations, NO YAML.
 """
 from __future__ import annotations
 
-DOMAIN = "hearth"
-PLATFORMS = ["sensor", "binary_sensor", "select", "switch"]
+import logging
+from datetime import timedelta
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
+from .api import HearthApiError, HearthAuthError, HearthClient
+from .const import ACTION_PREFIX, CONF_HOST, CONF_TOKEN, DOMAIN, UPDATE_INTERVAL_S
+
+_LOGGER = logging.getLogger(__name__)
+PLATFORMS = ["sensor"]
+
+
+class HearthCoordinator(DataUpdateCoordinator):
+    """Polls persons + latest predictions; sensors render from this."""
+
+    def __init__(self, hass: HomeAssistant, client: HearthClient) -> None:
+        super().__init__(hass, _LOGGER, name=DOMAIN,
+                         update_interval=timedelta(seconds=UPDATE_INTERVAL_S))
+        self.client = client
+        self.persons: list[dict] = []
+
+    async def _async_update_data(self) -> dict[str, dict]:
+        try:
+            if not self.persons:
+                self.persons = await self.client.persons()
+            return await self.client.latest_predictions()
+        except HearthAuthError as exc:
+            raise ConfigEntryAuthFailed from exc
+        except HearthApiError as exc:
+            raise UpdateFailed(str(exc)) from exc
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    client = HearthClient(entry.data[CONF_HOST], entry.data[CONF_TOKEN],
+                          async_get_clientsession(hass))
+    coordinator = HearthCoordinator(hass, client)
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryAuthFailed:
+        raise
+    except Exception as exc:  # noqa: BLE001 — backend may still be booting
+        raise ConfigEntryNotReady(str(exc)) from exc
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # ── the feedback loop: notification taps → Hearth, no automations ──────
+    async def _on_notification_action(event) -> None:
+        action = str(event.data.get("action", ""))
+        if not action.startswith(ACTION_PREFIX):
+            return
+        try:
+            ok = await client.post_action(action, event.data.get("device_name"))
+            _LOGGER.debug("forwarded %s to Hearth: %s", action, ok)
+        except HearthApiError:
+            _LOGGER.warning("could not forward %s to Hearth (backend down?)", action)
+
+    entry.async_on_unload(
+        hass.bus.async_listen("mobile_app_notification_action", _on_notification_action))
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if ok:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+    return ok

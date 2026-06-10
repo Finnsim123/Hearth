@@ -560,6 +560,19 @@ function StepActivities({ d, set, next, back }: StepProps) {
 
 function StepOutput({ d, next, back }: StepProps) {
   const [token, setToken] = useState<string | null>(null);
+  const [minting, setMinting] = useState(false);
+  const [mintErr, setMintErr] = useState("");
+  const mint = async () => {
+    setMinting(true); setMintErr("");
+    try {
+      const r = await fetch("/api/tokens", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Home Assistant" }) });
+      if (!r.ok) throw new Error(String(r.status));
+      setToken((await r.json()).token);
+    } catch { setMintErr("Couldn't mint a token — is the backend up?"); }
+    setMinting(false);
+  };
   // Deep links into the USER'S OWN HA instance (URL from step 2) using the
   // same /_my_redirect/ endpoints the my.home-assistant.io buttons resolve to.
   const ha = d.ha.url.replace(/\/+$/, "");
@@ -604,10 +617,13 @@ function StepOutput({ d, next, back }: StepProps) {
             </Callout>
           </>
         ) : (
-          <button className="btn btn-primary" style={{ alignSelf: "flex-start" }}
-            onClick={() => setToken("hrt_k3J9…demo…Xq")}>
-            <Icon name="key" size={16} /> Generate integration token
-          </button>
+          <>
+            <button className="btn btn-primary" style={{ alignSelf: "flex-start" }}
+              disabled={minting} onClick={mint}>
+              <Icon name="key" size={16} /> {minting ? "Generating…" : "Generate integration token"}
+            </button>
+            {mintErr && <p style={{ margin: 0, fontSize: 13, color: "var(--danger)" }}>{mintErr}</p>}
+          </>
         )}
         <Callout>
           No HACS, or buttons not opening? Manual path: HACS → custom repositories → add this

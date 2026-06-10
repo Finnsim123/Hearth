@@ -388,6 +388,21 @@ def build_api_router(deps: dict) -> APIRouter:
         repo.skip_question(question_id)
         return {"ok": True}
 
+    # ── api tokens (for the HA integration) ────────────────────────────────
+    @api.post("/tokens")
+    def create_token(body: dict | None = None) -> dict:
+        name = (body or {}).get("name") or "Home Assistant"
+        return {"token": repo.create_api_token(name), "note": "shown once"}
+
+    @api.get("/tokens")
+    def list_tokens() -> list[dict]:
+        return repo.api_tokens()
+
+    @api.delete("/tokens/{token_id}")
+    def revoke_token(token_id: int) -> dict:
+        repo.revoke_api_token(token_id)
+        return {"ok": True}
+
     # ── feedback: notification action taps, forwarded by the HA integration ─
     @api.post("/feedback/action")
     def feedback_action(body: dict) -> dict:

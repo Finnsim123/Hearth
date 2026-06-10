@@ -96,7 +96,7 @@ hearth/
 │       ├── theme.css    Design tokens (dark / light / system)
 │       ├── icons.tsx    The 47-icon set, one stroke language with the logo
 │       └── onboarding/  The 10-step wizard (implemented)
-├── integration/     Thin HA custom integration (HACS) — host+token config flow
+├── custom_components/   HA integration (HACS layout) — config flow, activity sensors, action listener
 ├── brand/           Ember logo, wordmark, usage rules
 └── grafana/         Optional pre-provisioned dashboards
 ```

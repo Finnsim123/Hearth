@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Hearth",
+        "description": "Enter your Hearth address and an API token (minted in Hearth's setup wizard or Settings → API tokens).",
+        "data": { "host": "Hearth address", "token": "API token" }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect to Hearth",
+        "description": "Your token was rotated or revoked — paste a fresh one.",
+        "data": { "token": "API token" }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach Hearth at that address.",
+      "invalid_auth": "Hearth rejected the token — mint a new one in Settings → API tokens."
+    },
+    "abort": {
+      "already_configured": "This Hearth is already connected.",
+      "reauth_successful": "Reconnected."
+    }
+  }
+}

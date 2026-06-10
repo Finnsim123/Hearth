@@ -1,13 +1,14 @@
 {
   "domain": "hearth",
   "name": "Hearth",
-  "codeowners": [],
+  "codeowners": ["@Finnsim123"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/your-org/hearth",
+  "documentation": "https://github.com/Finnsim123/Hearth",
+  "issue_tracker": "https://github.com/Finnsim123/Hearth/issues",
   "integration_type": "hub",
-  "iot_class": "local_push",
+  "iot_class": "local_polling",
   "requirements": [],
-  "version": "0.0.1",
+  "version": "0.1.0",
   "zeroconf": ["_hearth._tcp.local."]
 }

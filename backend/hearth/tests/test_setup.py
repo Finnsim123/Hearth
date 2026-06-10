@@ -143,3 +143,33 @@ def test_change_password_revokes_other_sessions(client):
     assert other.get("/api/auth/me").status_code == 401   # other device kicked
     assert c.post("/api/auth/login", json={
         "email": email, "password": "brand-new-password-456"}).status_code == 200
+
+
+def test_api_token_bearer_scope(client):
+    c, repo = client
+    # wizard step 9 mints a token DURING setup (no users yet)
+    tok = c.post("/api/tokens", json={"name": "Home Assistant"}).json()["token"]
+    assert tok.startswith("hrt_")
+    c.post("/api/setup/complete", json=PAYLOAD)
+
+    fresh = TestClient(c.app)                       # no session cookie
+    bearer = {"Authorization": f"Bearer {tok}"}
+    # in-scope endpoints work with the bearer token
+    assert fresh.get("/api/persons", headers=bearer).status_code == 200
+    assert fresh.get("/api/predictions", headers=bearer).status_code == 200
+    # feedback/action: authenticated, parses, 404s on unknown question
+    r = fresh.post("/api/feedback/action", headers=bearer,
+                   json={"action": "HEARTH_999_0"})
+    assert r.status_code in (200, 404)
+    # …but NOT without it (was anonymous before this change)
+    assert fresh.post("/api/feedback/action", json={"action": "HEARTH_1_0"}).status_code == 401
+    # …and out-of-scope endpoints are refused
+    assert fresh.get("/api/models", headers=bearer).status_code == 403
+    assert fresh.post("/api/tokens", headers=bearer, json={}).status_code == 403
+    # bad token refused
+    assert fresh.get("/api/persons",
+                     headers={"Authorization": "Bearer hrt_nope"}).status_code == 403
+    # revocation kills it
+    tid = next(t["id"] for t in c.get("/api/tokens").json() if not t["revoked"])
+    c.delete(f"/api/tokens/{tid}")
+    assert fresh.get("/api/persons", headers=bearer).status_code == 403

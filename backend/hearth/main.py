@@ -57,9 +57,13 @@ def create_app() -> FastAPI:
     # webhook (TODO: bearer scope check), and — ONLY while no users exist —
     # the wizard's probe + setup endpoints. The SPA itself is public; it
     # gates itself on /api/auth/me.
-    PUBLIC = {"/api/health", "/api/auth/login", "/api/feedback/action"}
+    PUBLIC = {"/api/health", "/api/auth/login"}
     SETUP_ONLY = {"/api/setup/complete", "/api/ha/test", "/api/ha/inventory",
-                  "/api/influx/inspect"}
+                  "/api/influx/inspect", "/api/tokens"}
+    # what an "integration"-scope bearer token may reach — the integration
+    # reads predictions/persons and forwards notification taps, nothing else
+    BEARER_INTEGRATION = {"/api/feedback/action", "/api/predictions",
+                          "/api/persons", "/api/journey"}
 
     @app.middleware("http")
     async def _auth(request, call_next):
@@ -72,6 +76,13 @@ def create_app() -> FastAPI:
         repo = deps["repo"]
         if path in SETUP_ONLY and repo.user_count() == 0:
             return await call_next(request)
+        authz = request.headers.get("authorization", "")
+        if authz.startswith("Bearer hrt_"):
+            scope = repo.api_token_scope(authz[7:])
+            if scope == "integration" and path in BEARER_INTEGRATION:
+                return await call_next(request)
+            return JSONResponse({"detail": "Token invalid, revoked, or out of scope"},
+                                status_code=403)
         cookie = request.cookies.get("hearth_session")
         user = repo.session_user(
             hashlib.sha256(cookie.encode()).hexdigest()) if cookie else None

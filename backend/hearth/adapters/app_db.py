@@ -485,6 +485,45 @@ class AppDb:
             return out
 
     # ── users (auth — consumed by Phase 2 middleware) ──────────────────────
+    # ── api tokens (integration auth — docs/SECURITY.md) ──────────────────
+    def create_api_token(self, name: str, scope: str = "integration") -> str:
+        """Mints and stores a token; returns the PLAINTEXT exactly once."""
+        plaintext, sha = security.mint_api_token(scope)
+        with Session(self.engine) as s:
+            s.add(ApiTokenRow(name=name, token_sha256=sha, scope=scope))
+            s.commit()
+        return plaintext
+
+    def api_token_scope(self, presented: str) -> str | None:
+        """Scope for a presented bearer token, or None if unknown/revoked.
+        Touches last_used_at on hit."""
+        import hashlib
+        sha = hashlib.sha256(presented.encode()).hexdigest()
+        with Session(self.engine) as s:
+            r = s.scalars(select(ApiTokenRow).where(
+                ApiTokenRow.token_sha256 == sha,
+                ApiTokenRow.revoked_at.is_(None))).first()
+            if r is None:
+                return None
+            r.last_used_at = _now()
+            s.commit()
+            return r.scope
+
+    def api_tokens(self) -> list[dict]:
+        with Session(self.engine) as s:
+            return [{"id": r.id, "name": r.name, "scope": r.scope,
+                     "created_at": r.created_at.isoformat() if r.created_at else None,
+                     "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+                     "revoked": r.revoked_at is not None}
+                    for r in s.scalars(select(ApiTokenRow)).all()]
+
+    def revoke_api_token(self, token_id: int) -> None:
+        with Session(self.engine) as s:
+            r = s.get(ApiTokenRow, token_id)
+            if r and r.revoked_at is None:
+                r.revoked_at = _now()
+                s.commit()
+
     def user_count(self) -> int:
         with Session(self.engine) as s:
             return len(s.scalars(select(UserRow)).all())
