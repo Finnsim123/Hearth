@@ -16,7 +16,7 @@ an explanation of how it was computed.
 ## 1. Onboarding wizard (first boot, resumable)
 
 **Implemented** in `frontend/src/onboarding/` (`Wizard.tsx` + `ui.tsx`); backend
-calls stubbed until Phase 1/2. UX pattern, identical on every step: progress
+calls all wired to the real API. UX pattern, identical on every step: progress
 bar (ember fill) -> "Step n of 10" label -> title -> one-paragraph explainer in
 plain language -> fields with inline hints ("where do I find this") and inline
 validation -> a "what's happening" callout explaining what Hearth does with the

@@ -209,8 +209,12 @@ def build_api_router(deps: dict) -> APIRouter:
 
     @api.post("/influx/inspect")
     def influx_inspect(body: dict) -> dict:
-        """Staged wizard check; body {url, org, token}. Read-only, saves nothing."""
+        """Staged wizard check; body {url, org, token} OR {mode: "bundled"}
+        (server fills in its own env credentials). Read-only, saves nothing."""
         from ..adapters.influx_store import inspect_influx
+        if body.get("mode") == "bundled":
+            from ..config import settings as cfg
+            return inspect_influx(cfg.influx_url, cfg.influx_org, cfg.influx_token)
         return inspect_influx(body.get("url", ""), body.get("org", ""),
                               body.get("token", ""))
 

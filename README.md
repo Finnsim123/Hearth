@@ -34,15 +34,21 @@ HA sensors ──► Hearth pipeline ──► features ──► model ──�
 
 ## Status
 
-🚧 **Design + skeleton stage.** The architecture is fully specified in
-[`docs/`](docs/); code is a stubbed skeleton that boots but predicts nothing yet
-(the onboarding wizard UI is already real). Implementation order lives in
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+🔥 **Working product, running live.** All three pillars are implemented and
+shipping: data pipeline (HA WebSocket ingest + history import + role-based
+feature engine), models (hierarchical state→activity classifiers with honest
+metrics, calibration, learned transition smoothing), and the feedback loop
+(notification questions via the HA integration, Inbox, ribbon corrections,
+weekly retrains with promotion gates). Plus: pattern discovery (HDBSCAN
+cards you name), evidence tiers (predictions disclose what they rest on),
+in-app updates, and CI. Remaining work lives in
+[`docs/ROADMAP.md`](docs/ROADMAP.md) (Phase 5: hardening + packaging, and
+the research bets).
 
-## Quickstart (target UX)
+## Quickstart
 
 ```bash
-git clone https://github.com/you/hearth && cd hearth
+git clone https://github.com/Finnsim123/Hearth && cd Hearth
 
 # Already running InfluxDB somewhere? (the wizard will ask for URL + token)
 bash install.sh
@@ -62,9 +68,12 @@ and prints exactly where to go:
 
 The 10-step wizard walks you through everything else: create your account →
 connect Home Assistant → choose existing-or-bundled InfluxDB → define your
-household → automatic sensor inventory → optional AI-assisted mapping → pick
-your activities → connect the HA integration. Hearth records for a few days,
-patterns appear, you name them, the first model trains, predictions go live.
+household (per-person notification budgets) → automatic sensor inventory →
+optional AI-assisted mapping (any language) → pick your activities → mint a
+token for the HA integration. **Fast track:** if your InfluxDB already has
+history, Hearth imports it, builds features, and trains models during setup —
+predictions on the dashboard within minutes. Fresh installs record for ~3
+days, then pattern cards appear for naming and the first model trains.
 
 ## Documentation
 

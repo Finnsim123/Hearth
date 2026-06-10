@@ -1,9 +1,8 @@
 /**
  * Onboarding wizard — 10 steps, resumable (localStorage), every step explains
  * itself before asking for anything. Spec: docs/UI_SPEC.md §1.
- *
- * Backend wiring is stubbed (fakeApi) until Phase 1/2 land the real
- * endpoints — the flow, copy, fields and validation are final.
+ * All steps are wired to real endpoints (HA test, inventory scan, Influx
+ * inspection, token minting, setup completion + fast track).
  */
 import { useEffect, useState } from "react";
 import { PRESET_HUES } from "../components/Avatar";
@@ -40,8 +39,6 @@ const empty: WizardData = {
   taxonomyPreset: "standard",
 };
 
-// TODO(phase 1/2): replace with real API calls.
-const fakeApi = (ok = true) => new Promise<boolean>((r) => setTimeout(() => r(ok), 900));
 
 export default function Wizard() {
   const [step, setStep] = useState(1);
@@ -320,7 +317,15 @@ function StepInflux({ d, set, next, back }: StepProps) {
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <code style={{ flex: 1, padding: "10px 12px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-ctl)", fontSize: 13 }}>{cmd}</code>
                   <button className="btn btn-secondary" onClick={() => navigator.clipboard.writeText(cmd)} aria-label="Copy command"><Icon name="copy" size={16} /></button>
-                  <button className="btn btn-secondary" onClick={async () => { setBundled("checking"); setBundled((await fakeApi()) ? "found" : "missing"); }}>
+                  <button className="btn btn-secondary" onClick={async () => {
+                    setBundled("checking");
+                    try {
+                      const r = await fetch("/api/influx/inspect", { method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ mode: "bundled" }) }).then((x) => x.json());
+                      setBundled(r.reachable && r.authed ? "found" : "missing");
+                    } catch { setBundled("missing"); }
+                  }}>
                     {bundled === "checking" ? "Checking…" : "Re-check"}
                   </button>
                 </div>
