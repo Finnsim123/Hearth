@@ -62,3 +62,10 @@ def test_setup_complete_persists_everything(client):
     assert c.post("/api/setup/complete", json=PAYLOAD).status_code == 409
     # health flips
     assert c.get("/api/health").json()["needs_setup"] is False
+
+
+def test_setup_refuses_missing_password(client):
+    c, repo = client
+    bad = dict(PAYLOAD, account={"name": "A", "email": "a@b.c", "password": ""})
+    assert c.post("/api/setup/complete", json=bad).status_code == 400
+    assert repo.user_count() == 0          # nothing half-created

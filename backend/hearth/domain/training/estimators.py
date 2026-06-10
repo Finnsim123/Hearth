@@ -64,9 +64,9 @@ class RandomForestEstimator:
                 out[c] = 0.0
         return out[self.columns]
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
+    def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> None:
         self.columns = list(X.columns)
-        self.model.fit(X, y)
+        self.model.fit(X, y, sample_weight=sample_weight)
 
     def predict_proba(self, X: pd.DataFrame) -> pd.DataFrame:
         probs = self.model.predict_proba(self._align(X))

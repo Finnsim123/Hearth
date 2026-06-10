@@ -55,7 +55,10 @@ weights (§4). Everything user-specific stays local.
 "Kitchen presence high" — but *who* is cooking? The prototype sidesteps it with
 per-person models + person-specific sensors (bed side, phone focus, BLE area).
 This remains the weakest link when both residents are home doing different
-things. Best known signals: ESPresense/BLE room-level location, per-person
+things — and PETS make it worse: a cat triggering the couch presence sensor is
+indistinguishable from a person without per-binding context (future: a
+`pet_immune` binding option for mmWave sensors with pet filtering, and pet
+flags as a labeling-rule guard). Best known signals: ESPresense/BLE room-level location, per-person
 device telemetry. Honest position: windows where attribution is ambiguous get
 lower-trust labels; don't pretend to solve it in v1.
 
@@ -101,6 +104,8 @@ primary). Tokens at rest: encrypted SQLite column (Fernet, key in `.env`).
 | **CASAS / van Kasteren datasets** | Academic smart-home HAR corpora | Validation that ambient-sensor HAR works (80–95% on 3–8 classes); useful for offline recipe tests without private data. |
 | **Snorkel** | Weak supervision framework | The *pattern* of labeling functions + trust-weighted overlay — implemented minimally, no dependency. |
 | **river** | Online ML in Python | Candidate for incremental learning post-v1; avoids full retrains. |
+| **thesillyhome** (paused) | Predicts actuator states & executes them via AppDaemon | Adopted: recency-weighted training samples. Validated-by-failure: directly actuating from weak models erodes trust — Hearth ships predictions as sensors, humans own automations. Backlog: recorder-DB-as-source mode (no Influx), event-driven inference on binding change. |
+| **ha-ml-predictor** (early/AI-generated) | Room-occupancy time-to-event predictions | Two real ideas: PETS as a presence-sensor confounder (now tracked under P3 — pet motion fakes human presence; future per-binding `pet_immune` option), and next-occupied-time MQTT topics — independent validation of the HEPA horizon bet. Also a cautionary tale: agent-generated process litter ≠ product. |
 | **Forgis HEPA** (MIT) | Self-supervised JEPA encoder for multivariate time series; horizon-conditioned event prediction; one 2.16M-param model transfers across domains | **The serious research bet (§4):** pretrain on a home's unlabeled stream, fine-tune small heads on few labels; embeddings also upgrade clustering. |
 | **Forgis TEMPO** (CC BY-NC-SA, not yet runnable) | Time series → discrete tokens for LLM reasoning | Watch-list only: could one day power NL explanations/QA over sensor history. License + maturity + GPU needs rule it out as a dependency. |
 | **Forgis FactoryBench** (CC BY-NC-SA) | LLM benchmark on machine telemetry | Not architecturally relevant; borrow its *engineering craft*: resumable long jobs, result JSON + compare tooling — mirrored in Hearth's training-run artifacts. |

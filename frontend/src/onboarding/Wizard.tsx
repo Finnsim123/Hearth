@@ -47,8 +47,11 @@ export default function Wizard() {
     const saved = localStorage.getItem(STORE);
     if (saved) {
       const s = JSON.parse(saved);
-      setStep(s.step ?? 1);
       setData({ ...empty, ...s.data });
+      // Passwords are never persisted — a resumed session must pass through
+      // step 1 again so the account is created with a REAL password.
+      const restored = s.data?.account?.password ?? "";
+      setStep(restored.length >= 10 ? (s.step ?? 1) : 1);
     }
   }, []);
   useEffect(() => {

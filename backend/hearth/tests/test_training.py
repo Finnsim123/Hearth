@@ -215,3 +215,20 @@ def test_hyperparam_cache_respected(world):
     # small data -> cached params still used, never tunes
     small_X = big_X.head(100)
     assert _hyperparams(repo, "alice", "vY", small_X, y.head(100), force=True) == {"n_estimators": 200}
+
+
+def test_recency_weighting_prefers_recent_regime():
+    """Same features, label flipped halfway: recent regime must win at predict
+    time (thesillyhome-inspired recency weighting)."""
+    from hearth.domain.training.trainer import RECENCY_HALF_LIFE_DAYS
+    from hearth.domain.training.estimators import RandomForestEstimator
+    end = pd.Timestamp.now(tz="UTC").floor("30min")
+    idx = pd.date_range(end=end, periods=400, freq="30min")
+    X = pd.DataFrame({"a": [1.0] * 400, "hour_of_day": idx.hour.astype(float)}, index=idx)
+    y = pd.Series(["old"] * 200 + ["new"] * 200, index=idx)
+    age = (end - idx).total_seconds() / 86400
+    w = 0.5 ** (age / RECENCY_HALF_LIFE_DAYS)
+    est = RandomForestEstimator(n_estimators=50)
+    est.fit(X, y, sample_weight=w)
+    pred = est.predict_proba(X.tail(1)).idxmax(axis=1).iloc[0]
+    assert pred == "new"

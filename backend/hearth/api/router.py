@@ -95,6 +95,10 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(409, "Setup already completed")
 
         acct = body["account"]
+        if len(acct.get("password") or "") < 10:
+            raise HTTPException(400, "Password missing or too short — go back "
+                                      "to step 1 and re-enter it (resuming the "
+                                      "wizard never restores passwords).")
         repo.create_user(User(email=acct["email"], display_name=acct["name"],
                               role="admin"), acct["password"])
 

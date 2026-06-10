@@ -20,6 +20,8 @@ log = logging.getLogger(__name__)
 
 MIN_TRAIN_WINDOWS = 100
 VAL_DAYS = 7
+RECENCY_HALF_LIFE_DAYS = 21  # last week counts ~2x vs a month ago (thesillyhome's
+                             # recency-weighting idea — drift mitigation without forgetting)
 TUNE_MIN_WINDOWS = 500     # below this, tuning fits noise — use defaults
 TUNE_EVERY_DAYS = 30       # re-tune monthly, not every weekly retrain
 TEMPORAL_COLS = ["hour_of_day", "day_of_week", "is_weekend"]
@@ -63,7 +65,9 @@ def train_person(person_id: str, tsdb, repo, store,
 
     params = _hyperparams(repo, person_id, fset, X_train, y_train, force)
     est = RandomForestEstimator(**params)
-    est.fit(X_train, y_train)
+    age_days = (end - X_train.index).total_seconds() / 86400
+    weights = 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
+    est.fit(X_train, y_train, sample_weight=weights.to_numpy())
     metrics = evaluate_model(est, X_val, y_val, prov_val)
     metrics["n_train"] = int(len(X_train))
     metrics["feature_count"] = int(X_train.shape[1])
