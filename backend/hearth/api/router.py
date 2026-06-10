@@ -38,6 +38,99 @@ def build_api_router(deps: dict) -> APIRouter:
             return {"configured": False}
         return {"configured": True, "url": conn["url"], "options": conn["options"]}
 
+    # ── setup completion: persist EVERYTHING the wizard collected ──────────
+    TAXONOMY_PRESETS = {
+        "minimal": [("sleeping", "Sleeping", "sleeping"), ("away", "Away", "out of the house"),
+                     ("home", "Home", "just at home")],
+        "standard": [("sleeping", "Sleeping", "sleeping"), ("away", "Away", "out of the house"),
+                      ("home", "Home", "just at home"), ("cooking", "Cooking", "cooking"),
+                      ("eating", "Eating", "eating"), ("movie", "Movie", "watching something"),
+                      ("working", "Working", "working")],
+        "custom": [],
+    }
+
+    @api.post("/setup/complete")
+    async def setup_complete(body: dict) -> dict:
+        """One-shot: create admin, save connections/household/taxonomy/bindings,
+        mark fast-track, then restart to apply (docker restarts the container)."""
+        import asyncio
+        import os
+        import re as _re
+
+        from ..domain.onboarding.advisor import heuristic_bindings
+        from ..domain.schemas import Activity, Binding, Person, Role, User
+
+        if repo.user_count() > 0:
+            raise HTTPException(409, "Setup already completed")
+
+        acct = body["account"]
+        repo.create_user(User(email=acct["email"], display_name=acct["name"],
+                              role="admin"), acct["password"])
+
+        ha = body["ha"]
+        repo.set_connection("ha", ha["url"].rstrip("/"), ha["token"])
+
+        # home timezone from HA config (probe), fallback UTC
+        from ..adapters.ha_probe import probe, rest_inventory
+        info = await probe(ha["url"], ha["token"])
+        repo.set_setting("timezone", info.get("timezone") or "UTC")
+
+        influx = body["influx"]
+        if influx.get("mode") == "external":
+            repo.set_connection("influx", influx["url"].rstrip("/"), influx["token"],
+                                {"org": influx["org"] or "homelab", "mode": "external",
+                                 "source_bucket": influx.get("sourceBucket") or None})
+        else:
+            from ..config import settings as cfg
+            repo.set_connection("influx", cfg.influx_url, cfg.influx_token,
+                                {"org": cfg.influx_org, "mode": "bundled"})
+
+        if body.get("llmKey"):
+            repo.set_connection("llm", "https://openrouter.ai/api/v1", body["llmKey"],
+                                {"model": "auto"})
+
+        def _slug(name: str) -> str:
+            return _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "member"
+
+        for m in body.get("members", []):
+            repo.save_person(Person(id=_slug(m["name"]), name=m["name"],
+                                    avatar=m.get("avatar"),
+                                    ha_person_entity=m.get("personEntity") or None,
+                                    notify_service=m.get("notifyService") or None,
+                                    has_device=bool(m.get("hasDevice", True))))
+
+        for slug, name, phrase in TAXONOMY_PRESETS.get(body.get("taxonomyPreset", "standard"), []):
+            repo.save_activity(Activity(slug=slug, name=name, phrase=phrase))
+        repo.set_setting("default_activity", "home")
+
+        # seed bindings from heuristics over the live inventory (reviewable in
+        # the Sensors page later) + person-entity bindings for each member
+        try:
+            inventory = await rest_inventory(ha["url"], ha["token"])
+            for b in heuristic_bindings(inventory):
+                repo.save_binding(b)
+        except Exception:
+            pass
+        for m in body.get("members", []):
+            ent = m.get("personEntity")
+            if ent:
+                try:
+                    repo.save_binding(Binding(entity_id=ent, role=Role.PERSON,
+                                              name=f"{_slug(m['name'])}_loc",
+                                              person_id=_slug(m["name"])))
+                except Exception:
+                    pass
+
+        if influx.get("mode") == "external" and influx.get("sourceBucket"):
+            repo.set_setting("fasttrack.pending",
+                             {"source_bucket": influx["sourceBucket"]})
+
+        # restart to (re)build adapters with the saved connections
+        if os.getenv("HEARTH_NO_RESTART") != "1":
+            asyncio.get_event_loop().call_later(1.0, os._exit, 0)
+        return {"ok": True, "restarting": True,
+                "fasttrack": bool(influx.get("mode") == "external" and influx.get("sourceBucket"))}
+
     @api.post("/ha/test")
     async def ha_test(body: dict) -> dict:
         """Staged wizard check; body {url, token}. Read-only, saves nothing."""
@@ -236,6 +329,7 @@ def build_api_router(deps: dict) -> APIRouter:
             "days": round(days, 1),
             "events_24h": tsdb.count_raw_events(24) if tsdb else 0,
             "sensors_bound": len([b for b in repo.bindings() if b.enabled]),
+            "fasttrack": repo.get_setting("fasttrack.status"),
             "milestones": {
                 "recording": bool(repo.get_setting("milestone.recording_started")),
                 "patterns": bool(repo.get_setting("milestone.patterns_found")),

@@ -75,6 +75,11 @@ def create_app() -> FastAPI:
         scheduler.start()
         if deps.get("ingest_coro"):
             app.state.ingest_task = asyncio.create_task(deps["ingest_coro"]())
+        if deps["repo"].get_setting("fasttrack.pending") and deps.get("tsdb"):
+            from .domain.fasttrack import run_fast_track
+            app.state.fasttrack_task = asyncio.create_task(
+                run_fast_track(deps["repo"], deps["tsdb"], deps["models"],
+                               deps.get("notifier")))
         log.info("Hearth up on :%s (tsdb=%s, ha=%s)", settings.port,
                  bool(deps["tsdb"]), bool(deps["events"]))
 

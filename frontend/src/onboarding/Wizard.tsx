@@ -58,6 +58,43 @@ export default function Wizard() {
   const next = () => setStep((s) => Math.min(s + 1, TOTAL));
   const back = () => setStep((s) => Math.max(s - 1, 1));
   const set = <K extends keyof WizardData>(k: K, v: WizardData[K]) => setData((d) => ({ ...d, [k]: v }));
+  const [applying, setApplying] = useState<"idle" | "saving" | "failed">("idle");
+
+  const finishSetup = async () => {
+    setApplying("saving");
+    try {
+      const r = await fetch("/api/setup/complete", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+      if (!r.ok && r.status !== 409) throw new Error(String(r.status));
+    } catch { /* server restarts mid-request; that's expected */ }
+    // poll until the backend is back with setup complete
+    for (let i = 0; i < 60; i++) {
+      await new Promise((res) => setTimeout(res, 2000));
+      try {
+        const h = await fetch("/api/health").then((x) => x.json());
+        if (h && h.needs_setup === false) {
+          localStorage.removeItem(STORE);
+          setApplying("idle");
+          setStep(10);
+          return;
+        }
+      } catch { /* still restarting */ }
+    }
+    setApplying("failed");
+  };
+
+  if (applying !== "idle") {
+    return (
+      <div style={{ padding: "120px 16px", maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
+        <h2>{applying === "saving" ? "Applying your setup…" : "That took too long"}</h2>
+        <p style={{ color: "var(--text-dim)", fontSize: 14.5 }}>
+          {applying === "saving"
+            ? "Saving everything and restarting Hearth with your connections — about ten seconds."
+            : "Hearth didn't come back up. Check: docker compose logs hearth — your wizard answers are still here."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: "32px 16px" }}>
@@ -70,8 +107,8 @@ export default function Wizard() {
       {step === 6 && <StepInventory d={data} set={set} next={next} back={back} />}
       {step === 7 && <StepAiAssist d={data} set={set} next={next} back={back} />}
       {step === 8 && <StepActivities d={data} set={set} next={next} back={back} />}
-      {step === 9 && <StepOutput d={data} set={set} next={next} back={back} />}
-      {step === 10 && <StepDone />}
+      {step === 9 && <StepOutput d={data} set={set} next={finishSetup} back={back} />}
+      {step === 10 && <StepDone d={data} />}
     </div>
   );
 }
@@ -474,7 +511,7 @@ function StepOutput({ d, next, back }: StepProps) {
   // Deep links into the USER'S OWN HA instance (URL from step 2) using the
   // same /_my_redirect/ endpoints the my.home-assistant.io buttons resolve to.
   const ha = d.ha.url.replace(/\/+$/, "");
-  const HEARTH_REPO = { owner: "your-org", repository: "hearth" }; // TODO: real repo
+  const HEARTH_REPO = { owner: "Finnsim123", repository: "Hearth" };
   const hacsLink = `${ha}/_my_redirect/hacs_repository?owner=${HEARTH_REPO.owner}&repository=${HEARTH_REPO.repository}&category=integration`;
   const flowLink = `${ha}/_my_redirect/config_flow_start?domain=hearth`;
   return (
@@ -532,23 +569,34 @@ function StepOutput({ d, next, back }: StepProps) {
   );
 }
 
-function StepDone() {
-  const items: [string, string][] = [
-    ["Right now", "Hearth is recording. Close this tab, go live your normal life around the house — that IS the training data."],
-    ["In ~3 days", "First patterns appear — we'll send a phone notification when they're ready to name."],
-    ["In ~1 week", "Enough data for a first model. You'll get a “Hearth is live ✨” notification when predictions start flowing into HA."],
-    ["Ongoing", "Hearth occasionally asks “was this right?” — every answer makes next week's model better."],
-  ];
+function StepDone({ d }: { d: WizardData }) {
+  const fastTrack = d.influx.mode === "external" && !!d.influx.sourceBucket;
+  const items: [string, string][] = fastTrack
+    ? [
+        ["Right now", `Hearth is importing your history from “${d.influx.sourceBucket}” and building features — minutes, not days.`],
+        ["Within the hour", "A first model trains on your imported data. Predictions and the activity ribbon go live today — watch the dashboard."],
+        ["Today", "Hearth may already start asking “was this right?” — early answers sharpen the model fastest."],
+        ["Ongoing", "Live recording keeps improving on the imported foundation; retraining runs weekly."],
+      ]
+    : [
+        ["Right now", "Hearth is recording. Close this tab, go live your normal life around the house — that IS the training data."],
+        ["In ~3 days", "First patterns appear — we'll send a phone notification when they're ready to name."],
+        ["In ~1 week", "Enough data for a first model. You'll get a “Hearth is live ✨” notification when predictions start flowing into HA."],
+        ["Ongoing", "Hearth occasionally asks “was this right?” — every answer makes next week's model better."],
+      ];
   return (
-    <StepShell step={10} total={TOTAL} title="You're all set — come back in a few days"
-      explainer="Setup is done. Hearth learns by watching normal life, so the best thing you can do now is nothing at all. We'll notify your phone at each milestone:">
+    <StepShell step={10} total={TOTAL}
+      title={fastTrack ? "You're all set — and you brought history" : "You're all set — come back in a few days"}
+      explainer={fastTrack
+        ? "Setup is done — and because you imported existing data, Hearth is skipping the waiting week and processing it right now:"
+        : "Setup is done. Hearth learns by watching normal life, so the best thing you can do now is nothing at all. We'll notify your phone at each milestone:"}>
       {items.map(([when, what]) => (
         <div key={when} style={{ display: "flex", gap: 12 }}>
           <span style={{ minWidth: 90, fontWeight: 500, fontSize: 14 }}>{when}</span>
           <span style={{ color: "var(--text-dim)", fontSize: 14.5 }}>{what}</span>
         </div>
       ))}
-      <FooterNav onNext={() => { localStorage.removeItem(STORE); window.location.href = "/"; }} nextLabel="Go to dashboard" />
+      <FooterNav onNext={() => { window.location.href = "/"; }} nextLabel="Go to dashboard" />
     </StepShell>
   );
 }

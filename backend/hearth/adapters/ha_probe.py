@@ -13,7 +13,7 @@ import aiohttp
 async def probe(url: str, token: str) -> dict:
     """-> {reachable, authed, entities, version, error} — staged truth."""
     out = {"reachable": False, "authed": False, "entities": 0,
-           "version": None, "error": None}
+           "version": None, "timezone": None, "error": None}
     base = url.rstrip("/")
     timeout = aiohttp.ClientTimeout(total=10)
     try:
@@ -26,7 +26,9 @@ async def probe(url: str, token: str) -> dict:
                     return out
                 r.raise_for_status()
                 out["authed"] = True
-                out["version"] = (await r.json()).get("version")
+                cfg = await r.json()
+                out["version"] = cfg.get("version")
+                out["timezone"] = cfg.get("time_zone")
             async with session.get(f"{base}/api/states",
                                    headers={"Authorization": f"Bearer {token}"}) as r:
                 r.raise_for_status()
