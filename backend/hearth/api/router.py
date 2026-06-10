@@ -240,15 +240,25 @@ def build_api_router(deps: dict) -> APIRouter:
         """Prune seeded bindings the improved heuristics would no longer
         suggest: device_tracker noise + diagnostics blocklist. Person bindings
         for household members (person.*) are always kept."""
+        from ..domain.features.person_scope import binding_owner
         from ..domain.onboarding.advisor import is_bindable
-        removed = []
+        removed, owned = [], 0
+        persons_now = repo.persons()
         for b in repo.bindings():
             if b.entity_id.split(".")[0] == "person":
                 continue
             if not is_bindable(b.entity_id, b.role):
                 repo.delete_binding(b.id)
                 removed.append(b.entity_id)
-        return {"removed": len(removed), "entities": removed}
+                continue
+            if not b.person_id:
+                owner = binding_owner(b, persons_now)
+                if owner:
+                    b.person_id = owner
+                    repo.save_binding(b)
+                    owned += 1
+        return {"removed": len(removed), "entities": removed,
+                "owners_assigned": owned}
 
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:

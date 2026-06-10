@@ -107,8 +107,10 @@ class OpenRouterAdvisor:
         return _extract_json(data["choices"][0]["message"]["content"])
 
     # ── bindings: the name->role brain ──────────────────────────────────────
-    async def propose_bindings(self, inventory: list[dict]) -> list[Binding]:
+    async def propose_bindings(self, inventory: list[dict],
+                               persons: list | None = None) -> list[Binding]:
         roles = ", ".join(r.value for r in Role)
+        member_ids = [p.id for p in (persons or [])]
         lines = [f"{e['entity_id']} | {e.get('device_class') or '-'} | "
                  f"{e.get('unit') or '-'} | {e.get('friendly_name') or '-'}"
                  for e in inventory if not e.get("disabled")]
@@ -121,8 +123,13 @@ class OpenRouterAdvisor:
             "home. Skip diagnostics, infrastructure, weather, forecasts, "
             "network devices.\n"
             f"Valid roles: {roles}.\n"
+            f"Household members: {member_ids or 'unknown'}. PERSONAL devices "
+            "(alarm clock, phone focus/steps/battery, wearables) must carry "
+            "\"person\": the owning member id when the entity name implies an "
+            "owner — wrong-person signals poison that person's model.\n"
             "Reply with ONLY a JSON array: [{\"entity_id\": str, \"role\": str, "
             "\"name\": short_snake_case_slug, \"room\": str|null, "
+            "\"person\": member_id|null, "
             "\"reason\": str}] — nothing else. Keep each reason under 8 words; "
             "omit the reason field entirely when the mapping is obvious.")
         out: list[Binding] = []
@@ -142,6 +149,8 @@ class OpenRouterAdvisor:
                 try:
                     role = Role(it["role"])
                     name = _slugify(it.get("name") or it["entity_id"].split(".")[-1])
+                    person = it.get("person")
+                    person = person if person in member_ids else None
                     reason = str(it.get("reason", "")).strip()
                     standard = is_bindable(it["entity_id"], role)
                     appealed = (not standard and bool(reason)
@@ -152,7 +161,7 @@ class OpenRouterAdvisor:
                         opts = {"llm_override": reason} if appealed else {}
                         out.append(Binding(entity_id=it["entity_id"], role=role,
                                            name=name, room=it.get("room"),
-                                           options=opts))
+                                           person_id=person, options=opts))
                 except (KeyError, ValueError):
                     continue
         return out

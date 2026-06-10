@@ -57,6 +57,7 @@ class FakeRepo:
 
     def get_setting(self, k, d=None): return self.settings.get(k, d)
     def persons(self): return [Person(id="alice", name="Alice")]
+    def bindings(self): return []
     def clusters(self, status=None, person_id=None):
         return [c for c in self.saved if (status is None or c.status == status)]
     def clear_clusters(self, person_id, status="new"):

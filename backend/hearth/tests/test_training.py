@@ -62,6 +62,8 @@ class FakeRepo:
         ]
 
     def rules(self): return self._rules
+    def bindings(self): return []
+    def persons(self): return []
     def activities(self):
         return [Activity(slug=s, name=s) for s in ("sleeping", "movie", "home")]
     def get_setting(self, k, d=None): return self.settings.get(k, d)

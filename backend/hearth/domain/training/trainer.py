@@ -39,6 +39,12 @@ def train_person(person_id: str, tsdb, repo, store,
         log.info("[%s] %d windows < %d — skip", person_id, len(feats), MIN_TRAIN_WINDOWS)
         return None
 
+    # never learn from another member's personal-cadence sensors (their alarm
+    # says nothing about YOU — at best it leaks schedule correlation)
+    from ..features.person_scope import drop_foreign_personal
+    feats, excluded = drop_foreign_personal(
+        feats, repo.bindings(), repo.persons(), person_id)
+
     default_activity = repo.get_setting("default_activity", "home") or "home"
     bootstrap = bootstrap_labels(repo.rules(), feats, person_id, default_activity)
     events = tsdb.read_labels(person_id, start, end)
@@ -74,6 +80,8 @@ def train_person(person_id: str, tsdb, repo, store,
     train_acc = float((est.predict_proba(X_train).idxmax(axis=1) == y_train).mean())
     metrics["accuracy_train"] = round(train_acc, 4)
     metrics["hyperparams"] = params
+    if excluded:
+        metrics["excluded_features"] = sorted(excluded)
     try:                                   # glass-box: top-15 feature importances
         imp = est.model.feature_importances_
         ranked = sorted(zip(est.columns, imp), key=lambda kv: -kv[1])[:15]

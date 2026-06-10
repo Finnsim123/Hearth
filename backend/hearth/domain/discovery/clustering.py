@@ -81,6 +81,9 @@ def discover_person(person_id: str, tsdb, repo, days: int = 30) -> list[ClusterC
     if confirmed:
         feats = feats[~feats.index.isin(confirmed)]
 
+    from ..features.person_scope import drop_foreign_personal
+    feats, _ = drop_foreign_personal(feats, repo.bindings(), repo.persons(), person_id)
+
     X = feats.drop(columns=[c for c in TEMPORAL_COLS if c in feats.columns])
     X = X.loc[:, X.std() > 0]                      # constant features carry nothing
     if X.empty or len(X) < MIN_WINDOWS:

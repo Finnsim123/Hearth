@@ -45,11 +45,18 @@ async def run_seed(repo, events) -> None:
             try:
                 from ...adapters.openrouter_llm import OpenRouterAdvisor
                 advisor = OpenRouterAdvisor(repo)
-                for b in await advisor.propose_bindings(usable):
+                for b in await advisor.propose_bindings(usable, repo.persons()):
                     merged[b.entity_id] = b              # LLM wins ties
             except Exception:
                 log.exception("LLM binding proposal failed — heuristics only")
+        # ownership backfill: a member's name/id as a token in the binding
+        # claims it ("nora_wekker" → nora) — person_scope uses this to
+        # keep one member's alarm/phone out of another member's model
+        from ..features.person_scope import binding_owner
+        persons_now = repo.persons()
         for b in merged.values():
+            if not b.person_id:
+                b.person_id = binding_owner(b, persons_now)
             try:
                 repo.save_binding(b)
             except Exception:
