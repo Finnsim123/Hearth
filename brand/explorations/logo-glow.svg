@@ -1,0 +1,7 @@
+<svg width="64" height="64" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Hearth "Glow" — presence radiating from a home: ember dot + rising arcs -->
+  <circle cx="16" cy="23" r="3" fill="#F59E0B"/>
+  <path d="M10.3 17.3 a8 8 0 0 1 11.4 0" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M6.8 13.8 a13 13 0 0 1 18.4 0" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.62"/>
+  <path d="M3.6 10.2 a17.6 17.6 0 0 1 24.8 0" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.3"/>
+</svg>

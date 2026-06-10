@@ -1,0 +1,87 @@
+# Hearth stack
+#
+#   docker compose up -d                          -> Hearth only (BYO InfluxDB,
+#                                                    connect it in the wizard)
+#   docker compose --profile influxdb up -d       -> Hearth + bundled InfluxDB
+#   --profile mqtt      adds Mosquitto (skip if reusing HA's broker)
+#   --profile grafana   adds Grafana with provisioned dashboards
+#
+# The onboarding wizard asks which mode you're in; "bundled" requires the
+# influxdb profile (the wizard detects it and shows the exact command if not).
+
+services:
+  influxdb:
+    image: influxdb:2.7
+    profiles: ["influxdb"]
+    restart: unless-stopped
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: hearth
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD:?set in .env}
+      DOCKER_INFLUXDB_INIT_ORG: hearth
+      DOCKER_INFLUXDB_INIT_BUCKET: hearth_raw
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?set in .env}
+    ports:
+      - "8086:8086"          # expose for Grafana on other hosts; remove if not needed
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  hearth:
+    build: ./backend
+    restart: unless-stopped
+    # No depends_on: Hearth boots without any database and the wizard
+    # connects either the bundled influxdb (profile) or an external one.
+    volumes:
+      - hearth-data:/data          # SQLite, models, logs
+    environment:
+      HEARTH_SECRET: ${HEARTH_SECRET:?set in .env}   # encrypts tokens at rest
+      HEARTH_DATA_DIR: /data
+      # Pre-fill for the BUNDLED influxdb profile only; for an external
+      # InfluxDB leave these unset and enter details in the wizard instead.
+      HEARTH_INFLUX_URL: ${HEARTH_INFLUX_URL:-}
+      HEARTH_INFLUX_ORG: ${HEARTH_INFLUX_ORG:-hearth}
+      HEARTH_INFLUX_TOKEN: ${INFLUX_TOKEN:-}
+      HEARTH_LOG_LEVEL: ${HEARTH_LOG_LEVEL:-INFO}
+    ports:
+      - "8420:8420"          # web UI + API
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8420/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    profiles: ["mqtt"]
+    restart: unless-stopped
+    volumes:
+      - mosquitto-data:/mosquitto/data
+    ports:
+      - "1883:1883"
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    profiles: ["grafana"]
+    restart: unless-stopped
+    depends_on:
+      - influxdb
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-hearth}
+    ports:
+      - "3000:3000"
+
+volumes:
+  influxdb-data:
+  influxdb-config:
+  hearth-data:
+  mosquitto-data:
+  grafana-data:

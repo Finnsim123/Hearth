@@ -1,0 +1,12 @@
+{
+  "domain": "hearth",
+  "name": "Hearth",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/your-org/hearth",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.0.1"
+}

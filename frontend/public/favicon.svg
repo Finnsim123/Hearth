@@ -1,0 +1,9 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    path { stroke: #111827; }
+    @media (prefers-color-scheme: dark) { path { stroke: #E7EAF0; } }
+  </style>
+  <path d="M16 4 L28 14 V26 a2 2 0 0 1 -2 2 H6 a2 2 0 0 1 -2 -2 V14 Z"
+        stroke-width="2.5" stroke-linejoin="round"/>
+  <circle cx="16" cy="20" r="3.5" fill="#F59E0B"/>
+</svg>

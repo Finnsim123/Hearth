@@ -1,0 +1,35 @@
+# Hearth — Home Assistant automation blueprint
+# Forwards every HEARTH_* notification action to the Hearth backend.
+# This is the ONLY automation Hearth needs in HA — all parsing is server-side
+# (iOS does not return notification tags; action ids are the reliable channel).
+blueprint:
+  name: Hearth — forward notification actions
+  domain: automation
+  input:
+    hearth_url:
+      name: Hearth base URL
+      description: e.g. http://192.168.1.50:8420
+      selector:
+        text:
+
+mode: queued
+trigger:
+  - platform: event
+    event_type: mobile_app_notification_action
+condition:
+  - condition: template
+    value_template: "{{ trigger.event.data.action is defined and trigger.event.data.action.startswith('HEARTH_') }}"
+action:
+  - service: rest_command.hearth_forward_action
+    data:
+      action: "{{ trigger.event.data.action }}"
+      device: "{{ trigger.event.data.device_name | default('') }}"
+
+# Add once to configuration.yaml (the blueprint references it):
+#
+# rest_command:
+#   hearth_forward_action:
+#     url: "<hearth_url>/api/feedback/action"
+#     method: POST
+#     content_type: application/json
+#     payload: '{"action": "{{ action }}", "device": "{{ device }}"}'

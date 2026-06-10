@@ -1,0 +1,7 @@
+<svg width="64" height="64" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Hearth "Monogram" — H whose crossbar is an activity waveform in ember -->
+  <path d="M7 5 V27" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <path d="M25 5 V27" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <path d="M7 16 H11 L13 12 L17 20 L19 16 H25"
+        stroke="#F59E0B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

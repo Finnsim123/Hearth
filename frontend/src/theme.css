@@ -1,0 +1,144 @@
+/* Hearth design tokens — source of truth (docs/DESIGN.md).
+
+   Theme model (three-way):
+   - no data-theme attribute  -> FOLLOW SYSTEM (prefers-color-scheme)
+   - data-theme="dark"        -> forced dark
+   - data-theme="light"       -> forced light
+   Dark tokens are the base; light tokens override via media query (system)
+   or attribute (manual). See theme.ts for the switcher. */
+
+:root {
+  /* neutrals — dark */
+  --bg: #0f1115;
+  --surface: #161a21;
+  --surface-2: #1e242e;
+  --border: #2a313d;
+  --text: #e7eaf0;
+  --text-dim: #9aa3b2;
+  --shadow-sm: none;
+
+  /* brand */
+  --accent: #f59e0b;
+  --accent-strong: #d97706;
+  --on-accent: #1a1206;
+
+  /* status */
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+
+  /* activity palette — same activity = same color, everywhere */
+  --act-sleeping: #818cf8;
+  --act-away: #94a3b8;
+  --act-home: #34d399;
+  --act-cooking: #f59e0b;
+  --act-eating: #fb923c;
+  --act-media: #f472b6;
+  --act-working: #60a5fa;
+
+  /* geometry */
+  --radius-ctl: 8px;
+  --radius-card: 12px;
+  --radius-modal: 16px;
+  --content-max: 1200px;
+
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-feature-settings: "tnum";
+}
+
+[data-theme="light"] {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --border: #e2e8f0;
+  --text: #111827;
+  --text-dim: #64748b;
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #f8fafc;
+    --surface: #ffffff;
+    --surface-2: #f1f5f9;
+    --border: #e2e8f0;
+    --text: #111827;
+    --text-dim: #64748b;
+    --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+    color-scheme: light;
+  }
+}
+
+/* base */
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+h1 { font-size: 31px; font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 25px; font-weight: 600; letter-spacing: -0.01em; }
+h3 { font-size: 20px; font-weight: 600; }
+.label { font-size: 12px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-sm);
+  padding: 16px 24px;
+}
+
+.btn {
+  font: 500 14px Inter, system-ui, sans-serif;
+  border-radius: var(--radius-ctl);
+  padding: 10px 16px;
+  min-height: 44px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 150ms ease-out, border-color 150ms ease-out;
+}
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover { background: var(--accent-strong); }
+.btn-secondary { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+.btn-ghost { background: none; color: var(--text-dim); }
+.btn-ghost:hover { color: var(--text); }
+
+input, select, textarea {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-ctl);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 14px;
+}
+:is(input, select, textarea, .btn):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* confidence micro-bar */
+.conf { height: 4px; border-radius: 2px; background: var(--surface-2); }
+.conf > span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+.conf.low > span { background: var(--warn); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

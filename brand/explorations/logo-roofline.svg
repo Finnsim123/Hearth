@@ -1,0 +1,7 @@
+<svg width="64" height="64" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Hearth "Roofline" — roof chevron over an activity-dot timeline -->
+  <path d="M4 14 L16 5 L28 14" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="8"  cy="22" r="2.2" fill="currentColor" opacity="0.35"/>
+  <circle cx="16" cy="22" r="3"   fill="#F59E0B"/>
+  <circle cx="24" cy="22" r="2.2" fill="currentColor" opacity="0.35"/>
+</svg>
