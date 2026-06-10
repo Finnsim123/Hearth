@@ -2,8 +2,8 @@
  * Shell: nav + routes, styled with the Hearth design tokens (docs/DESIGN.md).
  * Each page is a stub matching docs/UI_SPEC.md; implement in roadmap order.
  */
-import { useState } from "react";
-import { Routes, Route, NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Routes, Route, NavLink, useLocation, useNavigate } from "react-router-dom";
 import "./theme.css";
 import { cycleTheme, getTheme, initTheme, type ThemeMode } from "./theme";
 
@@ -50,6 +50,14 @@ const themeLabel: Record<ThemeMode, string> = {
 
 export default function App() {
   const [mode, setMode] = useState<ThemeMode>(getTheme());
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    fetch("/api/health").then((r) => r.json()).then((h) => {
+      if (h.needs_setup && location.pathname !== "/onboarding") navigate("/onboarding");
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <div>
       <nav

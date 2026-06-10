@@ -18,7 +18,8 @@ def build_api_router(deps: dict) -> APIRouter:
     def health() -> dict:
         return {"status": "ok", "time": datetime.now(timezone.utc).isoformat(),
                 "tsdb": deps.get("tsdb") is not None,
-                "ha": deps.get("events") is not None}
+                "ha": deps.get("events") is not None,
+                "needs_setup": repo.user_count() == 0}
 
     # ── connections ────────────────────────────────────────────────────────
     @api.post("/connections/{kind}")

@@ -56,7 +56,18 @@ def create_app() -> FastAPI:
     from pathlib import Path
     static_dir = Path(os.getenv("HEARTH_STATIC_DIR", "/app/static"))
     if static_dir.is_dir():
-        app.mount("/", StaticFiles(directory=static_dir, html=True), name="ui")
+        app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+
+        from fastapi.responses import FileResponse
+
+        @app.get("/{path:path}", include_in_schema=False)
+        def spa(path: str) -> FileResponse:
+            # SPA fallback: real files (favicon etc.) served as-is, every
+            # client route (/onboarding, /inbox?q=..) gets index.html.
+            candidate = static_dir / path
+            if path and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(static_dir / "index.html")
 
     @app.on_event("startup")
     async def _start() -> None:
