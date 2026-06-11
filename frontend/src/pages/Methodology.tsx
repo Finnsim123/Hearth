@@ -308,16 +308,19 @@ export default function Methodology() {
         <h2 style={{ margin: 0 }}>How Hearth works</h2>
       </div>
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)" }}>
-        The whole pipeline, A→Z, with your instance's own numbers. Click any stage to expand it.
+        The whole pipeline, step by step, with your instance's own numbers. Click any step to expand it.
         {m.generated_at && <> <span style={{ opacity: 0.7 }}>As of {new Date(m.generated_at).toLocaleString()}.</span></>}
       </p>
-      {sections.map((s) => (
+      {sections.map((s, i) => (
         <details key={s.id} id={s.id}
                  style={{ border: "1px solid var(--border)", borderRadius: 12,
                           background: "var(--surface)", padding: "2px 4px" }}>
           <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px",
                             display: "flex", flexDirection: "column", gap: 3 }}>
-            <strong style={{ fontSize: 14.5 }}>{s.title}</strong>
+            <strong style={{ fontSize: 14.5 }}>
+              <span style={{ color: "var(--accent)" }}>Step {i + 1}</span>
+              {" · "}{s.title.replace(/^[A-Z] · /, "")}
+            </strong>
             <span style={{ fontSize: 13, color: "var(--text-dim)" }}>{s.summary}</span>
           </summary>
           <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 10,

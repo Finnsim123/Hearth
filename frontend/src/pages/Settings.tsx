@@ -441,6 +441,12 @@ function System() {
 // ── page ────────────────────────────────────────────────────────────────────
 
 export default function Settings() {
+  useEffect(() => {
+    if (window.location.hash) {
+      const el = document.querySelector(window.location.hash);
+      if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    }
+  }, []);
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 760 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -471,7 +477,7 @@ export default function Settings() {
       <ApiTokens />
       <ModelBehaviour />
       <Appearance />
-      <Account />
+      <div id="account"><Account /></div>
       <System />
     </section>
   );

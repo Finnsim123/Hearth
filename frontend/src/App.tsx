@@ -3,9 +3,9 @@
  * Each page is a stub matching docs/UI_SPEC.md; implement in roadmap order.
  */
 import { useEffect, useState } from "react";
-import { Routes, Route, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
 import "./theme.css";
-import { cycleTheme, getTheme, initTheme, type ThemeMode } from "./theme";
+import { applyTheme, getTheme, initTheme, type ThemeMode } from "./theme";
 
 initTheme();
 import Dashboard from "./pages/Dashboard";
@@ -20,16 +20,47 @@ import Onboarding from "./pages/Onboarding";
 import Login from "./components/Login";
 import ProgressWait from "./components/ProgressWait";
 
-const tabs = [
-  ["/", "Dashboard"],
-  ["/inbox", "Inbox"],
-  ["/activities", "Activities"],
-  ["/patterns", "Patterns"],
-  ["/models", "Models"],
-  ["/sensors", "Sensors"],
-  ["/methodology", "How it works"],
-  ["/settings", "Settings"],
-] as const;
+// The three pipeline stages — collapsible groups (Data → Model → Output).
+const PIPELINE: { label: string; items: readonly (readonly [string, string])[] }[] = [
+  { label: "Inputs", items: [["/sensors", "Sensors"]] },
+  { label: "The model", items: [["/activities", "Activities"], ["/patterns", "Patterns"], ["/models", "Models"]] },
+  { label: "Predictions", items: [["/inbox", "Inbox"]] },
+];
+
+const navLinkStyle = ({ isActive }: { isActive: boolean }) => ({
+  display: "block", padding: "7px 10px", borderRadius: 8, fontSize: 14,
+  textDecoration: "none", fontWeight: isActive ? 600 : 500,
+  color: isActive ? "var(--text)" : "var(--text-dim)",
+  background: isActive ? "var(--surface-2)" : "transparent",
+});
+
+const Chevron = ({ open }: { open: boolean }) => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+       style={{ transition: "transform .18s", transform: open ? "none" : "rotate(-90deg)" }}>
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+);
+
+const ICON = { width: 17, height: 17, viewBox: "0 0 24 24", fill: "none",
+  stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const, "aria-hidden": true };
+const SunIcon = () => (
+  <svg {...ICON}><circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+  </svg>
+);
+const MoonIcon = () => (
+  <svg {...ICON}><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8z" /></svg>
+);
+const AutoIcon = () => (   // "match system": a half-filled disc
+  <svg {...ICON}><circle cx="12" cy="12" r="9" />
+    <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none" />
+  </svg>
+);
+const THEMES: [ThemeMode, () => JSX.Element, string][] = [
+  ["light", SunIcon, "Light"], ["system", AutoIcon, "Match system"], ["dark", MoonIcon, "Dark"],
+];
 
 function Mark() {
   // logo-ember mark (brand/logo-ember.svg), inline for the nav
@@ -45,12 +76,6 @@ function Mark() {
     </svg>
   );
 }
-
-const themeLabel: Record<ThemeMode, string> = {
-  system: "Theme: system",
-  light: "Theme: light",
-  dark: "Theme: dark",
-};
 
 function UpdatingScreen() {
   return (
@@ -76,8 +101,20 @@ export default function App() {
   const [auth, setAuth] = useState<AuthState>("loading");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState<Set<string>>(
+    () => new Set(JSON.parse(localStorage.getItem("hearth.nav.collapsed") || "[]")));
   const navigate = useNavigate();
   const location = useLocation();
+
+  const toggleGroup = (label: string) => setNavCollapsed((prev) => {
+    const next = new Set(prev);
+    next.has(label) ? next.delete(label) : next.add(label);
+    localStorage.setItem("hearth.nav.collapsed", JSON.stringify([...next]));
+    return next;
+  });
+  // the group holding the current page is always shown (never hide the active item)
+  const currentGroup = PIPELINE.find((g) => g.items.some(([to]) => to === location.pathname))?.label;
+  const setTheme = (m: ThemeMode) => { applyTheme(m); setMode(m); };
 
   const checkAuth = async () => {
     try {
@@ -133,73 +170,88 @@ export default function App() {
   if (auth === "login") return <Login onSuccess={() => { setAuth("ready"); navigate("/"); }} />;
 
   return (
-    <div>
-      <nav
+    <div style={{ display: "flex", minHeight: "100vh" }}>
+      <aside
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 20,
-          padding: "12px 24px",
-          background: "var(--surface)",
-          borderBottom: "1px solid var(--border)",
+          width: 214, flexShrink: 0, position: "sticky", top: 0, height: "100vh",
+          display: "flex", flexDirection: "column", gap: 3, padding: "16px 12px",
+          background: "var(--surface)", borderRight: "1px solid var(--border)",
+          overflowY: "auto",
         }}
       >
-        <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, letterSpacing: "-0.02em" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600,
+                       letterSpacing: "-0.02em", padding: "4px 8px 14px" }}>
           <Mark />
           hearth
         </span>
-        {tabs.map(([to, label]) => (
-          <NavLink
-            key={to}
-            to={to}
-            style={({ isActive }) => ({
-              color: isActive ? "var(--text)" : "var(--text-dim)",
-              textDecoration: "none",
-              fontSize: 14,
-              fontWeight: 500,
-            })}
-          >
-            {label}
-          </NavLink>
-        ))}
-        {update && update.behind > 0 && (
-          <button
-            className="btn btn-primary"
-            style={{ marginLeft: "auto", minHeight: 32, padding: "4px 12px", fontSize: 13 }}
-            onClick={runUpdate}
-            title={update.latest_subject}
-          >
-            Update available ({update.behind})
-          </button>
-        )}
-        <button
-          className="btn btn-ghost"
-          style={{ marginLeft: update && update.behind > 0 ? 0 : "auto", minHeight: 36, padding: "6px 10px" }}
-          onClick={() => setMode(cycleTheme())}
-          title="Cycle theme: system → light → dark"
-        >
-          {themeLabel[mode]}
-        </button>
-        <button
-          className="btn btn-ghost"
-          style={{ minHeight: 36, padding: "6px 10px" }}
-          onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); setAuth("login"); }}
-        >
-          Sign out
-        </button>
-      </nav>
-      <main style={{ maxWidth: "var(--content-max)", margin: "0 auto", padding: 24 }}>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/inbox" element={<Inbox />} />
-          <Route path="/activities" element={<Activities />} />
-          <Route path="/patterns" element={<Patterns />} />
-          <Route path="/models" element={<Models />} />
-          <Route path="/sensors" element={<Sensors />} />
-          <Route path="/methodology" element={<Methodology />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/onboarding" element={<Onboarding />} />
-        </Routes>
+
+        <NavLink to="/" end style={navLinkStyle}>Dashboard</NavLink>
+
+        {PIPELINE.map((g) => {
+          const open = !navCollapsed.has(g.label) || g.label === currentGroup;
+          return (
+            <div key={g.label} style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 12 }}>
+              <button onClick={() => toggleGroup(g.label)}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                         background: "none", border: "none", cursor: "pointer", width: "100%",
+                         padding: "4px 10px 4px", color: "var(--text-dim)", fontSize: 10.5,
+                         textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                {g.label}
+                <Chevron open={open} />
+              </button>
+              {open && g.items.map(([to, label]) => (
+                <NavLink key={to} to={to} style={navLinkStyle}>{label}</NavLink>
+              ))}
+            </div>
+          );
+        })}
+
+        <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 2, paddingTop: 14 }}>
+          {update && update.behind > 0 && (
+            <button className="btn btn-primary" style={{ width: "100%", fontSize: 13, marginBottom: 6 }}
+                    onClick={runUpdate} title={update.latest_subject}>
+              Update ({update.behind})
+            </button>
+          )}
+          <NavLink to="/methodology" style={navLinkStyle}>How it works</NavLink>
+          <NavLink to="/settings" end style={navLinkStyle}>Settings</NavLink>
+          <Link to="/settings#account" style={{ ...navLinkStyle({ isActive: false }) }}>Account</Link>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                        marginTop: 10, padding: "0 8px" }}>
+            <div style={{ display: "inline-flex", border: "1px solid var(--border)",
+                          borderRadius: 999, overflow: "hidden" }}>
+              {THEMES.map(([m, Glyph, title]) => (
+                <button key={m} onClick={() => setTheme(m)} title={title} aria-label={title}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center",
+                           border: "none", cursor: "pointer", padding: "5px 9px", lineHeight: 1,
+                           background: mode === m ? "var(--accent)" : "transparent",
+                           color: mode === m ? "#fff" : "var(--text-dim)" }}>
+                  <Glyph />
+                </button>
+              ))}
+            </div>
+            <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 8px" }}
+                    onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); setAuth("login"); }}>
+              Sign out
+            </button>
+          </div>
+        </div>
+      </aside>
+      <main style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ maxWidth: "var(--content-max)", margin: "0 auto", padding: 24 }}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/activities" element={<Activities />} />
+            <Route path="/patterns" element={<Patterns />} />
+            <Route path="/models" element={<Models />} />
+            <Route path="/sensors" element={<Sensors />} />
+            <Route path="/methodology" element={<Methodology />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/onboarding" element={<Onboarding />} />
+          </Routes>
+        </div>
       </main>
     </div>
   );
