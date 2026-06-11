@@ -14,7 +14,8 @@ import logging
 
 import aiohttp
 
-from ..domain.labeling.phrasing import button_titles, phrase_question
+from ..domain.labeling.phrasing import (button_titles, followup_message,
+                                         option_universe, root_options)
 from ..domain.schemas import Person, Question
 
 log = logging.getLogger(__name__)
@@ -77,11 +78,31 @@ class HaRestNotifier:
             return False
         activities = self.repo.activities()
         probs = question.probabilities or {question.predicted: question.confidence}
-        message, _ = phrase_question(probs, activities, question.window_ts)
+        # message: a follow-up reads "was it one of these instead?"; a root
+        # question reads in its uncertainty mode (confident / toss-up / unsure).
+        if question.parent_id:
+            message = followup_message(question.window_ts)
+        else:
+            message, _opts, _more = root_options(probs, activities, question.window_ts)
         titles = button_titles(question.alternatives, activities)
-        actions = [{"action": f"HEARTH_{question.id}_{i}",
-                    "title": ("✓ " + t if i == 0 else t)}
-                   for i, t in enumerate(titles[:3])]
+
+        # Confident single-option question = Yes / No. Otherwise list the options
+        # and add "Other". The escape (No/Other) opens the next batch; only show
+        # it while candidates remain unshown.
+        confident = len(question.alternatives) == 1
+        if confident:
+            actions = [{"action": f"HEARTH_{question.id}_0", "title": "✓ Yes"}]
+            escape_title = "No"
+        else:
+            actions = [{"action": f"HEARTH_{question.id}_{i}", "title": t}
+                       for i, t in enumerate(titles)]
+            escape_title = "Other"
+        remaining = [s for s in option_universe(probs, activities)
+                     if s not in set(question.asked)]
+        if remaining:
+            actions.append({"action": f"HEARTH_{question.id}_more", "title": escape_title})
+        actions = actions[:3]
+
         base = self.base_url or self.repo.get_setting("hearth_base_url", "") or ""
         deep_link = f"{base.rstrip('/')}/inbox?q={question.id}"
         payload = {

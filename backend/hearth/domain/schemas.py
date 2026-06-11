@@ -167,9 +167,13 @@ class Question(BaseModel):
     predicted: str
     confidence: float
     alternatives: list[str] = Field(default_factory=list)  # button slugs, index-mapped
+    asked: list[str] = Field(default_factory=list)  # cumulative slugs offered across the
+                                                    # follow-up chain — excluded from the next batch
+    parent_id: int | None = None  # set on a follow-up; links back to the question it refines
     probabilities: dict[str, float] = Field(default_factory=dict)  # drives phrasing mode
     channel: Literal["notification", "inbox"] = "inbox"
-    status: Literal["open", "answered", "expired"] = "open"
+    # superseded = the user tapped "No/Other", so a follow-up question replaced this one
+    status: Literal["open", "answered", "expired", "superseded"] = "open"
     answer: str | None = None
     created_at: datetime | None = None
 

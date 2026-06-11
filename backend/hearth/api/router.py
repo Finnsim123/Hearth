@@ -791,15 +791,19 @@ def build_api_router(deps: dict) -> APIRouter:
 
     # ── feedback: notification action taps, forwarded by the HA integration ─
     @api.post("/feedback/action")
-    def feedback_action(body: dict) -> dict:
-        """body: {"action": "HEARTH_<qid>_<idx>", "device": "..."} — sent by
-        the Hearth integration's event-bus listener. No automations involved."""
+    async def feedback_action(body: dict) -> dict:
+        """body: {"action": "HEARTH_<qid>_<idx|more>", "device": "..."} — sent by
+        the Hearth integration's event-bus listener. No automations involved.
+
+        A numeric idx is a concrete answer (records the label). The "more" token
+        is the No/Other escape: it supersedes this question and pushes a FOLLOW-UP
+        notification with the next batch of options, repeating until one is picked."""
         action = str(body.get("action", ""))
         parts = action.split("_")
         if len(parts) != 3 or parts[0] != "HEARTH":
             raise HTTPException(400, "not a hearth action")
         try:
-            qid, idx = int(parts[1]), int(parts[2])
+            qid = int(parts[1])
         except ValueError:
             raise HTTPException(400, "malformed action id")
         q = repo.get_question(qid)
@@ -807,6 +811,35 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(404, "unknown question")
         if q.status != "open":
             return {"ok": True, "note": "already answered"}
+
+        # ── escape: "No" / "Other" → send the next batch as a follow-up ──────
+        if parts[2] == "more":
+            from ..domain.labeling.phrasing import next_batch
+            from ..domain.schemas import Question
+            activities = repo.activities()
+            probs = q.probabilities or {q.predicted: q.confidence}
+            batch, _has_more = next_batch(probs, activities, q.asked)
+            repo.supersede_question(qid)
+            if not batch:
+                return {"ok": True, "note": "no further options"}
+            child = repo.save_question(Question(
+                person_id=q.person_id, window_ts=q.window_ts, predicted=q.predicted,
+                confidence=q.confidence, probabilities=probs, alternatives=batch,
+                asked=list(q.asked) + batch, parent_id=qid, channel=q.channel))
+            notifier = deps.get("notifier")
+            person = next((p for p in repo.persons() if p.id == q.person_id), None)
+            if notifier is not None and person is not None:
+                try:
+                    await notifier.ask(child, person)
+                except Exception:
+                    log.exception("follow-up notification failed (stays in inbox)")
+            return {"ok": True, "followup": child.id, "options": batch}
+
+        # ── concrete answer ─────────────────────────────────────────────────
+        try:
+            idx = int(parts[2])
+        except ValueError:
+            raise HTTPException(400, "malformed action id")
         if idx >= len(q.alternatives):
             raise HTTPException(400, "option index out of range")
         answer_slug = q.alternatives[idx]

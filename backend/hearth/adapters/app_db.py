@@ -112,6 +112,8 @@ class QuestionRow(Base):
     predicted: Mapped[str] = mapped_column(String)
     confidence: Mapped[float] = mapped_column(Float)
     alternatives_json: Mapped[str] = mapped_column(Text, default="[]")
+    asked_json: Mapped[str] = mapped_column(Text, default="[]")
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     probabilities_json: Mapped[str] = mapped_column(Text, default="{}")
     channel: Mapped[str] = mapped_column(String, default="inbox")
     status: Mapped[str] = mapped_column(String, default="open", index=True)
@@ -356,11 +358,21 @@ class AppDb:
             s.commit()
 
     # ── questions / models / clusters (Phase 2/3 consumers) ───────────────
+    def _question(self, r: QuestionRow) -> Question:
+        return Question(id=r.id, person_id=r.person_id, window_ts=r.window_ts,
+                        predicted=r.predicted, confidence=r.confidence,
+                        alternatives=json.loads(r.alternatives_json),
+                        asked=json.loads(r.asked_json or "[]"), parent_id=r.parent_id,
+                        probabilities=json.loads(r.probabilities_json),
+                        channel=r.channel, status=r.status, answer=r.answer,
+                        created_at=r.created_at)
+
     def save_question(self, q: Question) -> Question:
         with Session(self.engine) as s:
             r = QuestionRow(person_id=q.person_id, window_ts=q.window_ts, predicted=q.predicted,
                             confidence=q.confidence, channel=q.channel, status=q.status,
                             alternatives_json=json.dumps(q.alternatives),
+                            asked_json=json.dumps(q.asked), parent_id=q.parent_id,
                             probabilities_json=json.dumps(q.probabilities))
             s.add(r)
             s.commit()
@@ -372,34 +384,28 @@ class AppDb:
             stmt = select(QuestionRow).where(QuestionRow.status == "open")
             if person:
                 stmt = stmt.where(QuestionRow.person_id == person)
-            return [Question(id=r.id, person_id=r.person_id, window_ts=r.window_ts,
-                             predicted=r.predicted, confidence=r.confidence,
-                             alternatives=json.loads(r.alternatives_json),
-                             probabilities=json.loads(r.probabilities_json),
-                             channel=r.channel, status=r.status, answer=r.answer,
-                             created_at=r.created_at)
-                    for r in s.scalars(stmt).all()]
+            return [self._question(r) for r in s.scalars(stmt).all()]
 
     def get_question(self, question_id: int) -> Question | None:
         with Session(self.engine) as s:
             r = s.get(QuestionRow, question_id)
-            if r is None:
-                return None
-            return Question(id=r.id, person_id=r.person_id, window_ts=r.window_ts,
-                            predicted=r.predicted, confidence=r.confidence,
-                            alternatives=json.loads(r.alternatives_json),
-                            probabilities=json.loads(r.probabilities_json),
-                            channel=r.channel, status=r.status, answer=r.answer,
-                            created_at=r.created_at)
+            return self._question(r) if r is not None else None
 
     def answer_question(self, question_id: int, answer: str) -> Question:
         with Session(self.engine) as s:
             r = s.get(QuestionRow, question_id)
             r.answer, r.status = answer, "answered"
             s.commit()
-            return Question(id=r.id, person_id=r.person_id, window_ts=r.window_ts,
-                            predicted=r.predicted, confidence=r.confidence,
-                            channel=r.channel, status=r.status, answer=r.answer)
+            return self._question(r)
+
+    def supersede_question(self, question_id: int) -> None:
+        """Mark a question replaced by a follow-up (user tapped No/Other). It
+        leaves the inbox but isn't a real answer, so no label is written."""
+        with Session(self.engine) as s:
+            r = s.get(QuestionRow, question_id)
+            if r and r.status == "open":
+                r.status = "superseded"
+                s.commit()
 
     def questions_since(self, person: str, since: datetime) -> int:
         with Session(self.engine) as s:
@@ -412,14 +418,7 @@ class AppDb:
         with Session(self.engine) as s:
             r = s.scalars(select(QuestionRow).where(QuestionRow.person_id == person)
                           .order_by(QuestionRow.created_at.desc())).first()
-            if r is None:
-                return None
-            return Question(id=r.id, person_id=r.person_id, window_ts=r.window_ts,
-                            predicted=r.predicted, confidence=r.confidence,
-                            alternatives=json.loads(r.alternatives_json),
-                            probabilities=json.loads(r.probabilities_json),
-                            channel=r.channel, status=r.status, answer=r.answer,
-                            created_at=r.created_at)
+            return self._question(r) if r is not None else None
 
     def skip_question(self, question_id: int) -> None:
         with Session(self.engine) as s:

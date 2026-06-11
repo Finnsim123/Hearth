@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from ..schemas import Person, Prediction, Question
+from .phrasing import root_options as phrase_question_options
 
 log = logging.getLogger(__name__)
 
@@ -88,11 +89,20 @@ async def maybe_ask(pred: Prediction, person: Person, repo, notifier) -> Questio
     # Inbox so the window can be confirmed next morning.
     silent = _is_silent(pred.predicted, repo)
 
-    ranked = sorted(pred.probabilities.items(), key=lambda kv: -kv[1])
-    alternatives = [s for s, _ in ranked[:3]] or [pred.predicted]
+    # Mode-based first options: confident -> [predicted] (Yes/No), toss-up /
+    # unsure -> top two (+ an "Other" that opens a follow-up). The escape path
+    # is handled at answer time (feedback_action) by sending the next batch.
+    try:
+        activities = repo.activities()
+    except Exception:
+        activities = []
+    _msg, alternatives, _more = phrase_question_options(
+        pred.probabilities or {pred.predicted: pred.confidence}, activities, pred.window_ts)
+    alternatives = alternatives or [pred.predicted]
     q = Question(person_id=person.id, window_ts=pred.window_ts,
                  predicted=pred.predicted, confidence=pred.confidence,
-                 alternatives=alternatives, probabilities=pred.probabilities,
+                 alternatives=alternatives, asked=list(alternatives),
+                 probabilities=pred.probabilities,
                  channel="notification" if (person.has_device and not silent) else "inbox")
     q = repo.save_question(q)
     if silent:

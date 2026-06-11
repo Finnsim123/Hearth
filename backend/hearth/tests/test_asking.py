@@ -50,12 +50,23 @@ def _person(**kw):
 
 
 @pytest.mark.asyncio
-async def test_uncertain_prediction_asks_with_top3_buttons(monkeypatch):
+async def test_uncertain_prediction_asks_mode_based_buttons(monkeypatch):
     repo, notifier = AskRepo(), SpyNotifier()
     monkeypatch.setattr(active.random, "random", lambda: 0.99)  # no exploration
+    # cooking .5 vs home .45 = toss-up → top two options, and `asked` mirrors them
     q = await active.maybe_ask(_pred(0.5), _person(), repo, notifier)
-    assert q is not None and q.alternatives[0] == "cooking" and len(q.alternatives) == 3
+    assert q is not None and q.alternatives[0] == "cooking" and len(q.alternatives) == 2
+    assert q.asked == q.alternatives
     assert notifier.asked and q.probabilities["cooking"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_confident_prediction_offers_single_yes_no(monkeypatch):
+    repo, notifier = AskRepo(), SpyNotifier()
+    monkeypatch.setattr(active.random, "random", lambda: 0.01)  # ε fires so a
+    # confident prediction still gets asked (exploration) → single Yes/No option
+    q = await active.maybe_ask(_pred(0.92), _person(), repo, notifier)
+    assert q is not None and q.alternatives == ["cooking"] and q.asked == ["cooking"]
 
 
 @pytest.mark.asyncio
