@@ -332,6 +332,47 @@ def build_api_router(deps: dict) -> APIRouter:
         return await sync_inventory(repo, events,
                                     use_llm=repo.get_connection("llm") is not None)
 
+    @api.get("/ha/entities")
+    async def ha_entities() -> list[dict]:
+        """The full Home Assistant entity list (for the 'Add sensor' search) with
+        a flag for what's already bound and the LLM's suggested role per entity."""
+        events = deps.get("events")
+        if events is None:
+            raise HTTPException(409, "Connect Home Assistant first")
+        from ..domain.onboarding.advisor import suggest_role
+        inv = await events.discover_entities()
+        bound = {b.entity_id for b in repo.bindings()}
+        out = []
+        for e in inv:
+            if e.get("disabled"):
+                continue
+            role = suggest_role(e)
+            out.append({"entity_id": e["entity_id"], "domain": e.get("domain"),
+                        "friendly_name": e.get("friendly_name"), "area": e.get("area"),
+                        "suggested_role": role.value if role else None,
+                        "bound": e["entity_id"] in bound})
+        return out
+
+    @api.post("/household/relink")
+    async def relink_persons() -> dict:
+        """Re-link every member to their home/away entity — LLM match (messy
+        names → the right member) with a name fallback. Fixes a member whose
+        person.* was missed at setup, without re-running the wizard."""
+        events = deps.get("events")
+        if events is None:
+            raise HTTPException(409, "Connect Home Assistant first")
+        from ..domain.onboarding.person_link import ensure_member_persons
+        inv = [e for e in await events.discover_entities() if not e.get("disabled")]
+        matches = {}
+        if repo.get_connection("llm"):
+            try:
+                from ..adapters.openrouter_llm import OpenRouterAdvisor
+                matches = await OpenRouterAdvisor(repo).match_person_entities(repo.persons(), inv)
+            except Exception:
+                log.exception("relink: LLM match failed — name fallback only")
+        linked = ensure_member_persons(repo, inv, matches)
+        return {"linked": linked}
+
     @api.get("/buddy")
     def buddy() -> dict:
         """Current phase for the ember buddy (every page) + first-run timeline.
@@ -453,7 +494,17 @@ def build_api_router(deps: dict) -> APIRouter:
         for p in persons:
             for ev in tsdb.read_labels(p.id, label_start, end):
                 classes[ev.label] = classes.get(ev.label, 0) + 1
-        return {"bindings": out, "classes": classes, "hours": hours}
+        # presence health: does each member have a LIVE home/away (person) binding?
+        # Without it the away rule can't fire for them — the biggest early-accuracy
+        # lever. status comes from the per-binding 'out' we just built.
+        status_by_name = {o["name"]: o["status"] for o in out}
+        members = []
+        for p in persons:
+            mine = [b for b in bindings if b.role.value == "person" and b.person_id == p.id]
+            alive = any(status_by_name.get(b.name) == "alive" for b in mine)
+            members.append({"id": p.id, "name": p.name, "has_person": bool(mine),
+                            "person_alive": alive})
+        return {"bindings": out, "classes": classes, "hours": hours, "members": members}
 
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:

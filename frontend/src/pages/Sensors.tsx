@@ -15,6 +15,14 @@ type Binding = {
 };
 
 const j = (r: Response) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); };
+const postJSON = (url: string, body: unknown) =>
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+const ALL_ROLES = ["presence", "bed", "person", "power", "light", "media", "env",
+                   "focus", "alarm_time", "door", "steps", "battery", "custom"];
+type Member = { id: string; name: string; has_person: boolean; person_alive: boolean };
+type Entity = { entity_id: string; domain: string | null; friendly_name: string | null;
+                area: string | null; suggested_role: string | null; bound: boolean };
 
 const ROLE_HINTS: Record<string, string> = {
   bed: "occupancy / pressure — sleeping signal",
@@ -96,6 +104,13 @@ function BindingRow({ b, persons, health, onChange }: {
   const status = health?.status;
   const isMobile = useIsMobile();
   const [busy, setBusy] = useState(false);
+  const [editRole, setEditRole] = useState(false);
+  const changeRole = async (role: string) => {
+    setEditRole(false);
+    if (role === b.role) return;
+    await postJSON("/api/bindings", { ...b, role }).catch(() => {});
+    onChange();
+  };
   const llmReason = (b.options?.llm_reason ?? b.options?.reason) as string | undefined;
   const overridden = Boolean(b.options?.llm_override);
   const toggle = async () => {
@@ -124,7 +139,16 @@ function BindingRow({ b, persons, health, onChange }: {
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <strong style={{ fontSize: 13.5 }}>{b.name}</strong>
-          <RoleBadge role={b.role} />
+          {editRole ? (
+            <select autoFocus defaultValue={b.role} onBlur={() => setEditRole(false)}
+                    onChange={(e) => changeRole(e.target.value)} style={{ fontSize: 12, padding: "1px 4px" }}>
+              {ALL_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          ) : (
+            <span onClick={() => setEditRole(true)} style={{ cursor: "pointer" }} title="Click to change role">
+              <RoleBadge role={b.role} />
+            </span>
+          )}
           {health && health.model_use > 0.001 && (
             <span title={`This sensor accounts for ${(health.model_use * 100).toFixed(1)}% of the live model's total feature importance.`}
                   style={{ fontSize: 11, padding: "1px 7px", borderRadius: 99, fontWeight: 600,
@@ -200,6 +224,110 @@ function BindingRow({ b, persons, health, onChange }: {
   );
 }
 
+function AddSensor({ members, onClose, onAdded }: {
+  members: Member[]; onClose: () => void; onAdded: () => void;
+}) {
+  const [entities, setEntities] = useState<Entity[] | null>(null);
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState<Entity | null>(null);
+  const [role, setRole] = useState("custom");
+  const [person, setPerson] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    fetch("/api/ha/entities").then(j).then(setEntities)
+      .catch(() => setEntities([]));
+  }, []);
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return (entities ?? [])
+      .filter((e) => !e.bound)
+      .filter((e) => !needle || e.entity_id.toLowerCase().includes(needle)
+        || (e.friendly_name ?? "").toLowerCase().includes(needle))
+      .slice(0, 80);
+  }, [entities, q]);
+  const pick = (e: Entity) => { setSel(e); setRole(e.suggested_role ?? "custom"); setErr(""); };
+  const add = async () => {
+    if (!sel) return;
+    setBusy(true);
+    const name = (sel.entity_id.split(".").pop() ?? "sensor")
+      .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "sensor";
+    try {
+      await postJSON("/api/bindings", {
+        entity_id: sel.entity_id, role, name, room: sel.area ?? null,
+        person_id: person || null, options: {}, enabled: true,
+      }).then(j);
+      onAdded(); onClose();
+    } catch { setErr("Couldn't add — the name may clash; try a different role."); setBusy(false); }
+  };
+  return (
+    <div onClick={onClose}
+         style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 40,
+                  display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "8vh 16px" }}>
+      <div className="card" onClick={(e) => e.stopPropagation()}
+           style={{ width: 520, maxWidth: "100%", maxHeight: "80vh", display: "flex",
+                    flexDirection: "column", gap: 12, padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 16 }}>Add a sensor</h3>
+          <button className="btn btn-ghost" style={{ marginLeft: "auto" }} onClick={onClose}>Close</button>
+        </div>
+        {!sel ? (
+          <>
+            <input autoFocus placeholder="Search Home Assistant entities…" value={q}
+                   onChange={(e) => setQ(e.target.value)} style={{ width: "100%", boxSizing: "border-box" }} />
+            <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+              {entities === null && <p style={{ color: "var(--text-dim)", fontSize: 13 }}>Loading…</p>}
+              {entities && shown.length === 0 && <p style={{ color: "var(--text-dim)", fontSize: 13 }}>Nothing matches (already-bound entities are hidden).</p>}
+              {shown.map((e) => (
+                <button key={e.entity_id} onClick={() => pick(e)}
+                        style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left",
+                                 padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)",
+                                 background: "var(--surface-2)", cursor: "pointer", color: "var(--text)" }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{e.friendly_name || e.entity_id}</div>
+                    <code style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{e.entity_id}</code>
+                  </div>
+                  {e.suggested_role && <RoleBadge role={e.suggested_role} />}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 13 }}>
+              <div style={{ fontWeight: 600 }}>{sel.friendly_name || sel.entity_id}</div>
+              <code style={{ fontSize: 12, color: "var(--text-dim)" }}>{sel.entity_id}</code>
+            </div>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 13.5 }}>
+              Role {sel.suggested_role && <span style={{ color: "var(--text-dim)", fontSize: 12 }}>· AI suggested “{sel.suggested_role}”</span>}
+              <select value={role} onChange={(e) => setRole(e.target.value)}>
+                {ALL_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            {(role === "person" || role === "bed" || role === "alarm_time" || role === "focus"
+              || role === "steps" || role === "battery") && members.length > 0 && (
+              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 13.5 }}>
+                Belongs to <span style={{ color: "var(--text-dim)", fontSize: 12 }}>· links a personal sensor to one member</span>
+                <select value={person} onChange={(e) => setPerson(e.target.value)}>
+                  <option value="">Shared / nobody</option>
+                  {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              </label>
+            )}
+            {err && <span style={{ fontSize: 12.5, color: "var(--danger)" }}>{err}</span>}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="btn btn-primary" disabled={busy} onClick={add}>
+                {busy ? "Adding…" : "Add sensor"}
+              </button>
+              <button className="btn btn-ghost" disabled={busy} onClick={() => setSel(null)}>Back</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Sensors() {
   const [bindings, setBindings] = useState<Binding[] | null>(null);
   const [health, setHealth] = useState<Record<string, Health>>({});
@@ -211,12 +339,25 @@ export default function Sensors() {
   const [roomF, setRoomF] = useState("all");
   const [sparkHours, setSparkHours] = useState(168);   // 1h / 24h / 7d sparkline zoom
   const [cleanMsg, setCleanMsg] = useState("");
+  const [members, setMembers] = useState<Member[]>([]);
+  const [adding, setAdding] = useState(false);
   const load = () => fetch("/api/bindings").then(j).then(setBindings).catch(() => setBindings([]));
   const loadHealth = (hours: number) =>
     fetch(`/api/bindings/health?hours=${hours}`).then(j).then((h) => {
       setHealth(Object.fromEntries((h.bindings ?? []).map((b: Health) => [b.name, b])));
       setClasses(h.classes ?? {});
+      setMembers(h.members ?? []);
     }).catch(() => {});
+  const reload = () => { load(); loadHealth(sparkHours); };
+  const relink = async () => {
+    setCleanMsg("Re-linking household to home/away sensors…");
+    try {
+      const r = await postJSON("/api/household/relink", {}).then(j);
+      setCleanMsg(r.linked ? `Linked ${r.linked} member${r.linked === 1 ? "" : "s"} to a home/away sensor.`
+        : "No new links found — add the person.* sensor manually if it's missing.");
+      reload();
+    } catch { setCleanMsg("Re-link failed — is Home Assistant connected?"); }
+  };
   useEffect(() => {
     load();
     fetch("/api/persons").then(j)
@@ -293,11 +434,28 @@ export default function Sensors() {
               Disable empty ({emptyCount})
             </button>
           )}
+          <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add sensor</button>
           <button className="btn btn-secondary" onClick={rescan}>Rescan HA</button>
           <button className="btn btn-secondary" onClick={tidyRooms}>Tidy rooms</button>
           <button className="btn btn-secondary" onClick={cleanup}>Clean up junk</button>
         </div>
       </div>
+
+      {members.some((m) => !m.person_alive) && (
+        <div style={{ padding: "10px 14px", borderRadius: 10, fontSize: 13.5,
+                      display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+                      background: "color-mix(in srgb, var(--danger) 12%, transparent)",
+                      border: "1px solid var(--danger)" }}>
+          <span style={{ flex: 1, minWidth: 220 }}>
+            <strong>{members.filter((m) => !m.person_alive).map((m) => m.name).join(", ")}</strong>{" "}
+            {members.filter((m) => !m.person_alive).length === 1 ? "has" : "have"} no live home/away
+            sensor — Hearth can't predict <em>away</em> for {members.filter((m) => !m.person_alive).length === 1 ? "them" : "them"} until a
+            {" "}<code>person.*</code> is linked.
+          </span>
+          <button className="btn btn-secondary" onClick={relink}>Auto-link with AI</button>
+        </div>
+      )}
+      {adding && <AddSensor members={members} onClose={() => setAdding(false)} onAdded={reload} />}
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)", maxWidth: 640 }}>
         Every Home Assistant entity Hearth listens to, and the <em>role</em> it was given —
         roles are what make features household-independent. Disable anything that shouldn't

@@ -40,11 +40,13 @@ async def run_seed(repo, events) -> None:
         usable = [e for e in inventory if not e.get("disabled")]
 
         _status(repo, "mapping", entities=len(usable))
-        merged = {b.entity_id: b for b in heuristic_bindings(usable)}
+        advisor = None
         if repo.get_connection("llm"):
+            from ...adapters.openrouter_llm import OpenRouterAdvisor
+            advisor = OpenRouterAdvisor(repo)
+        merged = {b.entity_id: b for b in heuristic_bindings(usable)}
+        if advisor is not None:
             try:
-                from ...adapters.openrouter_llm import OpenRouterAdvisor
-                advisor = OpenRouterAdvisor(repo)
                 for b in await advisor.propose_bindings(usable, repo.persons()):
                     merged[b.entity_id] = b              # LLM wins ties
             except Exception:
@@ -80,19 +82,38 @@ async def run_seed(repo, events) -> None:
                 except Exception:
                     pass
 
+        # Backstop linking: every member must have a person.* binding for the
+        # away rule to work. The LLM handles messy names → the right member;
+        # a name-token fallback covers no-key installs. Then guarantee core roles.
+        from .person_link import ensure_member_persons, force_core_roles
+        llm_matches = {}
+        if advisor is not None:
+            try:
+                llm_matches = await advisor.match_person_entities(repo.persons(), usable)
+            except Exception:
+                log.exception("LLM person match failed — name fallback only")
+        linked = ensure_member_persons(repo, usable, llm_matches)
+        force_core_roles(repo, usable)
+        if linked:
+            log.info("setup seeding: linked %d member(s) to a home/away entity", linked)
+
         _status(repo, "writing_rules", bindings=len(repo.bindings()))
         for rule in starter_rules(repo.bindings(), repo.activities()):
             repo.save_rule(rule)
-        if repo.get_connection("llm"):
+        if advisor is not None:
             try:
-                from ...adapters.openrouter_llm import OpenRouterAdvisor
-                advisor = OpenRouterAdvisor(repo)
                 for rule in await advisor.propose_rules(repo.bindings(),
                                                         repo.activities()):
                     repo.save_rule(rule)
             except Exception:
                 log.exception("LLM rule proposal failed — templates only")
 
+        bound = repo.bindings()
+        repo.set_setting("inventory.scan", {
+            "entity_total": len(inventory), "usable": len(usable),
+            "bindable_count": len(bound),
+            "filtered_examples": [e["entity_id"] for e in usable
+                                  if e["entity_id"] not in {b.entity_id for b in bound}][:6]})
         repo.set_setting("seed.pending", None)
         _status(repo, "done", bindings=len(repo.bindings()),
                 rules=len(repo.rules()))

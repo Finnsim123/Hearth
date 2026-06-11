@@ -177,6 +177,39 @@ class OpenRouterAdvisor:
                     continue
         return out
 
+    # ── person ↔ home/away entity matching ───────────────────────────────────
+    async def match_person_entities(self, members: list, inventory: list[dict]) -> dict[str, str]:
+        """Match each household member to their Home Assistant home/away entity
+        (person.* preferred, device_tracker.* fallback). Names may be nicknames
+        or in any language — this is exactly the messy-name → structure job the
+        LLM is for. Returns {member_id: entity_id}; unknowns degrade to {}."""
+        cands = [e for e in inventory
+                 if e["entity_id"].split(".")[0] in ("person", "device_tracker")
+                 and not e.get("disabled")]
+        if not members or not cands:
+            return {}
+        system = (
+            "Match each household member to the Home Assistant entity that tracks "
+            "whether THEY are home or away. Prefer person.* over device_tracker.*. "
+            "Names may be nicknames or in another language — infer (e.g. 'Alex' ↔ "
+            "person.alexander_jansen). Reply ONLY a JSON object {member_id: entity_id "
+            "or null}, one entry per member, entity_id chosen from the candidates.")
+        user = json.dumps({
+            "members": [{"id": p.id, "name": p.name} for p in members],
+            "candidates": [{"entity_id": e["entity_id"],
+                            "name": e.get("friendly_name") or ""} for e in cands]})
+        try:
+            res = await self._chat(system, user, max_tokens=1500)
+        except Exception as exc:
+            log.warning("match_person_entities failed: %s", exc)
+            return {}
+        valid = {e["entity_id"] for e in cands}
+        member_ids = {p.id for p in members}
+        if not isinstance(res, dict):
+            return {}
+        return {str(k): str(v) for k, v in res.items()
+                if k in member_ids and v in valid}
+
     # ── room reconciliation ──────────────────────────────────────────────────
     async def propose_room_canon(self, rooms: list[str]) -> dict[str, str]:
         """Map messy room names to a merged canonical set — folding SEMANTIC
