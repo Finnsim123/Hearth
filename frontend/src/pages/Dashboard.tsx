@@ -426,13 +426,22 @@ function SensorCoverage() {
   }, []);
   if (!rows || rows.length === 0) return null;
 
-  const { rooms, width, height } = layoutRooms(rows, isMobile ? 600 : 1040);
+  const { rooms } = layoutRooms(rows, isMobile ? 600 : 1040);
   const selected = rooms.find((r) => r.key === sel) || null;
+
+  // Fit the viewBox to the actual bubble cloud (incl. labels) so the chart fills
+  // its card instead of floating in dead space — this is what scales the bubbles up.
+  const M = 6;
+  const minX = Math.min(...rooms.map((rm) => rm.x - rm.r)) - M;
+  const minY = Math.min(...rooms.map((rm) => rm.y - rm.r)) - M;
+  const maxX = Math.max(...rooms.map((rm) => rm.x + rm.r)) + M;
+  const maxY = Math.max(...rooms.map((rm) => rm.y + rm.r + 22)) + M;   // +label line
+  const vbW = maxX - minX, vbH = maxY - minY;
 
   return (
     <Card icon="sensors" title="Sensor coverage"
           sub="Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Click a room to see its sensors.">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img"
+      <svg viewBox={`${minX} ${minY} ${vbW} ${vbH}`} role="img"
            style={{ width: "100%", display: "block" }}>
         {rooms.map((rm) => {
           const active = rm.key === sel || rm.key === hover;

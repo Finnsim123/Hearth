@@ -12,23 +12,24 @@ type NodeData = { label: string; value: string; status: string; href: string; st
 type EdgeData = { rate: number; status: string; label?: string };
 type Flow = { phase: string; tone: string; nodes: Record<string, NodeData>; edges: Record<string, EdgeData> };
 
+// Compact layout (narrow canvas → text stays legible at half-card width).
 const N: Record<string, { x: number; y: number; w: number; h: number; color: string; desc: string }> = {
-  ha:          { x: 30,  y: 84,  w: 120, h: 54, color: "#34D399", desc: "Every sensor Hearth listens to." },
-  raw:         { x: 230, y: 84,  w: 120, h: 54, color: "#60A5FA", desc: "Raw events kept in InfluxDB (180-day retention)." },
-  features:    { x: 440, y: 84,  w: 120, h: 54, color: "#60A5FA", desc: "30-minute windows turned into model features." },
-  model:       { x: 640, y: 84,  w: 120, h: 54, color: "#F59E0B", desc: "The Random Forest that predicts your activity." },
-  predictions: { x: 820, y: 84,  w: 130, h: 54, color: "#34D399", desc: "Live states, pushed onto Home Assistant's bus." },
-  you:         { x: 820, y: 273, w: 130, h: 54, color: "#F472B6", desc: "You confirm — the ground truth it learns from." },
-  discovery:   { x: 440, y: 273, w: 120, h: 54, color: "#FB923C", desc: "Recurring routines it found for you to name." },
+  ha:          { x: 8,   y: 33,  w: 116, h: 54, color: "#34D399", desc: "Every sensor Hearth listens to." },
+  raw:         { x: 150, y: 33,  w: 116, h: 54, color: "#60A5FA", desc: "Raw events kept in InfluxDB (180-day retention)." },
+  features:    { x: 292, y: 33,  w: 116, h: 54, color: "#60A5FA", desc: "30-minute windows turned into model features." },
+  model:       { x: 434, y: 33,  w: 116, h: 54, color: "#F59E0B", desc: "The Random Forest that predicts your activity." },
+  predictions: { x: 576, y: 33,  w: 128, h: 54, color: "#34D399", desc: "Live states, pushed onto Home Assistant's bus." },
+  you:         { x: 576, y: 173, w: 128, h: 54, color: "#F472B6", desc: "You confirm — the ground truth it learns from." },
+  discovery:   { x: 292, y: 173, w: 116, h: 54, color: "#FB923C", desc: "Recurring routines it found for you to name." },
 };
 const E: { id: string; d: string; dot: string }[] = [
-  { id: "ha_raw", d: "M150 111 L230 111", dot: "#F59E0B" },
-  { id: "raw_features", d: "M350 111 L440 111", dot: "#F59E0B" },
-  { id: "features_model", d: "M560 111 L640 111", dot: "#7F77DD" },
-  { id: "model_predictions", d: "M760 111 L820 111", dot: "#34D399" },
-  { id: "predictions_you", d: "M885 138 L885 273", dot: "#F472B6" },
-  { id: "you_model", d: "M820 320 L700 320 L700 138", dot: "#F472B6" },
-  { id: "features_discovery", d: "M500 138 L500 273", dot: "#FB923C" },
+  { id: "ha_raw", d: "M124 60 L150 60", dot: "#F59E0B" },
+  { id: "raw_features", d: "M266 60 L292 60", dot: "#F59E0B" },
+  { id: "features_model", d: "M408 60 L434 60", dot: "#7F77DD" },
+  { id: "model_predictions", d: "M550 60 L576 60", dot: "#34D399" },
+  { id: "predictions_you", d: "M640 87 L640 173", dot: "#F472B6" },
+  { id: "you_model", d: "M576 200 L492 200 L492 89", dot: "#F472B6" },
+  { id: "features_discovery", d: "M350 87 L350 173", dot: "#FB923C" },
 ];
 const MAIN_N = ["ha", "raw", "features", "model", "predictions"];
 const MAIN_E = ["ha_raw", "raw_features", "features_model", "model_predictions"];
@@ -64,7 +65,7 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
   const nodeIds = Object.keys(N).filter((id) => !compact || MAIN_N.includes(id));
 
   const svg = (
-    <svg viewBox={compact ? "20 72 940 84" : "0 0 980 380"} role="img"
+    <svg viewBox={compact ? "2 28 708 64" : "0 24 712 212"} role="img"
          style={{ width: "100%", height: "auto", display: "block" }}>
       <defs>
         <marker id="fm-ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
@@ -115,18 +116,18 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
 
       {/* edge throughput label (ingest rate) */}
       {f.edges.ha_raw?.label && (
-        <text x={190} y={98} textAnchor="middle" fontSize={12.5} fill="var(--text-dim)"
+        <text x={137} y={52} textAnchor="middle" fontSize={11} fill="var(--text-dim)"
               style={{ pointerEvents: "none" }}>{f.edges.ha_raw.label}</text>
       )}
       {!compact && (
-        <text x={745} y={340} textAnchor="middle" fontSize={12.5} fill="var(--text-dim)"
+        <text x={534} y={216} textAnchor="middle" fontSize={12} fill="var(--text-dim)"
               style={{ pointerEvents: "none" }}>your answers</text>
       )}
 
       {hover && !compact && (() => {
         const n = N[hover]; const nd = f.nodes[hover];
-        const below = n.y < 200;
-        const tx = Math.max(6, Math.min(980 - 210, cx(hover) - 105));
+        const below = n.y < 100;
+        const tx = Math.max(6, Math.min(712 - 210, cx(hover) - 105));
         const ty = below ? n.y + n.h + 8 : n.y - 78;
         return (
           <foreignObject x={tx} y={ty} width={210} height={72} style={{ pointerEvents: "none" }}>
