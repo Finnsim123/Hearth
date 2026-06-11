@@ -119,9 +119,23 @@ def buddy_state(repo, tsdb) -> dict:
                       f"Day {max(1, round(days))} — learning your rhythms before I predict",
                       progress=round(min(days / 10.0, 0.95), 2))
 
-    return _state("waiting", "work", "Waiting for your sensors",
-                  "Connect Home Assistant and I'll start watching",
-                  cta={"label": "Settings", "href": "/settings"})
+    # No data yet — diagnose precisely so the message is actionable. Connections
+    # are wired at startup; saving them in Settings needs a restart to apply.
+    settings_cta = {"label": "Settings", "href": "/settings"}
+    influx_conf = bool(_safe(lambda: repo.get_connection("influx")))
+    ha_conf = bool(_safe(lambda: repo.get_connection("ha")))
+    if tsdb is None:
+        return _state("waiting", "work", "InfluxDB isn't connected",
+                      ("Saved it just now? Restart Hearth to apply. Otherwise check the URL and token."
+                       if influx_conf else "Point Hearth at your InfluxDB so it can store sensor data."),
+                      cta=settings_cta)
+    if not ha_conf:
+        return _state("waiting", "work", "Connect Home Assistant",
+                      "Add your Home Assistant URL and token so I can read your sensors.",
+                      cta=settings_cta)
+    return _state("waiting", "work", "Waiting for the first readings",
+                  "Connected — I've started watching. If nothing arrives, restart Hearth to apply the new connection.",
+                  cta=settings_cta)
 
 
 def _get(repo, key):

@@ -58,6 +58,22 @@ const j = (r: Response) => { if (!r.ok) throw new Error(String(r.status)); retur
 const post = (url: string, body: unknown) =>
   fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+/** Restart the container, then reload once it has gone down AND come back up. */
+async function restartAndReload(setBusy: (b: boolean) => void) {
+  setBusy(true);
+  try { await fetch("/api/system/restart", { method: "POST" }); } catch { /* it's exiting */ }
+  let down = false;
+  setTimeout(() => {
+    const id = setInterval(async () => {
+      try {
+        const r = await fetch("/api/health");
+        if (!r.ok) throw new Error();
+        if (down) { clearInterval(id); window.location.reload(); }
+      } catch { down = true; }
+    }, 1500);
+  }, 1500);
+}
+
 // ── household ───────────────────────────────────────────────────────────────
 
 type Person = {
@@ -232,6 +248,8 @@ function ConnectionCard({ kind, title, sub, fields }: {
   const [conn, setConn] = useState<Record<string, string>>({});
   const [masked, setMasked] = useState<string | null>(null);
   const [state, setState] = useState<SaveState>("idle");
+  const [restarting, setRestarting] = useState(false);
+  const needsRestart = kind === "ha" || kind === "influx";
   useEffect(() => {
     fetch(`/api/connections/${kind}`).then(j).then((c) => {
       if (!c.configured) return;
@@ -276,10 +294,16 @@ function ConnectionCard({ kind, title, sub, fields }: {
         ))}
       </div>
       <SaveButton state={state} onClick={save} />
-      {state === "ok" && (
-        <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
-          Saved. Restart the container to apply: <code>docker compose restart hearth</code>
-        </p>
+      {state === "ok" && needsRestart && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+            Saved — this connection applies after a restart.
+          </span>
+          <button className="btn btn-secondary" disabled={restarting}
+                  onClick={() => restartAndReload(setRestarting)}>
+            {restarting ? "Restarting…" : "Restart now"}
+          </button>
+        </div>
       )}
     </Card>
   );
@@ -481,14 +505,20 @@ function Account() {
 
 function System() {
   const [info, setInfo] = useState<{ build?: string; behind?: number; subject?: string }>({});
+  const [restarting, setRestarting] = useState(false);
   useEffect(() => {
     fetch("/api/health").then(j).then((h) => setInfo((i) => ({ ...i, build: h.build }))).catch(() => {});
     fetch("/api/system/update").then(j)
       .then((u) => setInfo((i) => ({ ...i, behind: u.behind ?? 0, subject: u.latest_subject })))
       .catch(() => {});
   }, []);
+  const restart = () => {
+    if (!window.confirm("Restart Hearth? It comes back in a few seconds. Needed to apply new Home Assistant or InfluxDB connections.")) return;
+    restartAndReload(setRestarting);
+  };
   return (
-    <Card title="System" sub="Updates install from the top bar when a new version is available.">
+    <Card title="System"
+          sub="Updates install from the top bar. Restart to apply new Home Assistant / InfluxDB connections.">
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 14 }}>
         <span><span style={{ color: "var(--text-dim)" }}>Version&nbsp;</span><code>{info.build ?? "…"}</code></span>
         <span>
@@ -497,6 +527,11 @@ function System() {
             : info.behind === 0 ? "Up to date ✓"
             : `${info.behind} commit${info.behind > 1 ? "s" : ""} behind — “${info.subject ?? ""}”`}
         </span>
+      </div>
+      <div>
+        <button className="btn btn-secondary" disabled={restarting} onClick={restart}>
+          {restarting ? "Restarting…" : "Restart Hearth"}
+        </button>
       </div>
     </Card>
   );

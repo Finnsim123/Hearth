@@ -811,6 +811,16 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"ok": True, "note": "the host updater picks this up within a "
                                     "minute; Hearth rebuilds and restarts"}
 
+    @api.post("/system/restart")
+    def restart_app() -> dict:
+        """Restart the container so newly-saved connections (HA / InfluxDB) take
+        effect — those are wired at startup. Relies on the compose restart
+        policy (unless-stopped): we exit, Docker brings us straight back."""
+        import os
+        import threading
+        threading.Timer(0.6, lambda: os._exit(0)).start()
+        return {"ok": True, "note": "restarting — back in a few seconds"}
+
     @api.post("/system/reset")
     def factory_reset(body: dict, response: Response) -> dict:
         """Wipe configuration so the app re-enters first-run setup. With
