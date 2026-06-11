@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 MIN_WINDOWS = 120          # ≈ 60 h of recording — the 72 h acceptance bar (ROADMAP P4)
 MAX_MEMBER_WINDOWS = 1000  # stored per card (labeling cap)
-TEMPORAL_COLS = ["hour_of_day", "day_of_week", "is_weekend"]
+from ..features.pipeline import TEMPORAL_COLS
 TOP_K = 6                  # signature size
 DEDUPE_OVERLAP = 3         # shared top-4 features with a handled card → skip
 
@@ -67,7 +67,8 @@ def discover_person(person_id: str, tsdb, repo, days: int = 30) -> list[ClusterC
 
     from ..features.registry import feature_set_version
 
-    fset = feature_set_version(repo.get_setting("composites", []) or [])
+    fset = feature_set_version(repo.get_setting("composites", []) or [],
+                               repo.get_setting("time_granularity", "coarse") or "coarse")
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
     feats = tsdb.read_features(person_id, fset, start, end)

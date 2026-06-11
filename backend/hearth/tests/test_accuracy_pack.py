@@ -111,3 +111,22 @@ def test_flux_tag_escapes_injection():
     assert _flux_tag("alice") == "alice"
     assert _flux_tag('x" or true or "') == 'x\\" or true or \\"'
     assert _flux_tag("a\\b") == "a\\\\b"
+
+
+def test_time_granularity_changes_columns_and_hash():
+    from datetime import datetime, timezone
+    from hearth.domain.features.pipeline import extract_windows
+    from hearth.domain.features.registry import feature_set_version
+    grid = [datetime(2026, 6, 1, 23, 0, tzinfo=timezone.utc),   # night
+            datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)]    # morning
+    empty = pd.DataFrame()
+    full = extract_windows(empty, [], grid, "UTC", "full")
+    coarse = extract_windows(empty, [], grid, "UTC", "coarse")
+    none = extract_windows(empty, [], grid, "UTC", "none")
+    assert "hour_of_day" in full.columns and "time_bucket" not in full.columns
+    assert "time_bucket" in coarse.columns and "hour_of_day" not in coarse.columns
+    assert coarse["time_bucket"].tolist() == [0.0, 1.0]         # night, morning
+    assert not any(c in none.columns for c in ("hour_of_day", "time_bucket", "is_weekend"))
+    # each granularity yields a DISTINCT feature-set hash (clean retrain)
+    hashes = {feature_set_version([], g) for g in ("full", "coarse", "none")}
+    assert len(hashes) == 3

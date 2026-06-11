@@ -301,6 +301,52 @@ function ApiTokens() {
   );
 }
 
+// ── model behaviour ─────────────────────────────────────────────────────────
+
+const TIME_CHOICES: [string, string, string][] = [
+  ["coarse", "Part of day (recommended)", "Night / morning / afternoon / evening — keeps the useful 'it's night-ish' prior without letting the model memorize a per-hour schedule."],
+  ["full", "Exact hour", "Raw 0–23 hour. More precise, but the model can lean on the clock instead of reading sensors."],
+  ["none", "Ignore time", "No time feature at all — predictions come purely from sensors. Strictest, needs the most labels."],
+];
+
+function ModelBehaviour() {
+  const [tg, setTg] = useState<string>("coarse");
+  const [state, setState] = useState<SaveState>("idle");
+  useEffect(() => {
+    fetch("/api/settings/model").then(j)
+      .then((r) => setTg(r.time_granularity ?? "coarse")).catch(() => {});
+  }, []);
+  const save = async (value: string) => {
+    setTg(value); setState("saving");
+    try { await post("/api/settings/model", { time_granularity: value }).then(j); setState("ok"); }
+    catch { setState("fail"); }
+  };
+  return (
+    <Card title="How much the model trusts the clock"
+          sub="Hearth can lean on time-of-day as a shortcut instead of reading your sensors. Coarser time forces it to use presence, bed and media signals.">
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {TIME_CHOICES.map(([value, label, desc]) => (
+          <label key={value} style={{ display: "flex", gap: 10, alignItems: "flex-start",
+                                      padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                                      border: `1px solid ${tg === value ? "var(--accent)" : "var(--border)"}` }}>
+            <input type="radio" name="tg" checked={tg === value}
+                   onChange={() => save(value)} style={{ marginTop: 3 }} />
+            <span>
+              <span style={{ fontWeight: 500, fontSize: 14 }}>{label}</span>
+              <span style={{ display: "block", fontSize: 12.5, color: "var(--text-dim)" }}>{desc}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+        {state === "ok" ? "Saved — retrain (Models → Train now) to apply; the feature set changed."
+          : state === "fail" ? "Couldn't save — check logs."
+          : "Changing this alters the feature set, so a retrain is needed to take effect."}
+      </p>
+    </Card>
+  );
+}
+
 // ── appearance ──────────────────────────────────────────────────────────────
 
 function Appearance() {
@@ -423,6 +469,7 @@ export default function Settings() {
           { key: "token", label: "API key", hint: "Leave empty to keep the current one." },
         ]} />
       <ApiTokens />
+      <ModelBehaviour />
       <Appearance />
       <Account />
       <System />

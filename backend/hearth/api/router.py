@@ -622,6 +622,23 @@ def build_api_router(deps: dict) -> APIRouter:
                                     "minute; Hearth rebuilds and restarts"}
 
     # ── system ─────────────────────────────────────────────────────────────
+    # ── model settings (small allowlist; values validated) ────────────────
+    _SETTING_CHOICES = {"time_granularity": {"coarse", "full", "none"}}
+
+    @api.get("/settings/model")
+    def get_model_settings() -> dict:
+        return {"time_granularity": repo.get_setting("time_granularity", "coarse")}
+
+    @api.post("/settings/model")
+    def set_model_settings(body: dict) -> dict:
+        for key, choices in _SETTING_CHOICES.items():
+            if key in body:
+                if body[key] not in choices:
+                    raise HTTPException(400, f"{key} must be one of {sorted(choices)}")
+                repo.set_setting(key, body[key])
+        return {"ok": True, "note": "takes effect on the next training run "
+                                    "(feature schema changed — retrain to apply)"}
+
     @api.get("/system/status")
     def status() -> dict:
         return {"bindings": len(repo.bindings()),

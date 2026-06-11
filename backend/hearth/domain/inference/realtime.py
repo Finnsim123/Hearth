@@ -66,11 +66,12 @@ def current_window_features(tsdb, repo, person_id: str):
     composites = repo.get_setting("composites", []) or []
     lag_features = repo.get_setting("lag_features", []) or []
     tz = repo.get_setting("timezone", "UTC") or "UTC"
+    tg = repo.get_setting("time_granularity", "coarse") or "coarse"
     end = datetime.now(timezone.utc)
     start = end - WINDOW
     raw = tsdb.read_raw(bindings, start - timedelta(minutes=120), end)
     prepared = prepare(raw, bindings) if not raw.empty else raw
-    return compute_features(prepared, bindings, [start], tz, composites, lag_features)
+    return compute_features(prepared, bindings, [start], tz, composites, lag_features, tg)
 
 
 def predict_current(person_id: str, tsdb, repo, store) -> Prediction | None:

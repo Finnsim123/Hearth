@@ -24,13 +24,12 @@ RECENCY_HALF_LIFE_DAYS = 21  # last week counts ~2x vs a month ago (thesillyhome
                              # recency-weighting idea — drift mitigation without forgetting)
 TUNE_MIN_WINDOWS = 500     # below this, tuning fits noise — use defaults
 TUNE_EVERY_DAYS = 30       # re-tune monthly, not every weekly retrain
-TEMPORAL_COLS = ["hour_of_day", "day_of_week", "is_weekend"]
 
 
 def train_person(person_id: str, tsdb, repo, store,
                  weeks: int = 8, force: bool = False) -> ModelRecord | None:
     composites = repo.get_setting("composites", []) or []
-    fset = feature_set_version(composites)
+    fset = feature_set_version(composites, repo.get_setting("time_granularity", "coarse") or "coarse")
     end = datetime.now(timezone.utc)
     start = end - timedelta(weeks=weeks)
 

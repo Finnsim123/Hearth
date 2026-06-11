@@ -26,7 +26,9 @@ def test_window_grid_alignment(raw):
 def test_features_no_nans_and_prefixed(raw, bindings):
     feats = compute_features(prepare(raw, bindings), bindings, _grid(raw), "UTC", [], [])
     assert not feats.isna().any().any()
-    assert {"hour_of_day", "day_of_week", "is_weekend"} <= set(feats.columns)
+    # default granularity is now "coarse": part-of-day bucket + is_weekend
+    assert {"time_bucket", "is_weekend"} <= set(feats.columns)
+    assert "hour_of_day" not in feats.columns
     assert "couch_frac" in feats.columns and "bed_a_occupied" in feats.columns
     assert "espresso_on" in feats.columns and "tv_playing" in feats.columns
 

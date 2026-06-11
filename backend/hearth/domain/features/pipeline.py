@@ -21,6 +21,39 @@ log = logging.getLogger(__name__)
 
 WINDOW = timedelta(minutes=30)
 
+# Time encoding. "full" = raw hour_of_day (0-23) — lets a tree memorize a
+# per-hour schedule and crowd out sensors (the clock-crutch failure). "coarse"
+# (default) = a 4-bucket part-of-day, keeping the legitimate "it's night-ish"
+# prior without the lookup table. "none" = no temporal feature at all.
+_PART_OF_DAY = "time_bucket"  # 0 night · 1 morning · 2 afternoon · 3 evening
+
+
+def _bucket(hour: int) -> float:
+    if hour < 5 or hour >= 22:
+        return 0.0
+    if hour < 11:
+        return 1.0
+    if hour < 17:
+        return 2.0
+    return 3.0
+
+
+def time_features(local, granularity: str) -> dict[str, float]:
+    if granularity == "none":
+        return {}
+    if granularity == "full":
+        return {"hour_of_day": float(local.hour),
+                "day_of_week": float(local.weekday()),
+                "is_weekend": float(local.weekday() >= 5)}
+    # coarse (default)
+    return {_PART_OF_DAY: _bucket(local.hour),
+            "is_weekend": float(local.weekday() >= 5)}
+
+
+# every temporal column name across granularities — discovery/training strip
+# these so clustering and importance never key on the clock
+TEMPORAL_COLS = ["hour_of_day", "day_of_week", "is_weekend", _PART_OF_DAY]
+
 # Event-dynamics features (CASAS baseline: Cook & Krishnan, "Activity
 # Recognition on Streaming Sensor Data"): event COUNT, dominant sensor and
 # IDLENESS discriminate activities better than aggregates alone — 40 silent
@@ -75,7 +108,8 @@ def window_grid(start: datetime, end: datetime, stride_min: int) -> list[datetim
 
 
 def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
-                    grid: list[datetime], tz: str = "UTC") -> pd.DataFrame:
+                    grid: list[datetime], tz: str = "UTC",
+                    time_granularity: str = "coarse") -> pd.DataFrame:
     """One row per window start: temporal features + per-binding recipe outputs
     (columns '{binding.name}_{suffix}'). Person-agnostic — caller filters
     bindings to shared + this person's.
@@ -109,11 +143,7 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
         else:
             sl = prepared.loc[(prepared.index >= ws) & (prepared.index < we)]
         local = ws.astimezone(zone)
-        row: dict[str, float] = {
-            "hour_of_day": float(local.hour),
-            "day_of_week": float(local.weekday()),
-            "is_weekend": float(local.weekday() >= 5),
-        }
+        row: dict[str, float] = dict(time_features(local, time_granularity))
         local_end = we.astimezone(zone)
         end_minutes = local_end.hour * 60 + local_end.minute
         # event dynamics for this window (0/idle-cap when no event sensors)
@@ -176,9 +206,10 @@ def bindings_for_person(all_bindings: list[Binding], person_id: str) -> list[Bin
 
 def compute_features(prepared: pd.DataFrame, bindings: list[Binding],
                      grid: list[datetime], tz: str,
-                     composites: list[dict], lag_features: list[str]) -> pd.DataFrame:
+                     composites: list[dict], lag_features: list[str],
+                     time_granularity: str = "coarse") -> pd.DataFrame:
     """The pure pipeline: extract -> composites -> lags -> impute."""
-    df = extract_windows(prepared, bindings, grid, tz)
+    df = extract_windows(prepared, bindings, grid, tz, time_granularity)
     df = apply_composites(df, composites)
     df = add_lags(df, lag_features)
     return impute(df, bindings)
@@ -193,13 +224,14 @@ def build_windows(tsdb, repo, person_id: str, start: datetime, end: datetime,
     composites = repo.get_setting("composites", []) or []
     lag_features = repo.get_setting("lag_features", []) or []
     tz = repo.get_setting("timezone", "UTC") or "UTC"
+    tg = repo.get_setting("time_granularity", "coarse") or "coarse"
     raw = tsdb.read_raw(bindings, start - timedelta(minutes=120), end)
     prepared = prepare(raw, bindings) if not raw.empty else raw
     grid = window_grid(start, end, stride_min)
     if not grid:
         return pd.DataFrame()
-    feats = compute_features(prepared, bindings, grid, tz, composites, lag_features)
-    tsdb.write_features(person_id, feature_set_version(composites), feats)
+    feats = compute_features(prepared, bindings, grid, tz, composites, lag_features, tg)
+    tsdb.write_features(person_id, feature_set_version(composites, tg), feats)
     return feats
 
 
@@ -208,7 +240,7 @@ def build_latest_windows(tsdb, repo) -> None:
     enabled person, then heartbeat."""
     now = datetime.now(timezone.utc)
     composites = repo.get_setting("composites", []) or []
-    fset = feature_set_version(composites)
+    fset = feature_set_version(composites, repo.get_setting("time_granularity", "coarse") or "coarse")
     for person in repo.persons():
         if not person.enabled:
             continue
