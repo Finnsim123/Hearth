@@ -268,6 +268,75 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"removed": len(removed), "entities": removed,
                 "owners_assigned": owned}
 
+    @api.get("/bindings/health")
+    def bindings_health() -> dict:
+        """Per-binding signal health over the last 7 days, plus the training
+        class balance. Answers 'is this sensor actually a feature?' — a binding
+        whose feature columns never vary is dead weight the model ignores, and
+        a class with 0 windows can never be predicted (no examples to learn)."""
+        tsdb = deps.get("tsdb")
+        if tsdb is None:
+            return {"bindings": [], "classes": {}, "note": "InfluxDB not connected"}
+        from datetime import datetime, timedelta, timezone
+        from ..domain.features.registry import feature_set_version
+        fset = feature_set_version(repo.get_setting("composites", []) or [],
+                                   repo.get_setting("time_granularity", "coarse") or "coarse")
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=7)
+        persons = [p for p in repo.persons() if p.enabled]
+        # union of each person's recent feature matrix (binding cols are shared
+        # + that person's personal sensors)
+        import pandas as pd
+        frames = [tsdb.read_features(p.id, fset, start, end) for p in persons]
+        feats = pd.concat([f for f in frames if not f.empty], axis=0) \
+            if any(not f.empty for f in frames) else pd.DataFrame()
+        SPARK_N = 60   # downsample to ~60 points across the window
+        BINARY_SUFFIXES = ("frac", "occupied", "on", "any", "playing", "active",
+                           "home_frac", "home_last", "on_last", "on_frac",
+                           "imminent", "opened_any")
+
+        def _spark(col):
+            ser = feats[col].dropna()
+            if ser.empty:
+                return []
+            # bucket the window into SPARK_N slots, mean per slot, normalized 0..1
+            ser = ser.sort_index()
+            n = len(ser)
+            step = max(1, n // SPARK_N)
+            vals = [float(ser.iloc[i:i + step].mean()) for i in range(0, n, step)]
+            lo, hi = min(vals), max(vals)
+            rng = hi - lo
+            return [round((v - lo) / rng, 3) if rng > 1e-9 else 0.0 for v in vals]
+
+        def _pick_col(cols, name):
+            # prefer a 'binary-ish' suffix so presence/bed read as a barcode
+            for suf in BINARY_SUFFIXES:
+                c = f"{name}_{suf}"
+                if c in cols:
+                    return c, "binary"
+            return (cols[0] if cols else None), "numeric"
+
+        out = []
+        for b in repo.bindings():
+            cols = [c for c in feats.columns
+                    if c == b.name or c.startswith(b.name + "_")] if not feats.empty else []
+            varies = any(feats[c].nunique(dropna=True) > 1 for c in cols)
+            present = bool(cols) and any(feats[c].notna().any() for c in cols)
+            col, kind = _pick_col(cols, b.name)
+            spark = _spark(col) if col and varies else []
+            out.append({"id": b.id, "name": b.name, "role": b.role.value,
+                        "entity_id": b.entity_id, "enabled": b.enabled,
+                        "status": ("alive" if varies else
+                                   "constant" if present else "no_data"),
+                        "spark": spark, "kind": kind})
+        # class balance from confirmed + bootstrap labels (recent window)
+        classes: dict[str, int] = {}
+        for p in persons:
+            for ev in tsdb.read_labels(p.id, start, end):
+                classes[ev.label] = classes.get(ev.label, 0) + 1
+        return {"bindings": out, "classes": classes,
+                "windows": int(len(feats)) if not feats.empty else 0}
+
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:
         events = deps.get("events")

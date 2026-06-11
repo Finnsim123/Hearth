@@ -42,9 +42,57 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
-function BindingRow({ b, persons, onChange }: {
-  b: Binding; persons: Record<string, string>; onChange: () => void;
+type Health = { name: string; status: string; spark: number[]; kind: string };
+
+/** A 7-day signal sparkline of what the MODEL sees (the feature value,
+ *  normalized 0–1). Binary roles render as a green barcode; numeric as a
+ *  blue line; dead sensors as a dashed flat baseline. */
+function Sparkline({ h }: { h?: Health }) {
+  const W = 200, H = 22;
+  if (!h || h.status !== "alive" || h.spark.length === 0) {
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} preserveAspectRatio="none"
+           style={{ flexShrink: 0 }} aria-label="no signal">
+        <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="var(--text-dim)"
+              strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+      </svg>
+    );
+  }
+  const n = h.spark.length;
+  const x = (i: number) => (i / Math.max(n - 1, 1)) * W;
+  if (h.kind === "binary") {
+    const bw = W / n;
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} preserveAspectRatio="none"
+           style={{ flexShrink: 0 }} aria-label={`${h.name} signal, 7 days`}>
+        <rect x="0" y="4" width={W} height={H - 8} fill="var(--surface-2)" rx="2" />
+        {h.spark.map((v, i) => v > 0.05 && (
+          <rect key={i} x={i * bw} y="4" width={Math.max(bw - 0.3, 0.6)} height={H - 8}
+                fill="var(--ok, #34D399)" opacity={0.35 + 0.65 * v} />
+        ))}
+      </svg>
+    );
+  }
+  const pts = h.spark.map((v, i) => `${x(i).toFixed(1)},${(H - 3 - v * (H - 6)).toFixed(1)}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} preserveAspectRatio="none"
+         style={{ flexShrink: 0 }} aria-label={`${h.name} signal, 7 days`}>
+      <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="1.5"
+                vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+const HEALTH_BADGE: Record<string, [string, string]> = {
+  alive: ["live", "var(--ok, #34D399)"],
+  constant: ["no variation", "var(--danger)"],
+  no_data: ["no data", "var(--danger)"],
+};
+
+function BindingRow({ b, persons, health, onChange }: {
+  b: Binding; persons: Record<string, string>; health?: Health; onChange: () => void;
 }) {
+  const status = health?.status;
   const [busy, setBusy] = useState(false);
   const llmReason = (b.options?.llm_reason ?? b.options?.reason) as string | undefined;
   const overridden = Boolean(b.options?.llm_override);
@@ -73,6 +121,16 @@ function BindingRow({ b, persons, onChange }: {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <strong style={{ fontSize: 13.5 }}>{b.name}</strong>
           <RoleBadge role={b.role} />
+          {status && HEALTH_BADGE[status] && (
+            <span title={status === "alive" ? "Producing varying signal — a usable feature."
+                       : status === "constant" ? "Bound, but the value never changes in recent data — the model can't learn from a constant."
+                       : "No recent data — this sensor isn't reaching Hearth (check it's logged to InfluxDB / not disabled in HA)."}
+                  style={{ fontSize: 11, padding: "1px 7px", borderRadius: 99, fontWeight: 600,
+                           color: HEALTH_BADGE[status][1],
+                           background: `color-mix(in srgb, ${HEALTH_BADGE[status][1]} 14%, transparent)` }}>
+              {HEALTH_BADGE[status][0]}
+            </span>
+          )}
           {b.person_id && (
             <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
               · {persons[b.person_id] ?? b.person_id}
@@ -95,6 +153,7 @@ function BindingRow({ b, persons, onChange }: {
           <span style={{ fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>“{llmReason}”</span>
         )}
       </div>
+      <Sparkline h={health} />
       <button className="btn btn-ghost" disabled={busy} title={b.enabled ? "Disable (keep, ignore)" : "Enable"}
               style={{ minHeight: 30, padding: "3px 10px", fontSize: 12.5 }} onClick={toggle}>
         {b.enabled ? "Disable" : "Enable"}
@@ -109,6 +168,8 @@ function BindingRow({ b, persons, onChange }: {
 
 export default function Sensors() {
   const [bindings, setBindings] = useState<Binding[] | null>(null);
+  const [health, setHealth] = useState<Record<string, Health>>({});
+  const [classes, setClasses] = useState<Record<string, number>>({});
   const [persons, setPersons] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
   const [role, setRole] = useState("all");
@@ -116,6 +177,11 @@ export default function Sensors() {
   const load = () => fetch("/api/bindings").then(j).then(setBindings).catch(() => setBindings([]));
   useEffect(() => {
     load();
+    fetch("/api/bindings/health").then(j).then((h) => {
+      setHealth(Object.fromEntries((h.bindings ?? []).map(
+        (b: Health) => [b.name, b])));
+      setClasses(h.classes ?? {});
+    }).catch(() => {});
     fetch("/api/persons").then(j)
       .then((ps: { id: string; name: string }[]) =>
         setPersons(Object.fromEntries(ps.map((p) => [p.id, p.name]))))
@@ -172,8 +238,18 @@ export default function Sensors() {
       {bindings !== null && shown.length === 0 && (
         <p style={{ color: "var(--text-dim)" }}>Nothing matches.</p>
       )}
+      {Object.keys(classes).length > 0 && !classes.away && (
+        <div style={{ padding: "10px 14px", borderRadius: 10, fontSize: 13,
+                      background: "color-mix(in srgb, var(--danger) 12%, transparent)",
+                      border: "1px solid var(--danger)" }}>
+          No <strong>away</strong> windows in the training data — the model can't predict a
+          state it has never seen. Check that a presence sensor below is <em>alive</em> while
+          you're out, or tap “away” on the dashboard a few times to teach it.
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {shown.map((b) => <BindingRow key={b.id} b={b} persons={persons} onChange={load} />)}
+        {shown.map((b) => <BindingRow key={b.id} b={b} persons={persons}
+                                      health={health[b.name]} onChange={load} />)}
       </div>
     </section>
   );

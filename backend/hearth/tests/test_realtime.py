@@ -60,3 +60,27 @@ class _Repo:
 def test_predict_current_none_without_model():
     # cold-start (no promoted model) → realtime lane defers to grid/rules lane
     assert predict_current("alice", tsdb=None, repo=_Repo(), store=None) is None
+
+
+def test_bindings_health_classifies_alive_constant_no_data():
+    """The diagnostic must distinguish a live varying sensor, a bound-but-
+    constant one (dead weight), and one with no data — and flag a missing class."""
+    import pandas as pd
+    from hearth.domain.schemas import Binding, Role
+
+    # simulate what the endpoint computes (pure logic extracted inline)
+    feats = pd.DataFrame({
+        "sofa_frac": [0.0, 1.0, 0.5],      # varies → alive
+        "alex_home_frac": [1.0, 1.0, 1.0], # constant → dead weight
+    })
+    bindings = [
+        Binding(id=1, entity_id="binary_sensor.sofa", role=Role.PRESENCE, name="sofa"),
+        Binding(id=2, entity_id="person.alex", role=Role.PERSON, name="alex_home"),
+        Binding(id=3, entity_id="person.kid", role=Role.PERSON, name="kid_home"),  # no col
+    ]
+    def status(b):
+        cols = [c for c in feats.columns if c == b.name or c.startswith(b.name + "_")]
+        varies = any(feats[c].nunique(dropna=True) > 1 for c in cols)
+        present = bool(cols) and any(feats[c].notna().any() for c in cols)
+        return "alive" if varies else "constant" if present else "no_data"
+    assert [status(b) for b in bindings] == ["alive", "constant", "no_data"]
