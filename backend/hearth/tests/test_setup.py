@@ -194,3 +194,38 @@ def test_prune_empty_disables_zero_obs_but_keeps_person(client):
     by_name = {b.name: b for b in repo.bindings()}
     assert by_name["dead"].enabled is False
     assert by_name["sofa"].enabled is True and by_name["alex_loc"].enabled is True
+
+
+@pytest.mark.asyncio
+async def test_inventory_sync_adds_new_updates_rooms_keeps_edits(client):
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)
+    from hearth.domain.schemas import Binding, Role
+    # existing binding the user has placed in a room
+    repo.save_binding(Binding(entity_id="binary_sensor.sofa", role=Role.PRESENCE,
+                              name="sofa", room="Living room"))
+
+    class FakeEvents:
+        async def discover_entities(self):
+            return [
+                # existing entity, AREA changed in HA → room should update
+                {"entity_id": "binary_sensor.sofa", "domain": "binary_sensor",
+                 "device_class": "occupancy", "unit": None, "area": "Lounge",
+                 "disabled": False, "state": "off"},
+                # brand-new bindable sensor → added
+                {"entity_id": "sensor.kitchen_co2", "domain": "sensor",
+                 "device_class": "carbon_dioxide", "unit": "ppm", "area": "Kitchen",
+                 "disabled": False, "state": "600"},
+                # junk / non-bindable → ignored
+                {"entity_id": "button.restart", "domain": "button",
+                 "device_class": None, "unit": None, "area": None,
+                 "disabled": False, "state": "unknown"},
+            ]
+
+    from hearth.domain.onboarding.inventory_sync import sync_inventory
+    res = await sync_inventory(repo, FakeEvents(), use_llm=False)
+    assert res["added"] == 1 and res["rooms_updated"] == 1
+    by_eid = {b.entity_id: b for b in repo.bindings()}
+    assert by_eid["binary_sensor.sofa"].room == "Lounge"       # area synced
+    assert "sensor.kitchen_co2" in by_eid                       # new picked up
+    assert "button.restart" not in by_eid                       # junk skipped

@@ -64,6 +64,15 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
         scheduler.add_job(expire_stale_questions, "interval", hours=6,
                           args=[repo], id="question_expiry")
 
+        if events is not None:
+            async def _sync_inventory() -> None:
+                from .domain.onboarding.inventory_sync import sync_inventory
+                await sync_inventory(repo, events, use_llm=False)
+
+            # daily: pick up new sensors / renamed entities / new HA areas
+            scheduler.add_job(_sync_inventory, "interval", hours=24,
+                              id="inventory_sync", max_instances=1, coalesce=True)
+
     if tsdb is not None and deps.get("notifier") is not None:
         scheduler.add_job(check_milestones, "interval", minutes=30,
                           args=[repo, tsdb, deps["notifier"]], id="milestones",

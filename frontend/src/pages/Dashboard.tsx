@@ -300,6 +300,18 @@ function SensorCoverage() {
     .map(([room, t]) => ({ room, t, total: (t[1] || 0) + (t[2] || 0) + (t[3] || 0) }))
     .sort((a, b) => b.total - a.total);
   const max = Math.max(...entries.map((e) => e.total), 1);
+  // area ∝ count: diameter scales with sqrt so a 9-sensor room isn't 9× wider
+  const diam = (total: number) => 40 + Math.round(Math.sqrt(total / max) * 76);
+  // conic-gradient pie of tier proportions for one bubble
+  const pie = (t: Record<number, number>, total: number) => {
+    let acc = 0;
+    const stops = [1, 2, 3].filter((tier) => (t[tier] || 0) > 0).map((tier) => {
+      const from = (acc / total) * 360; acc += t[tier] || 0;
+      const to = (acc / total) * 360;
+      return `${TIER_META[tier][1]} ${from.toFixed(1)}deg ${to.toFixed(1)}deg`;
+    });
+    return `conic-gradient(${stops.join(", ")})`;
+  };
 
   return (
     <section className="card" style={{ padding: 20 }}>
@@ -307,34 +319,39 @@ function SensorCoverage() {
         <Icon name="sensors" size={18} />
         <h3 style={{ margin: 0, fontSize: 16 }}>Sensor coverage</h3>
       </div>
-      <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--text-dim)" }}>
-        Live sensors per room, coloured by how directly they sense people. Short or pink
-        bars are rooms Hearth can barely see — add a presence or motion sensor there.
+      <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--text-dim)" }}>
+        Each bubble is a room — bigger means more live sensors, slices show how directly
+        they sense people. Small or mostly-pink bubbles are rooms Hearth can barely see.
       </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {entries.map(({ room, t, total }) => (
-          <div key={room} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 13, width: 110, textAlign: "right", flexShrink: 0,
-                           color: total <= 1 ? "var(--danger)" : "var(--text)",
-                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {room}
-            </span>
-            <div style={{ flex: 1, display: "flex", height: 16, borderRadius: 4, overflow: "hidden",
-                          background: "var(--surface-2)", width: `${(total / max) * 100}%`, minWidth: 24 }}>
-              {[1, 2, 3].map((tier) => (t[tier] || 0) > 0 && (
-                <div key={tier} title={`${t[tier]} ${TIER_META[tier][0]} sensor${t[tier] > 1 ? "s" : ""}`}
-                     style={{ flex: t[tier], background: TIER_META[tier][1] }} />
-              ))}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "center",
+                    justifyContent: "center", padding: "8px 0" }}>
+        {entries.map(({ room, t, total }) => {
+          const d = diam(total);
+          const sparse = total <= 1;
+          return (
+            <div key={room} title={[1, 2, 3].filter((x) => t[x]).map((x) => `${t[x]} ${TIER_META[x][0]}`).join(" · ")}
+                 style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: d }}>
+              <div style={{ width: d, height: d, borderRadius: "50%", background: pie(t, total),
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            color: "#fff", fontWeight: 600, fontSize: Math.max(13, d * 0.26),
+                            boxShadow: sparse ? "inset 0 0 0 2px var(--danger)" : "none",
+                            textShadow: "0 1px 2px rgba(0,0,0,0.4)" }}>
+                {total}
+              </div>
+              <span style={{ fontSize: 12, color: sparse ? "var(--danger)" : "var(--text-dim)",
+                             maxWidth: Math.max(d + 16, 72), textAlign: "center",
+                             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {room}
+              </span>
             </div>
-            <span style={{ fontSize: 12.5, color: "var(--text-dim)", width: 24,
-                           fontVariantNumeric: "tabular-nums" }}>{total}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
-      <div style={{ display: "flex", gap: 16, marginTop: 12, fontSize: 12, color: "var(--text-dim)" }}>
+      <div style={{ display: "flex", gap: 16, marginTop: 12, fontSize: 12, color: "var(--text-dim)",
+                    justifyContent: "center" }}>
         {[1, 2, 3].map((tier) => (
           <span key={tier} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-            <span style={{ width: 9, height: 9, borderRadius: 2, background: TIER_META[tier][1] }} />
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: TIER_META[tier][1] }} />
             {TIER_META[tier][0]}
           </span>
         ))}

@@ -234,6 +234,16 @@ export default function Sensors() {
     () => (bindings ?? []).filter((b) => b.enabled && b.role !== "person"
       && health[b.name]?.status === "no_data").length,
     [bindings, health]);
+  const rescan = async () => {
+    setCleanMsg("Rescanning Home Assistant…");
+    try {
+      const r = await fetch("/api/ha/sync", { method: "POST" }).then(j);
+      setCleanMsg(r.added || r.rooms_updated
+        ? `Found ${r.added} new sensor${r.added === 1 ? "" : "s"}, updated ${r.rooms_updated} room${r.rooms_updated === 1 ? "" : "s"}.`
+        : "Up to date — no new sensors or room changes.");
+      load();
+    } catch { setCleanMsg("Rescan failed — is Home Assistant connected?"); }
+  };
   const pruneEmpty = async () => {
     if (!window.confirm("Disable every bound sensor with no data in the last 7 days? They add empty columns to the model. You can re-enable any of them here once they start reporting.")) return;
     const r = await fetch("/api/bindings/prune-empty", { method: "POST" }).then(j);
@@ -260,6 +270,7 @@ export default function Sensors() {
               Disable empty ({emptyCount})
             </button>
           )}
+          <button className="btn btn-secondary" onClick={rescan}>Rescan HA</button>
           <button className="btn btn-secondary" onClick={cleanup}>Clean up junk</button>
         </div>
       </div>

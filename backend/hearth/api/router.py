@@ -288,6 +288,17 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"removed": len(removed), "entities": removed,
                 "owners_assigned": owned}
 
+    @api.post("/ha/sync")
+    async def ha_sync() -> dict:
+        """Rescan Home Assistant: add new sensors, update rooms from areas.
+        Uses the LLM for new entities when a key is configured."""
+        events = deps.get("events")
+        if events is None:
+            raise HTTPException(409, "Connect Home Assistant first")
+        from ..domain.onboarding.inventory_sync import sync_inventory
+        return await sync_inventory(repo, events,
+                                    use_llm=repo.get_connection("llm") is not None)
+
     @api.get("/bindings/health")
     def bindings_health() -> dict:
         """Per-binding signal health over the last 7 days, plus the training
