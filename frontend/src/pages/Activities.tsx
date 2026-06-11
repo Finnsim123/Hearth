@@ -62,7 +62,7 @@ function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
       <button onClick={() => setExpanded(!expanded)}
         style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none",
                  background: expanded ? "var(--surface-2)" : "transparent", cursor: "pointer",
-                 padding: "12px 14px", textAlign: "left" }}>
+                 color: "var(--text)", padding: "12px 14px", textAlign: "left" }}>
         <span style={{ width: 11, height: 11, borderRadius: "50%", background: a.color, flexShrink: 0 }} />
         <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
           <strong style={{ fontSize: 14.5 }}>{a.name}</strong>

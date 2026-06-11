@@ -108,7 +108,7 @@ function PersonCard({ p: initial }: { p: Person }) {
       <button onClick={() => setOpen(!open)}
         style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", border: "none",
                  background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
-                 padding: "12px 14px", textAlign: "left" }}>
+                 color: "var(--text)", padding: "12px 14px", textAlign: "left" }}>
         <Avatar name={p.name} value={p.avatar} size={40} />
         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
           <strong style={{ fontSize: 14.5 }}>{p.name || "Unnamed"}</strong>

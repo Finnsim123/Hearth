@@ -202,13 +202,16 @@ export default function App() {
             <button onClick={() => toggleGroup(g.label)}
               style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                        background: "none", border: "none", cursor: "pointer", width: "100%",
-                       padding: "4px 10px 4px", color: "var(--text-dim)", fontSize: 10.5,
-                       textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                       padding: "5px 10px", color: "var(--text)", fontSize: 14, fontWeight: 600 }}>
               {g.label}
               <Chevron open={open} />
             </button>
             {open && g.items.map(([to, label]) => (
-              <NavLink key={to} to={to} style={navLinkStyle} onClick={closeNav}>{label}</NavLink>
+              <NavLink key={to} to={to} onClick={closeNav}
+                       style={(p) => ({ ...navLinkStyle(p), paddingLeft: 22, fontSize: 13.5,
+                                        fontWeight: p.isActive ? 600 : 400 })}>
+                {label}
+              </NavLink>
             ))}
           </div>
         );
