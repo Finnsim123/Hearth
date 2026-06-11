@@ -64,7 +64,8 @@ class HaRestNotifier:
         actions = [{"action": f"HEARTH_{question.id}_{i}",
                     "title": ("✓ " + t if i == 0 else t)}
                    for i, t in enumerate(titles[:3])]
-        deep_link = f"{self.base_url or ''}/inbox?q={question.id}"
+        base = self.base_url or self.repo.get_setting("hearth_base_url", "") or ""
+        deep_link = f"{base.rstrip('/')}/inbox?q={question.id}"
         payload = {
             "title": "What are you up to?",
             "message": message,

@@ -124,8 +124,7 @@ function BasedOn({ latest }: { latest: Pred }) {
     : ev >= 0.5 ? ["strong", "var(--ok, #34D399)"]
     : ev >= 0.25 ? ["mixed", "var(--accent)"]
     : ["weak", "var(--danger)"];
-  const nice = (f: string) =>
-    f.replace(/_/g, " ").replace(/\b(frac|max|mean|delta|last)\b/g, "$1");
+  const nice = (f: string) => f.replace(/_/g, " ");
   return (
     <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10,
                   display: "flex", flexDirection: "column", gap: 6 }}>

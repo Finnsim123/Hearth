@@ -104,3 +104,10 @@ def test_bootstrap_basis_names_the_fired_rule():
     assert pd.isna(basis.iloc[0])                      # default — no rule fired
     assert basis.iloc[1] == "bed_max > 1"
     assert predicate_text({"any": [{"feat": "a", "op": "==", "value": 1}]}) == "(a == 1)"
+
+
+def test_flux_tag_escapes_injection():
+    from hearth.adapters.influx_store import _flux_tag
+    assert _flux_tag("alice") == "alice"
+    assert _flux_tag('x" or true or "') == 'x\\" or true or \\"'
+    assert _flux_tag("a\\b") == "a\\\\b"

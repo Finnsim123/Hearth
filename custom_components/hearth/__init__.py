@@ -36,8 +36,10 @@ class HearthCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, dict]:
         try:
-            if not self.persons:
-                self.persons = await self.client.persons()
+            # refresh persons every poll: renames, enable/disable and newly
+            # added members are reflected (new members need one HA reload to
+            # create their entity — see async_setup_entry)
+            self.persons = await self.client.persons()
             return await self.client.latest_predictions()
         except HearthAuthError as exc:
             raise ConfigEntryAuthFailed from exc

@@ -156,8 +156,15 @@ class OpenRouterAdvisor:
                     appealed = (not standard and bool(reason)
                                 and is_bindable(it["entity_id"], role, override=True))
                     if (it["entity_id"] in valid_ids and _SLUG.match(name)
-                            and name not in seen and (standard or appealed)):
-                        seen.add(name)
+                            and it["entity_id"] not in seen
+                            and (standard or appealed)):
+                        seen.add(it["entity_id"])   # dedupe on entity, not name
+                        # feature prefixes must stay unique — disambiguate a
+                        # name collision instead of dropping a real sensor
+                        base, n = name, 2
+                        used = {b.name for b in out}
+                        while name in used:
+                            name, n = f"{base}_{n}", n + 1
                         opts = {"llm_override": reason} if appealed else {}
                         out.append(Binding(entity_id=it["entity_id"], role=role,
                                            name=name, room=it.get("room"),

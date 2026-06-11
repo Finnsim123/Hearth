@@ -67,7 +67,8 @@ export default function Wizard() {
     setApplying("saving");
     try {
       const r = await fetch("/api/setup/complete", { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...data, appBaseUrl: window.location.origin }) });
       if (!r.ok && r.status !== 409) throw new Error(String(r.status));
     } catch { /* server restarts mid-request; that's expected */ }
     // poll until the backend is back with setup complete

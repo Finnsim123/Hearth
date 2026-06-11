@@ -53,6 +53,7 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
     bindings = repo.bindings()
     # hierarchy (LCPN): one fine classifier per coarse state that has one
     child_probs: dict[str, pd.DataFrame] = {}
+    child_explains: dict[str, pd.DataFrame] = {}
     if record is not None:
         est = store.load(record)
         probs = est.predict_proba(todo)
@@ -60,7 +61,11 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         version = record.version
         for child in (m for m in promoted if m.node != "root"):
             try:
-                child_probs[child.node] = store.load(child).predict_proba(todo)
+                child_est = store.load(child)
+                child_probs[child.node] = child_est.predict_proba(todo)
+                # explain from the CHILD too: a fine prediction's "based on"
+                # and evidence must describe the child model, not the root
+                child_explains[child.node] = child_est.explain(todo)
             except Exception:
                 log.exception("child model %s failed to load", child.version)
     else:
@@ -73,8 +78,12 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
     for ts in todo.index:
         row = probs.loc[ts]
         # learned-transition forward filter: the previous window's state sets
-        # a prior (sleeping is sticky; sleeping→cooking at 3am is rare)
-        if trans and history:
+        # a prior (sleeping is sticky; sleeping→cooking at 3am is rare).
+        # ONLY for model predictions — the transition matrix is keyed on coarse
+        # STATES, so it must run on the root row before the hierarchy picks a
+        # fine label; applying it to the rules row could flip the argmax away
+        # from the rule we then cite as the reason.
+        if trans and history and version != RULES_VERSION:
             prev = history[0]
             prev_ts = prev.window_ts if prev.window_ts.tzinfo else \
                 prev.window_ts.replace(tzinfo=timezone.utc)
@@ -86,6 +95,7 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         confidence = float(row.max())
         parent = None
         coarse_confidence = None
+        active_explains = explains            # which model explains THIS window
         if predicted in child_probs:
             # top-down: the root said e.g. "home"; the home-node classifier
             # now picks among home's children (or "just home" = parent slug).
@@ -98,18 +108,19 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                 predicted = fine
             confidence = float(fine_row.max())
             row = fine_row                  # alternatives/asking use siblings
+            active_explains = child_explains.get(predicted, explains)
         explanation: list[tuple[str, float]] = []
         evidence = None
         if version == RULES_VERSION:
             why = rule_basis.get(ts)
             why = why if isinstance(why, str) else None   # pandas None→NaN trap
             explanation = [(f"rule: {why}" if why else "default (no rule matched)", 1.0)]
-        if not explains.empty and ts in explains.index:
-            top = explains.loc[ts].abs().nlargest(3)
-            explanation = [(f, float(explains.loc[ts, f])) for f in top.index]
+        if not active_explains.empty and ts in active_explains.index:
+            top = active_explains.loc[ts].abs().nlargest(3)
+            explanation = [(f, float(active_explains.loc[ts, f])) for f in top.index]
             from ..features.evidence import (
                 WEAK_CONFIDENCE_CAP, WEAK_DIRECT_SHARE, window_evidence)
-            evidence = round(window_evidence(explains.loc[ts], bindings), 4)
+            evidence = round(window_evidence(active_explains.loc[ts], bindings), 4)
             if evidence < WEAK_DIRECT_SHARE and confidence > WEAK_CONFIDENCE_CAP:
                 # the model is confident but not anchored on direct signal —
                 # don't assert; the capped confidence triggers a question
@@ -142,7 +153,11 @@ def _history(tsdb, person_id: str, now: datetime) -> list:
         out.append(Prediction(person_id=person_id, window_ts=datetime.fromisoformat(r["time"]),
                               model_version=r["model_version"], predicted=r["predicted"],
                               smoothed=r["smoothed"], confidence=r["confidence"],
-                              probabilities=r.get("probs", {})))
+                              probabilities=r.get("probs", {}),
+                              # parent is what the transition filter keys on next
+                              # window — without it the filter silently no-ops
+                              parent=r.get("parent"),
+                              evidence=r.get("evidence")))
     return out
 
 
@@ -164,5 +179,10 @@ async def predict_latest(tsdb, repo, store, publisher=None, notifier=None) -> No
                 except Exception:
                     log.exception("publish failed")
         if preds and notifier is not None:
-            await maybe_ask(preds[-1], person, repo, notifier)
+            try:
+                await maybe_ask(preds[-1], person, repo, notifier)
+            except Exception:
+                # a bad timezone setting or sqlite hiccup must not abort the
+                # loop for other members or skip the heartbeat
+                log.exception("maybe_ask failed for %s", person.id)
     tsdb.write_heartbeat("inference")

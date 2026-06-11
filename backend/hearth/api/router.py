@@ -132,6 +132,8 @@ def build_api_router(deps: dict) -> APIRouter:
         from ..adapters.ha_probe import probe
         info = await probe(ha["url"], ha["token"])
         repo.set_setting("timezone", info.get("timezone") or "UTC")
+        if body.get("appBaseUrl"):
+            repo.set_setting("hearth_base_url", str(body["appBaseUrl"]).rstrip("/"))
 
         influx = body["influx"]
         if influx.get("mode") == "external":
@@ -283,7 +285,13 @@ def build_api_router(deps: dict) -> APIRouter:
         from datetime import datetime, timedelta, timezone
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=min(hours, 24 * 30))
-        targets = [person] if person else [p.id for p in repo.persons() if p.enabled]
+        # `person` is interpolated into a Flux query downstream and is reachable
+        # by an integration-scope bearer token — only ever query KNOWN person
+        # ids (defence in depth alongside read_predictions' own escaping).
+        known = {p.id for p in repo.persons() if p.enabled}
+        if person is not None and person not in known:
+            raise HTTPException(404, "no such person")
+        targets = [person] if person else sorted(known)
         return {"persons": {pid: tsdb.read_predictions(pid, start, end)
                             for pid in targets}}
 

@@ -43,8 +43,12 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
 
         def _train_all() -> None:
             for person in repo.persons():
-                if person.enabled:
+                if not person.enabled:
+                    continue
+                try:
                     train_person(person.id, tsdb, repo, deps.get("models"))
+                except Exception:
+                    log.exception("weekly training failed for %s", person.id)
 
         scheduler.add_job(_train_all, "cron", day_of_week="sun", hour=3,
                           id="weekly_training", max_instances=1)

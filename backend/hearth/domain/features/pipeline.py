@@ -76,7 +76,6 @@ def window_grid(start: datetime, end: datetime, stride_min: int) -> list[datetim
 
 def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
                     grid: list[datetime], tz: str = "UTC") -> pd.DataFrame:
-    dyn = event_dynamics(prepared, bindings)
     """One row per window start: temporal features + per-binding recipe outputs
     (columns '{binding.name}_{suffix}'). Person-agnostic — caller filters
     bindings to shared + this person's.
@@ -85,12 +84,22 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
     window slices are precomputed in ONE O(n) groupby pass instead of a boolean
     mask per window (O(n x windows) — this was a multi-hour stage on 90-day
     fast-tracks before)."""
+    dyn = event_dynamics(prepared, bindings)
     zone = ZoneInfo(tz)
     aligned = all(g.minute % 30 == 0 and g.second == 0 for g in grid)
     slices: dict[datetime, pd.DataFrame] = {}
     if aligned and not prepared.empty:
         for ws_ts, group in prepared.groupby(prepared.index.floor("30min")):
             slices[ws_ts.to_pydatetime()] = group
+    # idleness at each window END, precomputed in ONE asof pass (was an
+    # O(n×windows) .loc[:we] re-slice inside the loop — the perf bug the
+    # groupby fast-path exists to avoid)
+    idle_at_end: dict[datetime, float] = {}
+    if dyn is not None:
+        we_index = pd.DatetimeIndex([ws + WINDOW for ws in grid])
+        idle_series = dyn["idle_min"].reindex(we_index, method="ffill")
+        idle_at_end = {ws: (float(v) if pd.notna(v) else IDLE_CAP_MIN)
+                       for ws, v in zip(grid, idle_series.to_numpy())}
     rows = []
     empty_slice = prepared.iloc[0:0]
     for ws in grid:
@@ -118,10 +127,7 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
             row["evt_active_sensors"] = float((per_sensor > 0).sum())
             row["evt_dominant_share"] = (float(per_sensor.max() / total)
                                          if total > 0 else 0.0)
-            idle_at_end = dyn["idle_min"].loc[:we].iloc[-1] \
-                if len(dyn["idle_min"].loc[:we]) else IDLE_CAP_MIN
-            row["evt_idle_minutes"] = float(idle_at_end if pd.notna(idle_at_end)
-                                            else IDLE_CAP_MIN)
+            row["evt_idle_minutes"] = idle_at_end.get(ws, IDLE_CAP_MIN)
         else:
             row["evt_count"] = 0.0
             row["evt_active_sensors"] = 0.0

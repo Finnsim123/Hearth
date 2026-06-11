@@ -27,6 +27,13 @@ log = logging.getLogger(__name__)
 
 RAW_BUCKET, FEAT_BUCKET, ML_BUCKET = "hearth_raw", "hearth_features", "hearth_ml"
 
+
+def _flux_tag(value: str) -> str:
+    """Escape a string for safe interpolation into a Flux double-quoted
+    literal — backslash and double-quote only (Flux string rules). Tag values
+    (person ids) are slugs in practice, but never trust that at the boundary."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
 # Roles whose state maps to a float `num` field; everything else -> `str`.
 NUMERIC_ROLES = {Role.PRESENCE, Role.BED, Role.POWER, Role.ENV, Role.DOOR,
                  Role.FOCUS, Role.STEPS, Role.BATTERY, Role.LIGHT, Role.CUSTOM}
@@ -204,7 +211,7 @@ from(bucket: "{RAW_BUCKET}")
         flux = f'''
 from(bucket: "{FEAT_BUCKET}")
   |> range(start: {start.isoformat()}, stop: {end.isoformat()})
-  |> filter(fn: (r) => r._measurement == "features" and r.person == "{person}"
+  |> filter(fn: (r) => r._measurement == "features" and r.person == "{_flux_tag(person)}"
                        and r.feature_set == "{feature_set}")
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
@@ -261,7 +268,7 @@ from(bucket: "{FEAT_BUCKET}")
         flux = f'''
 from(bucket: "{ML_BUCKET}")
   |> range(start: {start.isoformat()}, stop: {end.isoformat()})
-  |> filter(fn: (r) => r._measurement == "labels" and r.person == "{person}")
+  |> filter(fn: (r) => r._measurement == "labels" and r.person == "{_flux_tag(person)}")
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
         df = self.query_api.query_data_frame(flux)
@@ -286,7 +293,7 @@ from(bucket: "{ML_BUCKET}")
         flux = f"""
 from(bucket: "{ML_BUCKET}")
   |> range(start: {start.isoformat()}, stop: {end.isoformat()})
-  |> filter(fn: (r) => r._measurement == "predictions" and r.person == "{person}")
+  |> filter(fn: (r) => r._measurement == "predictions" and r.person == "{_flux_tag(person)}")
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
 """
         df = self.query_api.query_data_frame(flux)
