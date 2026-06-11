@@ -247,3 +247,26 @@ Cook & Krishnan "Activity Recognition on Streaming Sensor Data") vs Hearth:
    validation split AFTER honest evaluation (metrics never see calibrated
    probabilities); every downstream threshold (ask, evidence cap, gates)
    reads confidence as a real probability. Only fitted when n_val ≥ 100.
+
+
+## Realtime inference lane (added June 2026)
+
+**Problem:** the grid lane predicts every 5 min on 30-min windows aligned to a
+5-min stride — fine for the ribbon, far too slow for automations ("dim lights
+AS the movie starts"). And no NEW grid window even exists between 5-min marks.
+
+**Design:** an event-driven second lane running beside the grid lane.
+- Ingest already streams every bound-entity change over the HA WebSocket; each
+  change marks the affected person(s) dirty on a shared `RealtimeSignal`.
+- `realtime_loop` wakes (3 s debounce to coalesce bursts; 60 s safety tick),
+  predicts a window ending NOW (built in-memory, never written to the feature
+  store so the training grid stays clean), applies the transition filter +
+  hysteresis, and on a SMOOTHED-STATE CHANGE writes the prediction and fires
+  `hearth_activity_changed` on HA's event bus (POST /api/events/...).
+- Automations trigger on that event (`platform: event`) → instant, no polling.
+  The per-person sensor still exists for state display (poll 60→15 s).
+- Cheap: no SHAP/evidence on this path (the grid lane owns the dashboard
+  explanation), so it can run on every sensor change without loading the CT.
+
+End-to-end latency: ingest flush (≤5 s) + debounce (3 s) + predict (<1 s) +
+HA event (instant) ≈ under 10 s from sensor change to automation.

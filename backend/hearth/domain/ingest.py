@@ -41,13 +41,20 @@ async def gap_fill(events: EventSource, tsdb: TimeSeriesStore,
     return n
 
 
-async def run_ingest(events: EventSource, tsdb: TimeSeriesStore, repo: AppRepo) -> None:
-    """Long-running task: subscribe to bound entities, batch, flush."""
+async def run_ingest(events: EventSource, tsdb: TimeSeriesStore, repo: AppRepo,
+                     signal=None) -> None:
+    """Long-running task: subscribe to bound entities, batch, flush. When a
+    realtime `signal` is supplied, mark the affected person(s) dirty on every
+    change so the realtime lane re-predicts near-instantly."""
     bindings = [b for b in repo.bindings() if b.enabled]
     if not bindings:
         log.info("ingest idle — no bindings configured yet")
         return
     by_entity = {b.entity_id: b for b in bindings}
+    persons = [p.id for p in repo.persons() if p.enabled]
+    # entity → which person(s) it affects (shared bindings affect everyone)
+    affects = {b.entity_id: ([b.person_id] if b.person_id else persons)
+               for b in bindings}
     await gap_fill(events, tsdb, bindings)
 
     buffer: dict[str, list[EntityState]] = {}
@@ -71,5 +78,7 @@ async def run_ingest(events: EventSource, tsdb: TimeSeriesStore, repo: AppRepo) 
         async for state in events.subscribe(list(by_entity)):
             async with lock:
                 buffer.setdefault(state.entity_id, []).append(state)
+            if signal is not None:
+                signal.mark(affects.get(state.entity_id, ()))
     finally:
         flush_task.cancel()

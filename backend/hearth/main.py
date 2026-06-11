@@ -123,6 +123,8 @@ def create_app() -> FastAPI:
         scheduler.start()
         if deps.get("ingest_coro"):
             app.state.ingest_task = asyncio.create_task(deps["ingest_coro"]())
+        if deps.get("realtime_coro"):
+            app.state.realtime_task = asyncio.create_task(deps["realtime_coro"]())
         repo = deps["repo"]
         if repo.get_setting("seed.pending") or repo.get_setting("fasttrack.pending"):
             async def _seed_then_fasttrack() -> None:

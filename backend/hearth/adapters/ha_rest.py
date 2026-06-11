@@ -43,6 +43,24 @@ class HaRestNotifier:
             log.warning("notify %s failed: %s", service, exc)
             return False
 
+    async def fire_event(self, event_type: str, data: dict) -> bool:
+        """Fire a custom event on HA's bus — automations trigger on it
+        instantly (platform: event). Used by the realtime inference lane."""
+        conn = self.repo.get_connection("ha")
+        if conn is None:
+            return False
+        url = f"{conn['url'].rstrip('/')}/api/events/{event_type}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data,
+                                        headers={"Authorization": f"Bearer {conn['token']}"},
+                                        timeout=aiohttp.ClientTimeout(10)) as r:
+                    r.raise_for_status()
+            return True
+        except Exception as exc:
+            log.warning("fire_event %s failed: %s", event_type, exc)
+            return False
+
     async def notify(self, person: Person, title: str, message: str,
                      data: dict | None = None) -> bool:
         if not person.has_device or not person.notify_service:

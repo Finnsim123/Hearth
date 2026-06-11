@@ -16,6 +16,27 @@ Connects HA to your local Hearth instance and closes the loop, no YAML, no autom
       target: { entity_id: light.all_lights }
   ```
 
+  **Instant automations** (no polling lag): Hearth fires a `hearth_activity_changed`
+  event on HA's bus the moment a state flips — trigger on that for sub-10-second
+  response:
+
+  ```yaml
+  trigger:
+    - platform: event
+      event_type: hearth_activity_changed
+      event_data:
+        person: alice          # optional; omit to match anyone
+        state: movie
+  action:
+    - service: light.turn_off
+      target: { entity_id: light.living_room }
+  ```
+
+  Event data: `person`, `person_name`, `state` (coarse, stable — home/away/
+  sleeping), `activity` (fine if a child model is live — e.g. eating), `confidence`.
+  The `sensor.hearth_<person>_activity` entity is still there for state-based
+  triggers and dashboards; the event is the low-latency path.
+
 - **Feedback forwarding**: when someone taps ✓/✗ on a Hearth training question,
   the integration catches the `mobile_app_notification_action` event and POSTs it
   to Hearth with its API token. That's the whole active-learning loop.

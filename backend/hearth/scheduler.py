@@ -70,10 +70,14 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
                           max_instances=1, coalesce=True)
 
     if tsdb is not None and events is not None:
+        from .domain.inference.realtime import RealtimeSignal, realtime_loop
+        signal = RealtimeSignal()
+        deps["realtime_signal"] = signal
+
         async def _ingest_forever() -> None:
             while True:
                 try:
-                    await run_ingest(events, tsdb, repo)
+                    await run_ingest(events, tsdb, repo, signal)
                     await asyncio.sleep(30)   # no bindings yet -> poll for some
                 except asyncio.CancelledError:
                     raise
@@ -84,4 +88,17 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
         scheduler.add_job(_ingest_forever, id="ingest", next_run_time=None)
         # started as a one-shot task from main (long-running, not interval)
         deps["ingest_coro"] = _ingest_forever
+
+        async def _realtime_forever() -> None:
+            while True:
+                try:
+                    await realtime_loop(tsdb, repo, deps.get("models"), signal,
+                                        deps.get("notifier"))
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("realtime lane crashed — restarting in 10 s")
+                    await asyncio.sleep(10)
+
+        deps["realtime_coro"] = _realtime_forever
     return scheduler
