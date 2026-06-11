@@ -316,6 +316,7 @@ def build_api_router(deps: dict) -> APIRouter:
                     return c, "binary"
             return (cols[0] if cols else None), "numeric"
 
+        counts = tsdb.raw_event_counts([b.name for b in repo.bindings()], days=7)
         out = []
         for b in repo.bindings():
             cols = [c for c in feats.columns
@@ -328,7 +329,9 @@ def build_api_router(deps: dict) -> APIRouter:
                         "entity_id": b.entity_id, "enabled": b.enabled,
                         "status": ("alive" if varies else
                                    "constant" if present else "no_data"),
-                        "spark": spark, "kind": kind})
+                        "spark": spark, "kind": kind,
+                        "obs": int(counts.get(b.name, 0)),
+                        "per_day": round(counts.get(b.name, 0) / 7, 1)})
         # class balance from confirmed + bootstrap labels (recent window)
         classes: dict[str, int] = {}
         for p in persons:

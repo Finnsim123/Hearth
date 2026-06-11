@@ -42,7 +42,7 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
-type Health = { name: string; status: string; spark: number[]; kind: string };
+type Health = { name: string; status: string; spark: number[]; kind: string; obs: number; per_day: number };
 
 /** A 7-day signal sparkline of what the MODEL sees (the feature value,
  *  normalized 0–1). Binary roles render as a green barcode; numeric as a
@@ -154,6 +154,14 @@ function BindingRow({ b, persons, health, onChange }: {
         )}
       </div>
       <Sparkline h={health} />
+      {health && (
+        <span title={`${health.obs.toLocaleString()} observations in 7 days · ~${health.per_day.toLocaleString()}/day`}
+              style={{ fontSize: 11.5, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums",
+                       minWidth: 52, textAlign: "right", whiteSpace: "nowrap" }}>
+          {health.obs >= 1000 ? `${(health.obs / 1000).toFixed(1)}k` : health.obs}
+          <span style={{ opacity: 0.6 }}> obs</span>
+        </span>
+      )}
       <button className="btn btn-ghost" disabled={busy} title={b.enabled ? "Disable (keep, ignore)" : "Enable"}
               style={{ minHeight: 30, padding: "3px 10px", fontSize: 12.5 }} onClick={toggle}>
         {b.enabled ? "Disable" : "Enable"}

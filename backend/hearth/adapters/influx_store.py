@@ -353,6 +353,29 @@ from(bucket: "{RAW_BUCKET}")
             return None
         return None
 
+    def raw_event_counts(self, names: list[str], days: int = 7) -> dict:
+        """{binding.name: observation count} over the last `days` — counts raw
+        state writes per sensor (one point per reported state)."""
+        if not names:
+            return {}
+        flux = f"""
+from(bucket: "{RAW_BUCKET}")
+  |> range(start: -{days}d)
+  |> filter(fn: (r) => r._field == "num" or r._field == "str")
+  |> group(columns: ["_measurement"])
+  |> count()
+"""
+        out: dict = {}
+        try:
+            for table in self.query_api.query(flux):
+                for rec in table.records:
+                    meas = rec.values.get("_measurement", "")
+                    if meas.startswith("raw_"):
+                        out[meas[4:]] = int(rec.get_value() or 0)
+        except Exception as exc:
+            log.warning("raw_event_counts failed: %s", exc)
+        return {n: out.get(n, 0) for n in names}
+
     def count_raw_events(self, hours: int = 24) -> int:
         flux = f"""
 from(bucket: "{RAW_BUCKET}")
