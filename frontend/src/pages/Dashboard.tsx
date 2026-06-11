@@ -60,64 +60,6 @@ function Conf({ v }: { v: number }) {
 
 const CORRECTION_SLUGS = ["sleeping", "away", "home", "cooking", "eating", "movie", "working"];
 
-function Ribbon({ preds, ruleBased, personId }: { preds: Pred[]; ruleBased: boolean; personId: string }) {
-  const qc = useQueryClient();
-  const [selected, setSelected] = useState<Pred | null>(null);
-  if (!preds.length) return null;
-  // fixed 48-slot 24h grid: both cards always time-aligned; gaps stay dim
-  const slotMs = 30 * 60_000;
-  const nowSlot = Math.floor(Date.now() / slotMs) * slotMs;
-  const byTs = new Map(preds.map((p) => [Math.floor(new Date(p.time).getTime() / slotMs) * slotMs, p]));
-  const ordered: (Pred | null)[] = Array.from({ length: 48 }, (_, i) =>
-    byTs.get(nowSlot - (47 - i) * slotMs) ?? null);
-  const correct = async (slug: string) => {
-    if (!selected) return;
-    const start = new Date(selected.time);
-    const end = new Date(start.getTime() + 30 * 60_000);
-    await fetch("/api/labels/bulk", { method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ person_id: personId, activity: slug, source: "ribbon",
-                             start: start.toISOString(), end: end.toISOString() }) });
-    setSelected(null);
-    qc.invalidateQueries({ queryKey: ["predictions"] });
-  };
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 1, height: 16, borderRadius: 4, overflow: "hidden" }}>
-        {ordered.map((p, i) => p === null ? (
-          <span key={i} style={{ flex: 1, background: "var(--surface-2)" }} />
-        ) : (
-          <span key={i} role="button"
-                title={`${t(p.time)} · ${p.smoothed} (${Math.round(p.confidence * 100)}%) — tap to correct`}
-                onClick={() => setSelected(selected?.time === p.time ? null : p)}
-                style={{ flex: 1, background: color(p.smoothed), cursor: "pointer",
-                         opacity: 0.35 + 0.65 * p.confidence,
-                         outline: selected?.time === p.time ? "2px solid var(--accent)" : "none" }} />
-        ))}
-      </div>
-      {selected && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
-          <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-            {t(selected.time)} was actually:
-          </span>
-          {CORRECTION_SLUGS.map((slug) => (
-            <button key={slug} className="btn btn-secondary"
-                    style={{ minHeight: 30, padding: "4px 10px", fontSize: 12.5 }}
-                    onClick={() => correct(slug)}>
-              {slug.replace("_", " ")}
-            </button>
-          ))}
-        </div>
-      )}
-      {ruleBased && (
-        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-dim)" }}>
-          <Icon name="info" size={12} /> rule-based until the first model is trained
-        </p>
-      )}
-    </div>
-  );
-}
-
 /** What the current prediction rests on — SHAP signals for models, the
  *  fired rule for the rules fallback, plus the evidence-strength chip. */
 function BasedOn({ latest }: { latest: Pred }) {
@@ -172,16 +114,21 @@ function BasedOn({ latest }: { latest: Pred }) {
 }
 
 const WK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
-/** A week of activity at a glance: 7 day-columns × 24 hour-rows, each cell the
- *  dominant predicted activity that hour. Fills in as the days roll by. */
-function WeekHeatmap({ preds }: { preds: Pred[] }) {
+/** A week of activity: 7 day-rows × 24 hour-columns, each cell the dominant
+ *  predicted activity that hour. Compact + tappable — tap a cell to correct
+ *  that hour (replaces the old 24h ribbon). Fills in as the days roll by. */
+function WeekHeatmap({ preds, personId, ruleBased }:
+                     { preds: Pred[]; personId: string; ruleBased: boolean }) {
+  const qc = useQueryClient();
+  const [sel, setSel] = useState<{ label: string; h: number; time: Date } | null>(null);
   if (!preds.length) return null;
   const now = new Date();
-  const days: { key: string; label: string }[] = [];
+  const days: { key: string; label: string; date: Date }[] = [];
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(now); d.setDate(now.getDate() - i);
-    days.push({ key: d.toDateString(), label: WK[d.getDay()] });
+    const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - i);
+    days.push({ key: d.toDateString(), label: WK[d.getDay()], date: new Date(d) });
   }
   const grid: Record<string, Record<number, Record<string, number>>> = {};
   for (const p of preds) {
@@ -191,42 +138,73 @@ function WeekHeatmap({ preds }: { preds: Pred[] }) {
     ((grid[key] ??= {})[h] ??= {});
     grid[key][h][s] = (grid[key][h][s] || 0) + 1;
   }
-  const dominant = (key: string, h: number): string | null => {
+  const dom = (key: string, h: number): string | null => {
     const c = grid[key]?.[h];
     return c ? Object.entries(c).sort((a, b) => b[1] - a[1])[0][0] : null;
   };
+  const correct = async (slug: string) => {
+    if (!sel) return;
+    const start = sel.time, end = new Date(start.getTime() + 3600_000);
+    await fetch("/api/labels/bulk", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ person_id: personId, activity: slug, source: "heatmap",
+                             start: start.toISOString(), end: end.toISOString() }) });
+    setSel(null);
+    qc.invalidateQueries({ queryKey: ["predictions"] });
+    qc.invalidateQueries({ queryKey: ["predictions_week"] });
+  };
   const cells: JSX.Element[] = [<div key="corner" />];
-  days.forEach((d, i) => cells.push(
-    <div key={"d" + i} style={{ fontSize: 10, color: "var(--text-dim)", textAlign: "center" }}>{d.label}</div>));
-  for (let h = 0; h < 24; h++) {
-    cells.push(
-      <div key={"hl" + h} style={{ fontSize: 9, color: "var(--text-dim)", textAlign: "right",
-                                   paddingRight: 4, lineHeight: "7px" }}>
-        {h % 6 === 0 ? String(h).padStart(2, "0") : ""}
-      </div>);
-    days.forEach((d, i) => {
-      const st = dominant(d.key, h);
-      const hh = String(h).padStart(2, "0");
+  HOURS.forEach((h) => cells.push(
+    <div key={"hh" + h} style={{ fontSize: 8, color: "var(--text-dim)", textAlign: "center", lineHeight: "9px" }}>
+      {h % 6 === 0 ? String(h).padStart(2, "0") : ""}
+    </div>));
+  days.forEach((d) => {
+    cells.push(<div key={"dl" + d.key} style={{ fontSize: 10, color: "var(--text-dim)",
+                                                lineHeight: "14px", paddingRight: 4 }}>{d.label}</div>);
+    HOURS.forEach((h) => {
+      const st = dom(d.key, h);
+      const cellTime = new Date(d.date); cellTime.setHours(h);
+      const future = cellTime > now;
+      const on = sel && sel.label === d.label && sel.h === h && +sel.time === +cellTime;
       cells.push(
-        <div key={`c${h}-${i}`}
-             title={st ? `${d.label} ${hh}:00 — ${st.replace("_", " ")}` : `${d.label} ${hh}:00 — no data`}
-             style={{ height: 7, borderRadius: 2, background: st ? color(st) : "var(--surface-2)" }} />);
+        <div key={`c${d.key}-${h}`}
+             onClick={() => future ? undefined : setSel(on ? null : { label: d.label, h, time: cellTime })}
+             title={`${d.label} ${String(h).padStart(2, "0")}:00 — ${st ? st.replace("_", " ") : "no data"}`}
+             style={{ height: 14, borderRadius: 2, cursor: future ? "default" : "pointer",
+                      background: st ? color(st) : "var(--surface-2)", opacity: future ? 0.3 : 1,
+                      outline: on ? "2px solid var(--accent)" : "none", outlineOffset: -1 }} />);
     });
-  }
+  });
   const present = Array.from(new Set(preds.map((p) => p.smoothed || p.predicted)));
   return (
     <div>
-      <p className="label" style={{ margin: "0 0 6px" }}>This week · hour of day</p>
-      <div style={{ display: "grid", gridTemplateColumns: "18px repeat(7, 1fr)", gap: 2, rowGap: 1 }}>
+      <p className="label" style={{ margin: "0 0 6px" }}>This week · tap a cell to correct</p>
+      <div style={{ display: "grid", gridTemplateColumns: "32px repeat(24, 1fr)", gap: 2 }}>
         {cells}
       </div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+      {sel && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+          <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+            {sel.label} {String(sel.h).padStart(2, "0")}:00 was actually:
+          </span>
+          {CORRECTION_SLUGS.map((slug) => (
+            <button key={slug} className="btn btn-secondary"
+                    style={{ minHeight: 30, padding: "4px 10px", fontSize: 12.5 }}
+                    onClick={() => correct(slug)}>{slug.replace("_", " ")}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
         {present.map((s) => (
           <span key={s} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11,
                                  color: "var(--text-dim)", textTransform: "capitalize" }}>
             <span style={{ width: 9, height: 9, borderRadius: 2, background: color(s) }} /> {s.replace("_", " ")}
           </span>
         ))}
+        {ruleBased && (
+          <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-dim)" }}>
+            <Icon name="info" size={11} /> rule-based until the first model
+          </span>
+        )}
       </div>
     </div>
   );
@@ -257,8 +235,7 @@ function PersonCard({ person, preds, weekPreds }: { person: Person; preds: Pred[
           <span style={{ fontSize: 13, color: "var(--text-dim)" }}>no predictions yet</span>
         </div>
       )}
-      <WeekHeatmap preds={weekPreds} />
-      <Ribbon preds={preds} ruleBased={!!ruleBased} personId={person.id} />
+      <WeekHeatmap preds={weekPreds} personId={person.id} ruleBased={!!ruleBased} />
       {latest && <BasedOn latest={latest} />}
     </div>
   );
