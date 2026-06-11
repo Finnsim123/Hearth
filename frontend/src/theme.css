@@ -126,6 +126,12 @@ h3 { font-size: 20px; font-weight: 600; }
 .btn-ghost { background: none; color: var(--text-dim); }
 .btn-ghost:hover { color: var(--text); }
 
+/* the ember buddy */
+@keyframes buddyBreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+.buddy-orb { transition: box-shadow .3s ease; }
+.buddy-orb.anim { animation: buddyBreathe 2.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .buddy-orb.anim { animation: none; } }
+
 input, select, textarea {
   background: var(--surface-2);
   border: 1px solid var(--border);

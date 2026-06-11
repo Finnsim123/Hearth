@@ -108,6 +108,17 @@ async def run_fast_track(repo, tsdb, store, notifier=None) -> None:
         from .inference.predictor import predict_latest
         await predict_latest(tsdb, repo, store, None, None)
 
+        # Discovery: cluster the windows the rules couldn't explain into routines
+        # the user can name — turns "your model is ready" into "here are 4
+        # patterns I found in your history, name them in a tap".
+        _status(repo, "discovering")
+        try:
+            from .discovery.clustering import run_discovery
+            found = await asyncio.to_thread(run_discovery, tsdb, repo)
+            _status(repo, "discovered", found=len(found))
+        except Exception:
+            log.exception("fast track: discovery failed")
+
         if notifier is not None:
             from .milestones import check_milestones
             await check_milestones(repo, tsdb, notifier)

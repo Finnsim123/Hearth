@@ -20,6 +20,7 @@ import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import Login from "./components/Login";
 import ProgressWait from "./components/ProgressWait";
+import Buddy from "./components/Buddy";
 
 // The three pipeline stages — collapsible groups (Data → Model → Output).
 const PIPELINE: { label: string; items: readonly (readonly [string, string])[] }[] = [
@@ -294,6 +295,7 @@ export default function App() {
                     onClick={runUpdate}>Update ({update.behind})</button>
           )}
         </header>
+        <Buddy />
         {drawerOpen && (
           <>
             <div onClick={closeNav}
@@ -316,6 +318,7 @@ export default function App() {
         {navBody}
       </aside>
       {mainContent}
+      <Buddy />
     </div>
   );
 }

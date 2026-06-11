@@ -1,0 +1,138 @@
+"""The buddy — a single resolver for "what is Hearth doing right now?".
+
+Drives the ember mascot (every page) and the dashboard's first-run timeline from
+ONE source of truth, so they never disagree. Pure read, cheap: a few settings +
+counts. Returns a friendly, first-person narration of the current phase.
+
+Phase priority (first match wins):
+  error → fast-track (import→features→patterns→training) → stalled sensors →
+  retraining → questions waiting → live (watch & predict) → collecting (no data
+  yet) → waiting (nothing connected).
+"""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta, timezone
+
+log = logging.getLogger(__name__)
+
+# Where each fast-track stage sits on the overall 0..1 progress bar.
+_FT_SPAN = {
+    "importing": (0.02, 0.35), "imported": (0.35, 0.37), "pruned_empty": (0.37, 0.4),
+    "building_features": (0.40, 0.70), "features_built": (0.70, 0.72),
+    "training": (0.72, 0.88), "trained": (0.88, 0.90),
+    "discovering": (0.90, 0.99), "discovered": (0.99, 1.0),
+}
+_FT_COPY = {
+    "importing": ("Scanning your history", "Reading everything your home has recorded"),
+    "imported": ("History imported", "Got it all — tidying up"),
+    "pruned_empty": ("Tidying up", "Setting aside sensors with no history"),
+    "building_features": ("Making sense of it", "Turning raw sensors into features"),
+    "features_built": ("Features ready", "Now I can start learning"),
+    "training": ("Learning your routines", "Training a model for each of you"),
+    "trained": ("Almost there", "Model trained — finishing up"),
+    "discovering": ("Spotting your patterns", "Looking for routines worth naming"),
+    "discovered": ("Patterns found", "Ready for you to name them"),
+}
+
+
+def _state(phase, tone, title, detail, progress=None, cta=None) -> dict:
+    return {"phase": phase, "tone": tone, "title": title, "detail": detail,
+            "progress": progress, "cta": cta}
+
+
+def _fasttrack(ft: dict) -> dict:
+    stage = ft.get("stage", "importing")
+    lo, hi = _FT_SPAN.get(stage, (0.0, 1.0))
+    progress = lo
+    if stage == "building_features" and ft.get("of"):
+        progress = lo + (hi - lo) * (ft.get("chunk", 0) / max(ft["of"], 1))
+    else:
+        progress = (lo + hi) / 2
+    title, detail = _FT_COPY.get(stage, ("Setting things up", "One moment"))
+    if stage == "importing" and ft.get("span_days"):
+        detail = f"Reading the last {int(ft['span_days'])} days of history"
+    if stage == "imported" and ft.get("points"):
+        detail = f"Imported {int(ft['points']):,} readings — tidying up"
+    if stage == "discovered" and ft.get("found"):
+        detail = f"Found {int(ft['found'])} routine{'s' if ft['found'] != 1 else ''} to name"
+    tone = "live" if stage in ("discovered", "trained") else "work"
+    return _state(f"setup:{stage}", tone, title, detail, round(progress, 3))
+
+
+def buddy_state(repo, tsdb) -> dict:
+    now = datetime.now(timezone.utc)
+
+    ft = _get(repo, "fasttrack.status") or {}
+    stage = ft.get("stage")
+    if stage == "failed":
+        return _state("error", "error", "I hit a snag importing",
+                      ft.get("error") or "Check the logs, then re-run setup.",
+                      cta={"label": "Settings", "href": "/settings"})
+    if _get(repo, "fasttrack.pending") or (stage and stage != "done"):
+        return _fasttrack(ft)
+
+    persons = [p for p in _safe(repo.persons, []) if getattr(p, "enabled", True)]
+    promoted = [m for m in _safe(repo.models, []) if m.promoted]
+    bound = len([b for b in _safe(repo.bindings, []) if b.enabled])
+
+    # stalled: bound sensors but nothing arriving recently
+    if tsdb is not None and bound:
+        recent = _safe(lambda: tsdb.count_raw_events(3), None)
+        first = _safe(lambda: tsdb.first_raw_time(), None)
+        if recent == 0 and first is not None and (now - first) > timedelta(hours=6):
+            return _state("stalled", "alert", "I've stopped hearing from your sensors",
+                          "No new readings in a few hours — is Home Assistant still connected?",
+                          cta={"label": "Check sensors", "href": "/sensors"})
+
+    # retraining in progress (weekly / first train)
+    ts = _get(repo, "training.status") or {}
+    if ts.get("running"):
+        return _state("retraining", "work", "Refreshing what I know",
+                      "Re-learning from your latest confirmations", None)
+
+    # questions waiting — a gentle nudge
+    open_q = _safe(lambda: repo.open_questions(), [])
+    if open_q:
+        n = len(open_q)
+        return _state("questions", "ask", f"I've got {n} question{'s' if n != 1 else ''} for you",
+                      "A minute of your time sharpens the model",
+                      cta={"label": "Open inbox", "href": "/inbox"})
+
+    # live — a model is promoted and predicting
+    if promoted and tsdb is not None:
+        states = []
+        for p in persons:
+            rows = _safe(lambda p=p: tsdb.read_predictions(p.id, now - timedelta(hours=6), now), [])
+            if rows:
+                states.append(f"{p.name}: {rows[-1].get('smoothed') or rows[-1].get('predicted')}")
+        events = _safe(lambda: tsdb.count_raw_events(24), None)
+        detail = " · ".join(states) if states else (
+            f"{int(events):,} readings today" if events else "Keeping an eye on things")
+        return _state("live", "live", "Watching & predicting", detail)
+
+    # collecting — recording, but not enough to train yet
+    first = _safe(lambda: tsdb.first_raw_time(), None) if tsdb is not None else None
+    if first is not None:
+        days = (now - first).total_seconds() / 86400
+        return _state("collecting", "work", "Getting to know your home",
+                      f"Day {max(1, round(days))} — learning your rhythms before I predict",
+                      progress=round(min(days / 10.0, 0.95), 2))
+
+    return _state("waiting", "work", "Waiting for your sensors",
+                  "Connect Home Assistant and I'll start watching",
+                  cta={"label": "Settings", "href": "/settings"})
+
+
+def _get(repo, key):
+    try:
+        return repo.get_setting(key)
+    except Exception:
+        return None
+
+
+def _safe(fn, default=None):
+    try:
+        return fn()
+    except Exception:
+        return default

@@ -332,6 +332,18 @@ def build_api_router(deps: dict) -> APIRouter:
         return await sync_inventory(repo, events,
                                     use_llm=repo.get_connection("llm") is not None)
 
+    @api.get("/buddy")
+    def buddy() -> dict:
+        """Current phase for the ember buddy (every page) + first-run timeline.
+        Pure read; degrades to a neutral 'waiting' state on any error."""
+        from ..domain.buddy import buddy_state
+        try:
+            return buddy_state(repo, deps.get("tsdb"))
+        except Exception:
+            log.exception("buddy_state failed")
+            return {"phase": "live", "tone": "live", "title": "Watching & predicting",
+                    "detail": "", "progress": None, "cta": None}
+
     @api.get("/methodology")
     def methodology() -> dict:
         """Live numbers that personalise the Methodology page (docs/METHODOLOGY.md).
