@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Routes, Route, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
 import "./theme.css";
 import { applyTheme, getTheme, initTheme, type ThemeMode } from "./theme";
+import { useIsMobile } from "./useMedia";
 
 initTheme();
 import Dashboard from "./pages/Dashboard";
@@ -33,6 +34,13 @@ const navLinkStyle = ({ isActive }: { isActive: boolean }) => ({
   color: isActive ? "var(--text)" : "var(--text-dim)",
   background: isActive ? "var(--surface-2)" : "transparent",
 });
+
+const MenuIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" aria-hidden>
+    <path d="M4 6h16M4 12h16M4 18h16" />
+  </svg>
+);
 
 const Chevron = ({ open }: { open: boolean }) => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -103,8 +111,13 @@ export default function App() {
   const [updating, setUpdating] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState<Set<string>>(
     () => new Set(JSON.parse(localStorage.getItem("hearth.nav.collapsed") || "[]")));
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // close the mobile drawer whenever the route changes (covers every nav link)
+  useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
 
   const toggleGroup = (label: string) => setNavCollapsed((prev) => {
     const next = new Set(prev);
@@ -169,92 +182,140 @@ export default function App() {
   }
   if (auth === "login") return <Login onSuccess={() => { setAuth("ready"); navigate("/"); }} />;
 
+  const closeNav = () => setDrawerOpen(false);
+
+  const navBody = (
+    <>
+      <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600,
+                     letterSpacing: "-0.02em", padding: "4px 8px 14px" }}>
+        <Mark />
+        hearth
+      </span>
+
+      <NavLink to="/" end style={navLinkStyle} onClick={closeNav}>Dashboard</NavLink>
+
+      {PIPELINE.map((g) => {
+        const open = !navCollapsed.has(g.label) || g.label === currentGroup;
+        return (
+          <div key={g.label} style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 12 }}>
+            <button onClick={() => toggleGroup(g.label)}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                       background: "none", border: "none", cursor: "pointer", width: "100%",
+                       padding: "4px 10px 4px", color: "var(--text-dim)", fontSize: 10.5,
+                       textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              {g.label}
+              <Chevron open={open} />
+            </button>
+            {open && g.items.map(([to, label]) => (
+              <NavLink key={to} to={to} style={navLinkStyle} onClick={closeNav}>{label}</NavLink>
+            ))}
+          </div>
+        );
+      })}
+
+      <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 2, paddingTop: 14 }}>
+        {update && update.behind > 0 && (
+          <button className="btn btn-primary" style={{ width: "100%", fontSize: 13, marginBottom: 6 }}
+                  onClick={runUpdate} title={update.latest_subject}>
+            Update ({update.behind})
+          </button>
+        )}
+        <NavLink to="/methodology" style={navLinkStyle} onClick={closeNav}>How it works</NavLink>
+        <NavLink to="/settings" end style={navLinkStyle} onClick={closeNav}>Settings</NavLink>
+        <Link to="/settings#account" style={{ ...navLinkStyle({ isActive: false }) }} onClick={closeNav}>Account</Link>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                      gap: 8, marginTop: 8, paddingTop: 10, paddingLeft: 2,
+                      borderTop: "1px solid var(--border)" }}>
+          <div style={{ display: "inline-flex", border: "1px solid var(--border)",
+                        borderRadius: 999, overflow: "hidden" }}>
+            {THEMES.map(([m, Glyph, title]) => (
+              <button key={m} onClick={() => setTheme(m)} title={title} aria-label={title}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center",
+                         border: "none", cursor: "pointer", padding: "5px 8px", lineHeight: 1,
+                         background: mode === m ? "var(--accent)" : "transparent",
+                         color: mode === m ? "#fff" : "var(--text-dim)" }}>
+                <Glyph />
+              </button>
+            ))}
+          </div>
+          <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 8px", whiteSpace: "nowrap" }}
+                  onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); setAuth("login"); }}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
+  const mainContent = (
+    <main style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ maxWidth: "var(--content-max)", margin: "0 auto",
+                    padding: isMobile ? "16px 14px 40px" : 24 }}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/inbox" element={<Inbox />} />
+          <Route path="/activities" element={<Activities />} />
+          <Route path="/patterns" element={<Patterns />} />
+          <Route path="/models" element={<Models />} />
+          <Route path="/sensors" element={<Sensors />} />
+          <Route path="/methodology" element={<Methodology />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/onboarding" element={<Onboarding />} />
+        </Routes>
+      </div>
+    </main>
+  );
+
+  const asideStyle: React.CSSProperties = {
+    boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 3,
+    padding: "16px 12px", background: "var(--surface)", borderRight: "1px solid var(--border)",
+    overflowY: "auto",
+  };
+
+  if (isMobile) {
+    return (
+      <div style={{ minHeight: "100vh" }}>
+        <header style={{ position: "sticky", top: 0, zIndex: 20, display: "flex", alignItems: "center",
+                         gap: 10, padding: "10px 14px", background: "var(--surface)",
+                         borderBottom: "1px solid var(--border)" }}>
+          <button onClick={() => setDrawerOpen(true)} aria-label="Open menu"
+            style={{ background: "none", border: "none", color: "var(--text)", cursor: "pointer",
+                     padding: 4, display: "flex" }}>
+            <MenuIcon />
+          </button>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600,
+                         letterSpacing: "-0.02em" }}>
+            <Mark />
+            hearth
+          </span>
+          {update && update.behind > 0 && (
+            <button className="btn btn-primary" style={{ marginLeft: "auto", fontSize: 12.5, padding: "4px 10px" }}
+                    onClick={runUpdate}>Update ({update.behind})</button>
+          )}
+        </header>
+        {drawerOpen && (
+          <>
+            <div onClick={closeNav}
+                 style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 30 }} />
+            <aside style={{ ...asideStyle, position: "fixed", top: 0, left: 0, height: "100vh",
+                            width: 264, maxWidth: "82vw", zIndex: 31 }}>
+              {navBody}
+            </aside>
+          </>
+        )}
+        {mainContent}
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
-      <aside
-        style={{
-          width: 214, flexShrink: 0, position: "sticky", top: 0, height: "100vh",
-          boxSizing: "border-box",
-          display: "flex", flexDirection: "column", gap: 3, padding: "16px 12px",
-          background: "var(--surface)", borderRight: "1px solid var(--border)",
-          overflowY: "auto",
-        }}
-      >
-        <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600,
-                       letterSpacing: "-0.02em", padding: "4px 8px 14px" }}>
-          <Mark />
-          hearth
-        </span>
-
-        <NavLink to="/" end style={navLinkStyle}>Dashboard</NavLink>
-
-        {PIPELINE.map((g) => {
-          const open = !navCollapsed.has(g.label) || g.label === currentGroup;
-          return (
-            <div key={g.label} style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 12 }}>
-              <button onClick={() => toggleGroup(g.label)}
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                         background: "none", border: "none", cursor: "pointer", width: "100%",
-                         padding: "4px 10px 4px", color: "var(--text-dim)", fontSize: 10.5,
-                         textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                {g.label}
-                <Chevron open={open} />
-              </button>
-              {open && g.items.map(([to, label]) => (
-                <NavLink key={to} to={to} style={navLinkStyle}>{label}</NavLink>
-              ))}
-            </div>
-          );
-        })}
-
-        <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 2, paddingTop: 14 }}>
-          {update && update.behind > 0 && (
-            <button className="btn btn-primary" style={{ width: "100%", fontSize: 13, marginBottom: 6 }}
-                    onClick={runUpdate} title={update.latest_subject}>
-              Update ({update.behind})
-            </button>
-          )}
-          <NavLink to="/methodology" style={navLinkStyle}>How it works</NavLink>
-          <NavLink to="/settings" end style={navLinkStyle}>Settings</NavLink>
-          <Link to="/settings#account" style={{ ...navLinkStyle({ isActive: false }) }}>Account</Link>
-
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                        gap: 8, marginTop: 8, paddingTop: 10, paddingLeft: 2,
-                        borderTop: "1px solid var(--border)" }}>
-            <div style={{ display: "inline-flex", border: "1px solid var(--border)",
-                          borderRadius: 999, overflow: "hidden" }}>
-              {THEMES.map(([m, Glyph, title]) => (
-                <button key={m} onClick={() => setTheme(m)} title={title} aria-label={title}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center",
-                           border: "none", cursor: "pointer", padding: "5px 8px", lineHeight: 1,
-                           background: mode === m ? "var(--accent)" : "transparent",
-                           color: mode === m ? "#fff" : "var(--text-dim)" }}>
-                  <Glyph />
-                </button>
-              ))}
-            </div>
-            <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 8px", whiteSpace: "nowrap" }}
-                    onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); setAuth("login"); }}>
-              Sign out
-            </button>
-          </div>
-        </div>
+      <aside style={{ ...asideStyle, width: 214, flexShrink: 0, position: "sticky",
+                      top: 0, height: "100vh" }}>
+        {navBody}
       </aside>
-      <main style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ maxWidth: "var(--content-max)", margin: "0 auto", padding: 24 }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/inbox" element={<Inbox />} />
-            <Route path="/activities" element={<Activities />} />
-            <Route path="/patterns" element={<Patterns />} />
-            <Route path="/models" element={<Models />} />
-            <Route path="/sensors" element={<Sensors />} />
-            <Route path="/methodology" element={<Methodology />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/onboarding" element={<Onboarding />} />
-          </Routes>
-        </div>
-      </main>
+      {mainContent}
     </div>
   );
 }

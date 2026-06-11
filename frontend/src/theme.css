@@ -75,8 +75,14 @@
 }
 
 /* base */
-body {
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
   margin: 0;
+  max-width: 100%;
+  overflow-x: hidden;   /* no sideways scrolling on any viewport */
+}
+body {
   background: var(--bg);
   color: var(--text);
   font-size: 16px;
@@ -86,6 +92,15 @@ body {
 h1 { font-size: 31px; font-weight: 600; letter-spacing: -0.01em; }
 h2 { font-size: 25px; font-weight: 600; letter-spacing: -0.01em; }
 h3 { font-size: 20px; font-weight: 600; }
+
+/* mobile: smaller headings, tighter cards, full-width controls */
+@media (max-width: 720px) {
+  h1 { font-size: 25px; }
+  h2 { font-size: 21px; }
+  h3 { font-size: 18px; }
+  .card { padding: 14px 16px; }
+  input, select, textarea { max-width: 100% !important; }
+}
 .label { font-size: 12px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
 
 .card {

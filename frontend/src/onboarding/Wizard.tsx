@@ -470,7 +470,7 @@ function StepInventory({ d, next, back }: StepProps & { back: () => void }) {
         )}
         {state === "done" && scan && (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))", gap: 12 }}>
               {[[scan.count.toLocaleString(), "entities found"],
                 [scan.bindable.toLocaleString(), "look useful for activity sensing"],
                 [scan.domains.toLocaleString(), "entity types"]].map(([n, l]) => (

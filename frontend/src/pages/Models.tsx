@@ -124,7 +124,7 @@ function Importances({ imp }: { imp: Record<string, number> }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {entries.map(([feat, v]) => (
-        <div key={feat} style={{ display: "grid", gridTemplateColumns: "220px 1fr 48px", gap: 10, alignItems: "center", fontSize: 12.5 }}>
+        <div key={feat} style={{ display: "grid", gridTemplateColumns: "minmax(96px, 200px) 1fr 44px", gap: 10, alignItems: "center", fontSize: 12.5 }}>
           <code style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{feat}</code>
           <div style={{ height: 8, background: "var(--surface-2)", borderRadius: 4 }}>
             <div style={{ height: "100%", width: `${(v / max) * 100}%`, background: "var(--accent)", borderRadius: 4 }} />

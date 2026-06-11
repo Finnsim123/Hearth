@@ -6,6 +6,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons";
+import { useIsMobile } from "../useMedia";
 
 type Binding = {
   id: number; entity_id: string; role: string; name: string;
@@ -51,7 +52,7 @@ function Sparkline({ h }: { h?: Health }) {
   const W = 200, H = 22;
   if (!h || h.status !== "alive" || h.spark.length === 0) {
     return (
-      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} preserveAspectRatio="none"
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
            style={{ flexShrink: 0 }} aria-label="no signal">
         <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="var(--text-dim)"
               strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
@@ -63,7 +64,7 @@ function Sparkline({ h }: { h?: Health }) {
   if (h.kind === "binary") {
     const bw = W / n;
     return (
-      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} preserveAspectRatio="none"
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
            style={{ flexShrink: 0 }} aria-label={`${h.name} signal`}>
         <rect x="0" y="4" width={W} height={H - 8} fill="var(--surface-2)" rx="2" />
         {h.spark.map((v, i) => v > 0.05 && (
@@ -75,7 +76,7 @@ function Sparkline({ h }: { h?: Health }) {
   }
   const pts = h.spark.map((v, i) => `${x(i).toFixed(1)},${(H - 3 - v * (H - 6)).toFixed(1)}`).join(" ");
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} preserveAspectRatio="none"
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
          style={{ flexShrink: 0 }} aria-label={`${h.name} signal`}>
       <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="1.5"
                 vectorEffect="non-scaling-stroke" />
@@ -93,6 +94,7 @@ function BindingRow({ b, persons, health, onChange }: {
   b: Binding; persons: Record<string, string>; health?: Health; onChange: () => void;
 }) {
   const status = health?.status;
+  const isMobile = useIsMobile();
   const [busy, setBusy] = useState(false);
   const llmReason = (b.options?.llm_reason ?? b.options?.reason) as string | undefined;
   const overridden = Boolean(b.options?.llm_override);
@@ -113,9 +115,11 @@ function BindingRow({ b, persons, health, onChange }: {
     onChange();
   };
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px",
-                  border: "1px solid var(--border)", borderRadius: 10,
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row",
+                  alignItems: isMobile ? "stretch" : "center", gap: isMobile ? 8 : 12,
+                  padding: "10px 14px", border: "1px solid var(--border)", borderRadius: 10,
                   opacity: b.enabled ? 1 : 0.45 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0, flex: 1 }}>
       <Icon name="sensors" size={15} />
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -161,7 +165,13 @@ function BindingRow({ b, persons, health, onChange }: {
           <span style={{ fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>“{llmReason}”</span>
         )}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12,
+                    marginLeft: isMobile ? 0 : "auto",
+                    justifyContent: isMobile ? "space-between" : "flex-end" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2,
+                    alignItems: isMobile ? "stretch" : "flex-end",
+                    flex: isMobile ? 1 : "none", minWidth: 110, maxWidth: isMobile ? "none" : 220 }}>
         <Sparkline h={health} />
         {health?.feature && (
           <code style={{ fontSize: 10.5, color: "var(--text-dim)" }} title="The exact feature column this sparkline plots — the model's actual input, after 1-min normalization + 30-min windowing.">
@@ -185,6 +195,7 @@ function BindingRow({ b, persons, health, onChange }: {
               style={{ minHeight: 30, padding: "3px 8px", color: "var(--danger)" }} onClick={remove}>
         <Icon name="trash" size={14} />
       </button>
+      </div>
     </div>
   );
 }

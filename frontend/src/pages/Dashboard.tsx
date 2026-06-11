@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import Avatar from "../components/Avatar";
 import { Icon, type IconName } from "../icons";
 import { packSiblings, enclose, type C } from "../bubbles";
+import { useIsMobile } from "../useMedia";
 
 type Pred = { time: string; predicted: string; smoothed: string; confidence: number;
               model_version: string; probs: Record<string, number>
@@ -300,12 +301,12 @@ const prettyRoom = (originals: string[]) => {
     .map((w) => w[0].toUpperCase() + w.slice(1)).join(" ") || "Unassigned";
 };
 
-const W = 1040;            // layout width in svg units (scales to card width)
 const LABEL_H = 24;
 
 /** Pack each room's sensors into a disc, then let the room-discs flow into an
- *  organic, non-overlapping cloud that fills the width. Mutates positions. */
-function layoutRooms(rows: Health[]): { rooms: Room[]; height: number } {
+ *  organic, non-overlapping cloud that fills the width `W` (svg units; a
+ *  narrower W on mobile keeps the bubbles legible once scaled to the screen). */
+function layoutRooms(rows: Health[], W: number): { rooms: Room[]; width: number; height: number } {
   const groups: Record<string, { label: string; list: Health[]; originals: Set<string> }> = {};
   for (const b of rows) {
     const k = roomKey(b.room);
@@ -365,7 +366,7 @@ function layoutRooms(rows: Health[]): { rooms: Room[]; height: number } {
     }
     if (!moved) break;                     // settled — stop early
   }
-  return { rooms, height: H + LABEL_H };
+  return { rooms, width: W, height: H + LABEL_H };
 }
 
 /** Sensor coverage bubble chart: rooms laid out across the width, each holding
@@ -375,6 +376,7 @@ function SensorCoverage() {
   const [rows, setRows] = useState<Health[] | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
+  const isMobile = useIsMobile();
   useEffect(() => {
     fetch("/api/bindings/health").then((r) => r.json())
       .then((h) => setRows((h.bindings ?? []).filter((b: Health) => b.status === "alive")))
@@ -382,7 +384,7 @@ function SensorCoverage() {
   }, []);
   if (!rows || rows.length === 0) return null;
 
-  const { rooms, height } = layoutRooms(rows);
+  const { rooms, width, height } = layoutRooms(rows, isMobile ? 600 : 1040);
   const selected = rooms.find((r) => r.key === sel) || null;
 
   return (
@@ -395,7 +397,7 @@ function SensorCoverage() {
         Each cluster is a room; each dot is a live sensor — bigger dots fire more often,
         colour is how directly it senses people. Click a room to see its sensors.
       </p>
-      <svg viewBox={`0 0 ${W} ${height}`} role="img"
+      <svg viewBox={`0 0 ${width} ${height}`} role="img"
            style={{ width: "100%", display: "block" }}>
         {rooms.map((rm) => {
           const active = rm.key === sel || rm.key === hover;

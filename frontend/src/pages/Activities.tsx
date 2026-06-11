@@ -39,6 +39,7 @@ function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
   parents: Activity[]; onSaved: () => void;
 }) {
   const [a, setA] = useState(initial);
+  const [expanded, setExpanded] = useState(false);
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<"idle" | "saving" | "ok" | "fail">("idle");
   const u = (patch: Partial<Activity>) => { setA({ ...a, ...patch }); setState("idle"); };
@@ -48,30 +49,51 @@ function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
     catch { setState("fail"); }
   };
   const mine = rules.filter((r) => r.activity_slug === a.slug);
+  const parentName = a.parent_id ? parents.find((p2) => p2.id === a.parent_id)?.name : null;
+  const summary = [
+    parentName ? `in ${parentName}` : "top-level state",
+    a.enabled ? null : "disabled",
+    `${mine.length} rule${mine.length === 1 ? "" : "s"}`,
+  ].filter(Boolean).join(" · ");
+
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16,
-                  display: "flex", flexDirection: "column", gap: 12,
-                  opacity: a.enabled ? 1 : 0.5 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ width: 12, height: 12, borderRadius: "50%", background: a.color, flexShrink: 0 }} />
-        <input value={a.name} onChange={(e) => u({ name: e.target.value })}
-               style={{ fontWeight: 600, fontSize: 15, maxWidth: 180 }} />
-        <code style={{ fontSize: 12, color: "var(--text-dim)" }}>{a.slug}</code>
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden",
+                  opacity: a.enabled ? 1 : 0.6 }}>
+      <button onClick={() => setExpanded(!expanded)}
+        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none",
+                 background: expanded ? "var(--surface-2)" : "transparent", cursor: "pointer",
+                 padding: "12px 14px", textAlign: "left" }}>
+        <span style={{ width: 11, height: 11, borderRadius: "50%", background: a.color, flexShrink: 0 }} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+          <strong style={{ fontSize: 14.5 }}>{a.name}</strong>
+          <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+            <code>{a.slug}</code> · {summary}
+          </span>
+        </div>
         {a.silent && (
           <span title="Never pushed as a notification — questions go to the Inbox"
-                style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 99,
+                style={{ marginLeft: 8, fontSize: 11.5, padding: "2px 8px", borderRadius: 99,
                          border: "1px solid var(--border)", color: "var(--text-dim)",
-                         display: "inline-flex", alignItems: "center", gap: 4 }}>
+                         display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
             <Icon name="bell-off" size={11} /> silent
           </span>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button className="btn btn-ghost" style={{ minHeight: 30, padding: "3px 10px", fontSize: 12.5 }}
-                  onClick={() => setOpen(!open)}>
-            {open ? "Hide rules" : `Rules (${mine.length})`}
-          </button>
-        </div>
-      </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+             style={{ marginLeft: "auto", flexShrink: 0, color: "var(--text-dim)",
+                      transition: "transform .18s", transform: expanded ? "none" : "rotate(-90deg)" }}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {expanded && (
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12,
+                    borderTop: "1px solid var(--border)" }}>
+      <label style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 240 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 500 }}>Name</span>
+        <input value={a.name} onChange={(e) => u({ name: e.target.value })}
+               style={{ fontWeight: 600, fontSize: 15 }} />
+      </label>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -110,6 +132,11 @@ function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
           )}
         </div>
       </div>
+
+      <button className="btn btn-ghost" onClick={() => setOpen(!open)}
+              style={{ alignSelf: "flex-start", minHeight: 30, padding: "3px 10px", fontSize: 12.5 }}>
+        {open ? "Hide rules" : `Show rules (${mine.length})`}
+      </button>
 
       {open && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -156,6 +183,8 @@ function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
         {state === "ok" && <span style={{ color: "var(--ok, #34D399)", fontSize: 13 }}>Saved ✓</span>}
         {state === "fail" && <span style={{ color: "var(--danger)", fontSize: 13 }}>Couldn't save</span>}
       </div>
+      </div>
+      )}
     </div>
   );
 }
