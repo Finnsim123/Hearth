@@ -336,25 +336,36 @@ def build_api_router(deps: dict) -> APIRouter:
                                     use_llm=repo.get_connection("llm") is not None)
 
     @api.get("/ha/entities")
-    async def ha_entities() -> list[dict]:
-        """The full Home Assistant entity list (for the 'Add sensor' search) with
-        a flag for what's already bound and the LLM's suggested role per entity."""
+    async def ha_entities() -> dict:
+        """The FULL Home Assistant entity list (for the 'Add sensor' search). Each
+        item is flagged with whether it's already bound (and to what role/member),
+        whether it's a genuine home/away tracker, and the heuristic suggested role.
+        Returns counts so the UI can show 'discovered / bound / available'."""
         events = deps.get("events")
         if events is None:
             raise HTTPException(409, "Connect Home Assistant first")
-        from ..domain.onboarding.advisor import suggest_role
+        from ..domain.onboarding.advisor import is_person_tracker, suggest_role
         inv = await events.discover_entities()
-        bound = {b.entity_id for b in repo.bindings()}
-        out = []
+        by_id = {b.entity_id: b for b in repo.bindings()}
+        persons = {p.id: p.name for p in repo.persons()}
+        out, n_disabled = [], 0
         for e in inv:
             if e.get("disabled"):
+                n_disabled += 1
                 continue
+            eid = e["entity_id"]
             role = suggest_role(e)
-            out.append({"entity_id": e["entity_id"], "domain": e.get("domain"),
+            b = by_id.get(eid)
+            out.append({"entity_id": eid, "domain": e.get("domain"),
                         "friendly_name": e.get("friendly_name"), "area": e.get("area"),
+                        "state": e.get("state"),
                         "suggested_role": role.value if role else None,
-                        "bound": e["entity_id"] in bound})
-        return out
+                        "is_tracker": is_person_tracker(eid, e.get("friendly_name") or ""),
+                        "bound": b is not None,
+                        "bound_role": b.role.value if b else None,
+                        "bound_person": persons.get(b.person_id) if b and b.person_id else None})
+        return {"entities": out, "total": len(inv), "disabled": n_disabled,
+                "bound": len(by_id), "available": sum(1 for e in out if not e["bound"])}
 
     @api.post("/household/relink")
     async def relink_persons() -> dict:
@@ -364,12 +375,15 @@ def build_api_router(deps: dict) -> APIRouter:
         events = deps.get("events")
         if events is None:
             raise HTTPException(409, "Connect Home Assistant first")
+        from ..domain.onboarding.advisor import is_person_tracker
         from ..domain.onboarding.person_link import (ensure_member_persons,
                                                       repair_person_bindings)
         # first heal any numeric distance/proximity entity wrongly given the
         # PERSON role (and its inverted away rule), then (re)link real trackers.
         repaired = repair_person_bindings(repo)
         inv = [e for e in await events.discover_entities() if not e.get("disabled")]
+        candidates = sum(1 for e in inv
+                         if is_person_tracker(e["entity_id"], e.get("friendly_name") or ""))
         matches = {}
         if repo.get_connection("llm"):
             try:
@@ -378,7 +392,11 @@ def build_api_router(deps: dict) -> APIRouter:
             except Exception:
                 log.exception("relink: LLM match failed — name fallback only")
         linked = ensure_member_persons(repo, inv, matches)
-        return {"linked": linked, **repaired}
+        # who's still without a live link, so the UI can guide a manual pick
+        unlinked = [p.name for p in repo.persons()
+                    if not any(b.role.value == "person" and b.person_id == p.id
+                               for b in repo.bindings())]
+        return {"linked": linked, "candidates": candidates, "unlinked": unlinked, **repaired}
 
     @api.get("/buddy")
     def buddy() -> dict:

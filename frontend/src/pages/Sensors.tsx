@@ -20,9 +20,15 @@ const postJSON = (url: string, body: unknown) =>
 
 const ALL_ROLES = ["presence", "bed", "person", "power", "light", "media", "env",
                    "focus", "alarm_time", "door", "steps", "battery", "custom"];
+// roles that belong to one household member — these get an inline "assign member"
+const PERSONAL_ROLES = new Set(["person", "bed", "alarm_time", "focus", "steps", "battery"]);
 type Member = { id: string; name: string; has_person: boolean; person_alive: boolean };
 type Entity = { entity_id: string; domain: string | null; friendly_name: string | null;
-                area: string | null; suggested_role: string | null; bound: boolean };
+                area: string | null; state: string | null; suggested_role: string | null;
+                is_tracker: boolean; bound: boolean;
+                bound_role: string | null; bound_person: string | null };
+type EntityResp = { entities: Entity[]; total: number; bound: number;
+                    available: number; disabled: number };
 
 const ROLE_HINTS: Record<string, string> = {
   bed: "occupancy / pressure — sleeping signal",
@@ -105,10 +111,18 @@ function BindingRow({ b, persons, health, onChange }: {
   const isMobile = useIsMobile();
   const [busy, setBusy] = useState(false);
   const [editRole, setEditRole] = useState(false);
+  const [editPerson, setEditPerson] = useState(false);
   const changeRole = async (role: string) => {
     setEditRole(false);
     if (role === b.role) return;
     await postJSON("/api/bindings", { ...b, role }).catch(() => {});
+    onChange();
+  };
+  const changePerson = async (pid: string) => {
+    setEditPerson(false);
+    const person_id = pid || null;
+    if (person_id === b.person_id) return;
+    await postJSON("/api/bindings", { ...b, person_id }).catch(() => {});
     onChange();
   };
   const llmReason = (b.options?.llm_reason ?? b.options?.reason) as string | undefined;
@@ -167,7 +181,21 @@ function BindingRow({ b, persons, health, onChange }: {
               {HEALTH_BADGE[status][0]}
             </span>
           )}
-          {b.person_id && (
+          {PERSONAL_ROLES.has(b.role) ? (
+            editPerson ? (
+              <select autoFocus defaultValue={b.person_id ?? ""} onBlur={() => setEditPerson(false)}
+                      onChange={(e) => changePerson(e.target.value)} style={{ fontSize: 12, padding: "1px 4px" }}>
+                <option value="">Shared / nobody</option>
+                {Object.entries(persons).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+              </select>
+            ) : (
+              <span onClick={() => setEditPerson(true)} title="Click to assign this sensor to a household member"
+                    style={{ fontSize: 12, cursor: "pointer",
+                             color: b.person_id ? "var(--text-dim)" : "var(--accent)" }}>
+                · {b.person_id ? (persons[b.person_id] ?? b.person_id) : "assign member"}
+              </span>
+            )
+          ) : b.person_id && (
             <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
               · {persons[b.person_id] ?? b.person_id}
             </span>
@@ -224,29 +252,43 @@ function BindingRow({ b, persons, health, onChange }: {
   );
 }
 
-function AddSensor({ members, onClose, onAdded }: {
-  members: Member[]; onClose: () => void; onAdded: () => void;
+const CAP = 120;
+
+function AddSensor({ members, initialPeople = false, onClose, onAdded }: {
+  members: Member[]; initialPeople?: boolean; onClose: () => void; onAdded: () => void;
 }) {
-  const [entities, setEntities] = useState<Entity[] | null>(null);
+  const [resp, setResp] = useState<EntityResp | null>(null);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<Entity | null>(null);
   const [role, setRole] = useState("custom");
   const [person, setPerson] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [showBound, setShowBound] = useState(initialPeople);   // reveal bound when linking people
+  const [peopleOnly, setPeopleOnly] = useState(initialPeople);
   useEffect(() => {
-    fetch("/api/ha/entities").then(j).then(setEntities)
-      .catch(() => setEntities([]));
+    fetch("/api/ha/entities").then(j).then(setResp)
+      .catch(() => setResp({ entities: [], total: 0, bound: 0, available: 0, disabled: 0 }));
   }, []);
-  const shown = useMemo(() => {
+  const entities = resp?.entities ?? null;
+  const matches = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return (entities ?? [])
-      .filter((e) => !e.bound)
+      .filter((e) => showBound || !e.bound)
+      .filter((e) => !peopleOnly || e.domain === "person" || e.domain === "device_tracker")
       .filter((e) => !needle || e.entity_id.toLowerCase().includes(needle)
         || (e.friendly_name ?? "").toLowerCase().includes(needle))
-      .slice(0, 80);
-  }, [entities, q]);
-  const pick = (e: Entity) => { setSel(e); setRole(e.suggested_role ?? "custom"); setErr(""); };
+      // genuine trackers first, then anything with a suggested role, then the rest
+      .sort((a, b) => Number(b.is_tracker) - Number(a.is_tracker)
+        || Number(Boolean(b.suggested_role)) - Number(Boolean(a.suggested_role))
+        || Number(a.bound) - Number(b.bound)
+        || a.entity_id.localeCompare(b.entity_id));
+  }, [entities, q, showBound, peopleOnly]);
+  const shown = matches.slice(0, CAP);
+  const pick = (e: Entity) => {
+    if (e.bound) return;                       // bound entities are info-only here
+    setSel(e); setRole(e.suggested_role ?? "custom"); setErr("");
+  };
   const add = async () => {
     if (!sel) return;
     setBusy(true);
@@ -273,23 +315,56 @@ function AddSensor({ members, onClose, onAdded }: {
         </div>
         {!sel ? (
           <>
-            <input autoFocus placeholder="Search Home Assistant entities…" value={q}
+            {resp && (
+              <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+                Home Assistant returned <strong style={{ color: "var(--text)" }}>{resp.total}</strong> entities ·{" "}
+                {resp.bound} already bound · <strong style={{ color: "var(--text)" }}>{resp.available}</strong> available to add
+                {resp.disabled > 0 && ` · ${resp.disabled} disabled in HA (hidden)`}
+              </p>
+            )}
+            <input autoFocus placeholder="Search all Home Assistant entities…" value={q}
                    onChange={(e) => setQ(e.target.value)} style={{ width: "100%", boxSizing: "border-box" }} />
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12.5, color: "var(--text-dim)" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                <input type="checkbox" checked={peopleOnly} onChange={(e) => setPeopleOnly(e.target.checked)} />
+                People only (person / device_tracker)
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                <input type="checkbox" checked={showBound} onChange={(e) => setShowBound(e.target.checked)} />
+                Show already-bound too
+              </label>
+            </div>
             <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
               {entities === null && <p style={{ color: "var(--text-dim)", fontSize: 13 }}>Loading…</p>}
-              {entities && shown.length === 0 && <p style={{ color: "var(--text-dim)", fontSize: 13 }}>Nothing matches (already-bound entities are hidden).</p>}
+              {entities && shown.length === 0 && (
+                <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
+                  Nothing matches{!showBound && " — tick “Show already-bound too” to see entities Hearth already tracks"}.
+                </p>
+              )}
               {shown.map((e) => (
-                <button key={e.entity_id} onClick={() => pick(e)}
+                <button key={e.entity_id} onClick={() => pick(e)} disabled={e.bound}
+                        title={e.bound ? `Already bound as ${e.bound_role}${e.bound_person ? ` · ${e.bound_person}` : ""} — change it in the list below` : undefined}
                         style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left",
                                  padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)",
-                                 background: "var(--surface-2)", cursor: "pointer", color: "var(--text)" }}>
+                                 background: "var(--surface-2)", cursor: e.bound ? "default" : "pointer",
+                                 opacity: e.bound ? 0.6 : 1, color: "var(--text)" }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{e.friendly_name || e.entity_id}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, display: "flex", gap: 6, alignItems: "center" }}>
+                      {e.friendly_name || e.entity_id}
+                      {e.is_tracker && <span style={{ fontSize: 10.5, color: "var(--text-dim)" }}>· home/away · {e.state ?? "?"}</span>}
+                    </div>
                     <code style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{e.entity_id}</code>
                   </div>
-                  {e.suggested_role && <RoleBadge role={e.suggested_role} />}
+                  {e.bound
+                    ? <span style={{ fontSize: 11, color: "var(--text-dim)" }}>bound · {e.bound_role}{e.bound_person ? ` · ${e.bound_person}` : ""}</span>
+                    : e.suggested_role && <RoleBadge role={e.suggested_role} />}
                 </button>
               ))}
+              {matches.length > CAP && (
+                <p style={{ color: "var(--text-dim)", fontSize: 12.5, margin: "4px 0 0" }}>
+                  +{matches.length - CAP} more — refine your search to narrow it down.
+                </p>
+              )}
             </div>
           </>
         ) : (
@@ -340,7 +415,7 @@ export default function Sensors() {
   const [sparkHours, setSparkHours] = useState(168);   // 1h / 24h / 7d sparkline zoom
   const [cleanMsg, setCleanMsg] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<false | "all" | "people">(false);
   const load = () => fetch("/api/bindings").then(j).then(setBindings).catch(() => setBindings([]));
   const loadHealth = (hours: number) =>
     fetch(`/api/bindings/health?hours=${hours}`).then(j).then((h) => {
@@ -353,8 +428,16 @@ export default function Sensors() {
     setCleanMsg("Re-linking household to home/away sensors…");
     try {
       const r = await postJSON("/api/household/relink", {}).then(j);
-      setCleanMsg(r.linked ? `Linked ${r.linked} member${r.linked === 1 ? "" : "s"} to a home/away sensor.`
-        : "No new links found — add the person.* sensor manually if it's missing.");
+      if (r.linked) {
+        setCleanMsg(`Linked ${r.linked} member${r.linked === 1 ? "" : "s"} to a home/away sensor.`);
+      } else if (!r.candidates) {
+        setCleanMsg("No person.* or device_tracker home/away entity exists in Home Assistant. "
+          + "Add HA's ‘Person’ integration (Settings → People), then Rescan HA.");
+      } else {
+        setCleanMsg(`Couldn't auto-match ${(r.unlinked ?? []).join(", ") || "everyone"} — `
+          + "opening the picker so you can link them by hand.");
+        setAdding("people");
+      }
       reload();
     } catch { setCleanMsg("Re-link failed — is Home Assistant connected?"); }
   };
@@ -434,28 +517,44 @@ export default function Sensors() {
               Disable empty ({emptyCount})
             </button>
           )}
-          <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add sensor</button>
+          <button className="btn btn-primary" onClick={() => setAdding("all")}>+ Add sensor</button>
           <button className="btn btn-secondary" onClick={rescan}>Rescan HA</button>
           <button className="btn btn-secondary" onClick={tidyRooms}>Tidy rooms</button>
           <button className="btn btn-secondary" onClick={cleanup}>Clean up junk</button>
         </div>
       </div>
 
-      {members.some((m) => !m.person_alive) && (
-        <div style={{ padding: "10px 14px", borderRadius: 10, fontSize: 13.5,
-                      display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
-                      background: "color-mix(in srgb, var(--danger) 12%, transparent)",
-                      border: "1px solid var(--danger)" }}>
-          <span style={{ flex: 1, minWidth: 220 }}>
-            <strong>{members.filter((m) => !m.person_alive).map((m) => m.name).join(", ")}</strong>{" "}
-            {members.filter((m) => !m.person_alive).length === 1 ? "has" : "have"} no live home/away
-            sensor — Hearth can't predict <em>away</em> for {members.filter((m) => !m.person_alive).length === 1 ? "them" : "them"} until a
-            {" "}<code>person.*</code> is linked.
-          </span>
-          <button className="btn btn-secondary" onClick={relink}>Auto-link with AI</button>
-        </div>
-      )}
-      {adding && <AddSensor members={members} onClose={() => setAdding(false)} onAdded={reload} />}
+      {members.some((m) => !m.person_alive) && (() => {
+        const unlinked = members.filter((m) => !m.has_person);
+        const stale = members.filter((m) => m.has_person && !m.person_alive);
+        return (
+          <div style={{ padding: "10px 14px", borderRadius: 10, fontSize: 13.5,
+                        display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+                        background: "color-mix(in srgb, var(--danger) 12%, transparent)",
+                        border: "1px solid var(--danger)" }}>
+            <span style={{ flex: 1, minWidth: 220 }}>
+              {unlinked.length > 0 && (
+                <><strong>{unlinked.map((m) => m.name).join(", ")}</strong>{" "}
+                {unlinked.length === 1 ? "has" : "have"} no <code>person.*</code> home/away sensor
+                linked — Hearth can't predict <em>away</em> for {unlinked.length === 1 ? "them" : "them"} yet.{" "}</>
+              )}
+              {stale.length > 0 && (
+                <><strong>{stale.map((m) => m.name).join(", ")}</strong>{" "}
+                {stale.length === 1 ? "is" : "are"} linked, but no recent data is arriving — check the
+                {" "}<code>person.*</code> entity is logging to InfluxDB (HA InfluxDB integration include list).</>
+              )}
+            </span>
+            {unlinked.length > 0 && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-secondary" onClick={relink}>Auto-link with AI</button>
+                <button className="btn btn-ghost" onClick={() => setAdding("people")}>Link manually</button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+      {adding && <AddSensor members={members} initialPeople={adding === "people"}
+                            onClose={() => setAdding(false)} onAdded={reload} />}
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)", maxWidth: 640 }}>
         Every Home Assistant entity Hearth listens to, and the <em>role</em> it was given —
         roles are what make features household-independent. Disable anything that shouldn't
