@@ -80,7 +80,10 @@
 html, body {
   margin: 0;
   max-width: 100%;
-  overflow-x: hidden;   /* no sideways scrolling on any viewport */
+  /* clip (not hidden): stops sideways scroll WITHOUT making body a scroll
+     container — `overflow-x: hidden` forces overflow-y to auto, which breaks
+     position:sticky on the sidebar. */
+  overflow-x: clip;
 }
 body {
   background: var(--bg);
