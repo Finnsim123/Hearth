@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import Avatar from "../components/Avatar";
 import { Icon, type IconName } from "../icons";
+import { packSiblings, enclose, type C } from "../bubbles";
 
 type Pred = { time: string; predicted: string; smoothed: string; confidence: number;
               model_version: string; probs: Record<string, number>
@@ -272,16 +273,53 @@ function Pulse({ j, hasTsdb }: { j?: Journey; hasTsdb: boolean }) {
   );
 }
 
-type Health = { name: string; status: string; role: string; room: string | null; tier: number };
+type Health = { name: string; status: string; role: string; room: string | null;
+                tier: number; per_day?: number };
 
 const TIER_META: Record<number, [string, string]> = {
-  1: ["direct", "var(--ok, #34D399)"],      // bed, presence, person, media, door
-  2: ["behavioral", "var(--accent)"],        // power, lights, steps
-  3: ["ambient", "#F472B6"],                 // temp, CO2, humidity, battery
+  1: ["direct", "#34D399"],      // bed, presence, person, media, door
+  2: ["behavioral", "#F59E0B"],  // power, lights, steps  (ember/amber)
+  3: ["ambient", "#F472B6"],     // temp, CO2, humidity, battery
 };
+const tierColor = (t: number) => TIER_META[t]?.[1] ?? TIER_META[2][1];
 
-/** Sensor coverage by room, segmented by evidence tier. Long green bars = rooms
- *  we can see well (direct sensors); short/pink bars = rooms we barely sense. */
+type Leaf = C & { tier: number; name: string };
+type Room = { x: number; y: number; r: number; room: string;
+              leaves: Leaf[]; total: number; sparse: boolean; tiers: Record<number, number> };
+
+/** Pack each room's sensors into a disc, then pack the room-discs into a cluster.
+ *  Returns absolutely-positioned rooms + leaves centred on the origin. */
+function packRooms(rows: Health[]): { rooms: Room[]; ext: number } {
+  const byRoom: Record<string, Health[]> = {};
+  for (const b of rows) (byRoom[b.room || "Unassigned"] ??= []).push(b);
+
+  const maxPD = Math.max(1, ...rows.map((b) => b.per_day ?? 0));
+  const leafR = (b: Health) => 5 + Math.sqrt((b.per_day ?? 0) / maxPD) * 9;  // 5–14px
+
+  const rooms: Room[] = Object.entries(byRoom).map(([room, list]) => {
+    const leaves: Leaf[] = list.map((b) => ({ x: 0, y: 0, r: leafR(b), tier: b.tier || 2, name: b.name }));
+    packSiblings(leaves);
+    const e = enclose(leaves);
+    for (const l of leaves) { l.x -= e.x; l.y -= e.y; }           // re-centre on room origin
+    const tiers: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
+    for (const l of leaves) tiers[l.tier] = (tiers[l.tier] || 0) + 1;
+    return { x: 0, y: 0, r: e.r + 7, room, leaves, total: leaves.length,
+             sparse: leaves.length <= 1, tiers };
+  }).sort((a, b) => b.r - a.r);                                   // big rooms first → centred
+
+  packSiblings(rooms as unknown as C[]);
+  const whole = enclose(rooms as unknown as C[]);
+  let ext = 0;
+  for (const rm of rooms) {
+    rm.x -= whole.x; rm.y -= whole.y;
+    ext = Math.max(ext, Math.hypot(rm.x, rm.y) + rm.r);
+  }
+  return { rooms, ext: ext + 18 };
+}
+
+/** Sensor coverage as a nested bubble chart: each room is a bubble packed into a
+ *  cluster, holding one dot per live sensor (size = how often it fires, colour =
+ *  evidence tier). Small or all-pink rooms are ones Hearth can barely see. */
 function SensorCoverage() {
   const [rows, setRows] = useState<Health[] | null>(null);
   useEffect(() => {
@@ -291,27 +329,7 @@ function SensorCoverage() {
   }, []);
   if (!rows || rows.length === 0) return null;
 
-  const byRoom: Record<string, Record<number, number>> = {};
-  for (const b of rows) {
-    const room = b.room || "Unassigned";
-    (byRoom[room] ??= { 1: 0, 2: 0, 3: 0 })[b.tier || 2] += 1;
-  }
-  const entries = Object.entries(byRoom)
-    .map(([room, t]) => ({ room, t, total: (t[1] || 0) + (t[2] || 0) + (t[3] || 0) }))
-    .sort((a, b) => b.total - a.total);
-  const max = Math.max(...entries.map((e) => e.total), 1);
-  // area ∝ count: diameter scales with sqrt so a 9-sensor room isn't 9× wider
-  const diam = (total: number) => 40 + Math.round(Math.sqrt(total / max) * 76);
-  // conic-gradient pie of tier proportions for one bubble
-  const pie = (t: Record<number, number>, total: number) => {
-    let acc = 0;
-    const stops = [1, 2, 3].filter((tier) => (t[tier] || 0) > 0).map((tier) => {
-      const from = (acc / total) * 360; acc += t[tier] || 0;
-      const to = (acc / total) * 360;
-      return `${TIER_META[tier][1]} ${from.toFixed(1)}deg ${to.toFixed(1)}deg`;
-    });
-    return `conic-gradient(${stops.join(", ")})`;
-  };
+  const { rooms, ext } = packRooms(rows);
 
   return (
     <section className="card" style={{ padding: 20 }}>
@@ -319,39 +337,46 @@ function SensorCoverage() {
         <Icon name="sensors" size={18} />
         <h3 style={{ margin: 0, fontSize: 16 }}>Sensor coverage</h3>
       </div>
-      <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--text-dim)" }}>
-        Each bubble is a room — bigger means more live sensors, slices show how directly
-        they sense people. Small or mostly-pink bubbles are rooms Hearth can barely see.
+      <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--text-dim)" }}>
+        Each cluster is a room; each dot is a live sensor — bigger dots fire more often,
+        colour is how directly it senses people. Small or all-pink rooms are ones Hearth
+        can barely see.
       </p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "center",
-                    justifyContent: "center", padding: "8px 0" }}>
-        {entries.map(({ room, t, total }) => {
-          const d = diam(total);
-          const sparse = total <= 1;
+      <svg viewBox={`${-ext} ${-ext} ${2 * ext} ${2 * ext}`} role="img"
+           style={{ width: "100%", maxHeight: 440, display: "block" }}>
+        {rooms.map((rm) => {
+          const fs = Math.max(9, Math.min(13, rm.r * 0.17));
+          const tip = [1, 2, 3].filter((t) => rm.tiers[t]).map((t) => `${rm.tiers[t]} ${TIER_META[t][0]}`).join(" · ");
           return (
-            <div key={room} title={[1, 2, 3].filter((x) => t[x]).map((x) => `${t[x]} ${TIER_META[x][0]}`).join(" · ")}
-                 style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: d }}>
-              <div style={{ width: d, height: d, borderRadius: "50%", background: pie(t, total),
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            color: "#fff", fontWeight: 600, fontSize: Math.max(13, d * 0.26),
-                            boxShadow: sparse ? "inset 0 0 0 2px var(--danger)" : "none",
-                            textShadow: "0 1px 2px rgba(0,0,0,0.4)" }}>
-                {total}
-              </div>
-              <span style={{ fontSize: 12, color: sparse ? "var(--danger)" : "var(--text-dim)",
-                             maxWidth: Math.max(d + 16, 72), textAlign: "center",
-                             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {room}
-              </span>
-            </div>
+            <g key={rm.room}>
+              <title>{rm.room} — {rm.total} sensors ({tip})</title>
+              <circle cx={rm.x} cy={rm.y} r={rm.r}
+                      fill="var(--surface-2)" fillOpacity={0.35}
+                      stroke={rm.sparse ? "var(--danger)" : "var(--border)"}
+                      strokeWidth={rm.sparse ? 1.8 : 1} />
+              {rm.leaves.map((l, i) => (
+                <circle key={i} cx={rm.x + l.x} cy={rm.y + l.y} r={l.r}
+                        fill={tierColor(l.tier)} fillOpacity={0.92}
+                        stroke="var(--surface)" strokeWidth={0.6}>
+                  <title>{l.name}</title>
+                </circle>
+              ))}
+              <text x={rm.x} y={rm.y - rm.r + fs + 3} textAnchor="middle"
+                    fontSize={fs} fontWeight={600}
+                    fill={rm.sparse ? "var(--danger)" : "var(--text)"}
+                    style={{ pointerEvents: "none", paintOrder: "stroke" }}
+                    stroke="var(--surface)" strokeWidth={2.4} strokeLinejoin="round">
+                {rm.room} · {rm.total}
+              </text>
+            </g>
           );
         })}
-      </div>
-      <div style={{ display: "flex", gap: 16, marginTop: 12, fontSize: 12, color: "var(--text-dim)",
+      </svg>
+      <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 12, color: "var(--text-dim)",
                     justifyContent: "center" }}>
         {[1, 2, 3].map((tier) => (
           <span key={tier} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-            <span style={{ width: 9, height: 9, borderRadius: "50%", background: TIER_META[tier][1] }} />
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: tierColor(tier) }} />
             {TIER_META[tier][0]}
           </span>
         ))}
