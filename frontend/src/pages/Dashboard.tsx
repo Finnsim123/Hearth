@@ -329,26 +329,25 @@ function layoutRooms(rows: Health[]): { rooms: Room[]; height: number } {
              leaves, total: leaves.length, sparse: leaves.length <= 1, tiers };
   }).sort((a, b) => b.r - a.r);
 
-  // Height ~ fits the total bubble area in a wide band; force relaxation then
-  // spreads them into an organic, non-overlapping cloud.
-  const area = rooms.reduce((s, rm) => s + Math.PI * rm.r * rm.r, 0);
+  // A wide 2D cloud, not a row. Seed on a phyllotaxis spiral stretched to fill
+  // a wide ellipse (biggest room near the centre), then resolve ONLY collisions.
+  // No centre-of-mass gravity — that's what collapsed everything onto one line
+  // (vertical pull) or into a central clump (symmetric pull). The spiral seed
+  // does the spreading; collisions just remove overlaps and preserve it.
   const maxR = Math.max(...rooms.map((rm) => rm.r), 1);
-  const H = Math.max(2 * maxR + 30, Math.min(480, Math.round((area / 0.46) / W)));
-  const cx = W / 2, cy = H / 2, PAD = 7;
-
-  // deterministic seed: spread across the width on a gentle zig-zag so the
-  // relaxation starts wide (no central clump) and settles stably (no jitter).
+  const H = Math.max(2 * maxR + 50, 320);
+  const cx = W / 2, cy = H / 2, PAD = 9;
+  const GA = Math.PI * (3 - Math.sqrt(5));   // golden angle → even 2D spread
+  const n = rooms.length;
   rooms.forEach((rm, i) => {
-    rm.x = (W * (i + 0.5)) / rooms.length;
-    rm.y = cy + (i % 2 ? -1 : 1) * Math.min(rm.r, H / 4);
+    const rad = Math.sqrt(i / Math.max(n - 1, 1));   // 0 (centre) … 1 (edge)
+    rm.x = cx + Math.cos(i * GA) * rad * (W * 0.44);
+    rm.y = cy + Math.sin(i * GA) * rad * (H * 0.42);
   });
-  for (let it = 0; it < 420; it++) {
-    for (const rm of rooms) {            // very weak x pull (stay spread), compact in y
-      rm.x += (cx - rm.x) * 0.0015;
-      rm.y += (cy - rm.y) * 0.05;
-    }
-    for (let a = 0; a < rooms.length; a++) {
-      for (let b = a + 1; b < rooms.length; b++) {
+  for (let it = 0; it < 500; it++) {
+    let moved = false;
+    for (let a = 0; a < n; a++) {
+      for (let b = a + 1; b < n; b++) {
         const A = rooms[a], Bb = rooms[b];
         let dx = Bb.x - A.x, dy = Bb.y - A.y;
         const d = Math.hypot(dx, dy) || 0.01, min = A.r + Bb.r + PAD;
@@ -356,13 +355,15 @@ function layoutRooms(rows: Health[]): { rooms: Room[]; height: number } {
           const push = (min - d) / 2; dx /= d; dy /= d;
           A.x -= dx * push; A.y -= dy * push;
           Bb.x += dx * push; Bb.y += dy * push;
+          moved = true;
         }
       }
     }
-    for (const rm of rooms) {             // keep inside the band
+    for (const rm of rooms) {              // keep inside the band only
       rm.x = Math.max(rm.r, Math.min(W - rm.r, rm.x));
       rm.y = Math.max(rm.r, Math.min(H - rm.r, rm.y));
     }
+    if (!moved) break;                     // settled — stop early
   }
   return { rooms, height: H + LABEL_H };
 }

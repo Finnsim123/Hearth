@@ -174,6 +174,7 @@ export default function App() {
       <aside
         style={{
           width: 214, flexShrink: 0, position: "sticky", top: 0, height: "100vh",
+          boxSizing: "border-box",
           display: "flex", flexDirection: "column", gap: 3, padding: "16px 12px",
           background: "var(--surface)", borderRight: "1px solid var(--border)",
           overflowY: "auto",
@@ -218,20 +219,21 @@ export default function App() {
           <Link to="/settings#account" style={{ ...navLinkStyle({ isActive: false }) }}>Account</Link>
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                        marginTop: 10, padding: "0 8px" }}>
+                        gap: 8, marginTop: 8, paddingTop: 10, paddingLeft: 2,
+                        borderTop: "1px solid var(--border)" }}>
             <div style={{ display: "inline-flex", border: "1px solid var(--border)",
                           borderRadius: 999, overflow: "hidden" }}>
               {THEMES.map(([m, Glyph, title]) => (
                 <button key={m} onClick={() => setTheme(m)} title={title} aria-label={title}
                   style={{ display: "flex", alignItems: "center", justifyContent: "center",
-                           border: "none", cursor: "pointer", padding: "5px 9px", lineHeight: 1,
+                           border: "none", cursor: "pointer", padding: "5px 8px", lineHeight: 1,
                            background: mode === m ? "var(--accent)" : "transparent",
                            color: mode === m ? "#fff" : "var(--text-dim)" }}>
                   <Glyph />
                 </button>
               ))}
             </div>
-            <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 8px" }}
+            <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: "6px 8px", whiteSpace: "nowrap" }}
                     onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); setAuth("login"); }}>
               Sign out
             </button>

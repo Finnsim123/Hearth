@@ -211,6 +211,14 @@ class AppDb:
                         ddl += f" DEFAULT {v!r}" if isinstance(v, str) else f" DEFAULT {v}"
                     conn.execute(text(ddl))
 
+    def factory_reset(self) -> None:
+        """Wipe ALL app state — users, household, bindings, taxonomy, rules,
+        models, connections, settings, sessions. Tables stay; rows go. After
+        this, user_count()==0 so the app re-enters first-run setup."""
+        with self.engine.begin() as conn:
+            for table in reversed(Base.metadata.sorted_tables):   # children first (FKs)
+                conn.execute(table.delete())
+
     # ── bindings ───────────────────────────────────────────────────────────
     def bindings(self) -> list[Binding]:
         with Session(self.engine) as s:

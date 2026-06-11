@@ -229,3 +229,13 @@ async def test_inventory_sync_adds_new_updates_rooms_keeps_edits(client):
     assert by_eid["binary_sensor.sofa"].room == "Lounge"       # area synced
     assert "sensor.kitchen_co2" in by_eid                       # new picked up
     assert "button.restart" not in by_eid                       # junk skipped
+
+
+def test_factory_reset_returns_to_first_run(client):
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)
+    assert c.get("/api/health").json()["needs_setup"] is False
+    r = c.post("/api/system/reset", json={"wipe_data": False})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert c.get("/api/health").json()["needs_setup"] is True   # no users → setup
+    assert repo.persons() == [] and repo.bindings() == []

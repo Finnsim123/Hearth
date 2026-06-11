@@ -2,9 +2,12 @@
 Auth middleware arrives in Phase 2; LAN-only until then (docs/SECURITY.md)."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, Response
+
+log = logging.getLogger(__name__)
 
 from ..domain.onboarding.advisor import heuristic_bindings
 from ..domain.schemas import Activity, Binding, Person, Rule
@@ -228,6 +231,36 @@ def build_api_router(deps: dict) -> APIRouter:
     @api.post("/persons")
     def save_person(p: Person) -> Person:
         return repo.save_person(p)
+
+    @api.post("/persons/{person_id}/avatar")
+    def upload_avatar(person_id: str, body: dict) -> dict:
+        """Accept a data-URL image (base64), store it under the uploads dir, and
+        point the person's avatar at it. JSON, so no multipart dependency."""
+        import base64
+        import re
+        import time
+        person = next((p for p in repo.persons() if p.id == person_id), None)
+        if person is None:
+            raise HTTPException(404, "unknown person")
+        m = re.match(r"data:image/(png|jpeg|jpg|webp|gif);base64,(.+)$",
+                     (body.get("image") or "").strip(), re.S)
+        if not m:
+            raise HTTPException(400, "expected a PNG/JPEG/WebP/GIF data URL")
+        ext = "jpg" if m.group(1) == "jpeg" else m.group(1)
+        try:
+            raw = base64.b64decode(m.group(2), validate=True)
+        except Exception:
+            raise HTTPException(400, "invalid base64 image")
+        if len(raw) > 4 * 1024 * 1024:
+            raise HTTPException(413, "image too large (max 4 MB)")
+        uploads = deps["uploads_dir"]
+        safe = re.sub(r"[^a-z0-9_-]", "", person_id.lower()) or "person"
+        for old in uploads.glob(f"{safe}.*"):
+            old.unlink(missing_ok=True)
+        (uploads / f"{safe}.{ext}").write_bytes(raw)
+        person.avatar = f"upload:/uploads/{safe}.{ext}?v={int(time.time())}"
+        repo.save_person(person)
+        return {"avatar": person.avatar}
 
     # ── bindings ───────────────────────────────────────────────────────────
     @api.get("/bindings")
@@ -754,6 +787,35 @@ def build_api_router(deps: dict) -> APIRouter:
         (shared / "update_requested").touch()
         return {"ok": True, "note": "the host updater picks this up within a "
                                     "minute; Hearth rebuilds and restarts"}
+
+    @api.post("/system/reset")
+    def factory_reset(body: dict, response: Response) -> dict:
+        """Wipe configuration so the app re-enters first-run setup. With
+        wipe_data=true, also erase all recorded sensor history, features and
+        models. Destructive and irreversible — the UI gates it behind a typed
+        confirmation."""
+        wipe_data = bool(body.get("wipe_data"))
+        if wipe_data:
+            tsdb = deps.get("tsdb")
+            if tsdb is not None and hasattr(tsdb, "wipe_all"):
+                try:
+                    tsdb.wipe_all()
+                except Exception:
+                    log.exception("reset: time-series wipe failed")
+            import shutil
+            mdir = getattr(deps.get("models"), "models_dir", None)
+            if mdir is not None:
+                shutil.rmtree(mdir, ignore_errors=True)
+        uploads = deps.get("uploads_dir")
+        if uploads is not None:
+            for f in uploads.glob("*"):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+        repo.factory_reset()                          # clears users → needs_setup
+        response.delete_cookie("hearth_session")       # current session is gone
+        return {"ok": True, "wiped_data": wipe_data}
 
     # ── system ─────────────────────────────────────────────────────────────
     # ── model settings (small allowlist; values validated) ────────────────

@@ -35,5 +35,9 @@ class Settings(BaseSettings):
     def models_dir(self) -> Path:
         return self.data_dir / "models"
 
+    @property
+    def uploads_dir(self) -> Path:
+        return self.data_dir / "uploads"
+
 
 settings = Settings()  # import-time singleton; tests construct their own

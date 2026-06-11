@@ -133,6 +133,20 @@ class InfluxStore:
         except Exception:
             return False
 
+    def wipe_all(self) -> None:
+        """Factory reset of the time-series side: drop and recreate the three
+        Hearth buckets, erasing all raw events, features and predictions."""
+        api = self.client.buckets_api()
+        for name in (RAW_BUCKET, FEAT_BUCKET, ML_BUCKET):
+            try:
+                b = api.find_bucket_by_name(name)
+                if b is not None:
+                    api.delete_bucket(b)
+                    log.info("Wiped bucket %s", name)
+            except Exception as exc:
+                log.warning("wipe_all: could not drop %s: %s", name, exc)
+        self.ensure_buckets()
+
     def ensure_buckets(self) -> None:
         api = self.client.buckets_api()
         existing = {b.name for b in api.find_buckets().buckets}

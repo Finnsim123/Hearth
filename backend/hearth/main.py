@@ -19,8 +19,9 @@ log = logging.getLogger("hearth")
 def build_deps() -> dict:
     repo = AppDb(settings.db_path)
     repo.migrate()
+    settings.uploads_dir.mkdir(parents=True, exist_ok=True)
     deps: dict = {"repo": repo, "models": FileModelStore(settings.models_dir),
-                  "tsdb": None, "events": None}
+                  "uploads_dir": settings.uploads_dir, "tsdb": None, "events": None}
 
     influx = repo.get_connection("influx") or (
         {"url": settings.influx_url, "token": settings.influx_token,
@@ -93,6 +94,8 @@ def create_app() -> FastAPI:
 
     import os
     from pathlib import Path
+    settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=settings.uploads_dir), name="uploads")
     static_dir = Path(os.getenv("HEARTH_STATIC_DIR", "/app/static"))
     if static_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")

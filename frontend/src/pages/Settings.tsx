@@ -5,7 +5,7 @@
  * Design rules: one card per concern, every control explains itself,
  * Save is per-card so a half-edited page never clobbers anything.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Avatar, { PRESET_HUES } from "../components/Avatar";
 import { Icon } from "../icons";
 import { applyTheme, getTheme, type ThemeMode } from "../theme";
@@ -67,24 +67,85 @@ type Person = {
   quiet_hours: [number, number]; enabled: boolean;
 };
 
+const pad2 = (h: number) => String(h).padStart(2, "0");
+
 function PersonCard({ p: initial }: { p: Person }) {
   const [p, setP] = useState(initial);
   const [state, setState] = useState<SaveState>("idle");
+  const [open, setOpen] = useState(false);
+  const [photoErr, setPhotoErr] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
   const u = (patch: Partial<Person>) => { setP({ ...p, ...patch }); setState("idle"); };
   const save = async () => {
     setState("saving");
     try { await post("/api/persons", p).then(j); setState("ok"); }
     catch { setState("fail"); }
   };
+  const onPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setPhotoErr("");
+    if (f.size > 4 * 1024 * 1024) { setPhotoErr("Image too large (max 4 MB)."); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const r = await post(`/api/persons/${p.id}/avatar`, { image: reader.result }).then(j);
+        setP((cur) => ({ ...cur, avatar: r.avatar }));
+      } catch { setPhotoErr("Upload failed — try a smaller PNG or JPEG."); }
+    };
+    reader.readAsDataURL(f);
+  };
   const hours = Array.from({ length: 24 }, (_, h) => h);
+  const summary = [
+    `${p.ask_budget_per_day}/day`,
+    `quiet ${pad2(p.quiet_hours[0])}–${pad2(p.quiet_hours[1])}`,
+    p.notify_service ? null : "no phone",
+    p.notify_system ? "system updates" : null,
+  ].filter(Boolean).join(" · ");
+
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16,
-                  display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <Avatar name={p.name} value={p.avatar} size={44} />
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+      <button onClick={() => setOpen(!open)}
+        style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", border: "none",
+                 background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
+                 padding: "12px 14px", textAlign: "left" }}>
+        <Avatar name={p.name} value={p.avatar} size={40} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          <strong style={{ fontSize: 14.5 }}>{p.name || "Unnamed"}</strong>
+          <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{summary}</span>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+             style={{ marginLeft: "auto", color: "var(--text-dim)",
+                      transition: "transform .18s", transform: open ? "none" : "rotate(-90deg)" }}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && (
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12,
+                    borderTop: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ position: "relative" }}>
+          <Avatar name={p.name} value={p.avatar} size={48} />
+          <button onClick={() => fileRef.current?.click()} aria-label="Upload photo"
+            title="Upload a photo"
+            style={{ position: "absolute", right: -4, bottom: -4, width: 22, height: 22,
+                     borderRadius: "50%", border: "1px solid var(--border)", cursor: "pointer",
+                     background: "var(--surface)", display: "flex", alignItems: "center",
+                     justifyContent: "center", padding: 0, color: "var(--text)" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M14.5 4h-5L8 6H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-4z" />
+              <circle cx="12" cy="13" r="3.2" />
+            </svg>
+          </button>
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp"
+                 onChange={onPhoto} style={{ display: "none" }} />
+        </div>
         <input value={p.name} onChange={(e) => u({ name: e.target.value })}
                style={{ fontWeight: 600, fontSize: 15, maxWidth: 200 }} />
-        <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+        <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
           {Object.keys(PRESET_HUES).map((hue) => (
             <button key={hue} onClick={() => u({ avatar: `preset:${hue}` })}
               aria-label={`avatar ${hue}`}
@@ -95,6 +156,7 @@ function PersonCard({ p: initial }: { p: Person }) {
           ))}
         </div>
       </div>
+      {photoErr && <span style={{ fontSize: 12.5, color: "var(--danger)" }}>{photoErr}</span>}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
         <Row label="Notify service" hint="HA → Developer tools → Actions → “notify.mobile_app…”. Empty = no phone.">
@@ -136,6 +198,8 @@ function PersonCard({ p: initial }: { p: Person }) {
       </label>
 
       <SaveButton state={state} onClick={save} />
+      </div>
+      )}
     </div>
   );
 }
@@ -440,6 +504,61 @@ function System() {
 
 // ── page ────────────────────────────────────────────────────────────────────
 
+function DangerZone() {
+  const [mode, setMode] = useState<null | "config" | "factory">(null);
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      await post("/api/system/reset", { wipe_data: mode === "factory" }).then(j);
+      window.location.href = "/";          // session cleared → wizard reloads
+    } catch { setBusy(false); }
+  };
+  return (
+    <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12,
+                                   border: "1px solid var(--danger)" }}>
+      <div>
+        <h3 style={{ margin: 0, fontSize: 16, color: "var(--danger)" }}>Reset</h3>
+        <p style={{ margin: "4px 0 0", fontSize: 13.5, color: "var(--text-dim)" }}>
+          Start over with the setup wizard — handy after big changes, or to hand Hearth to someone else.
+        </p>
+      </div>
+      {!mode && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button className="btn btn-secondary" onClick={() => { setMode("config"); setConfirm(""); }}>
+            Re-run setup
+          </button>
+          <button className="btn btn-secondary" onClick={() => { setMode("factory"); setConfirm(""); }}
+                  style={{ borderColor: "var(--danger)", color: "var(--danger)" }}>
+            Factory reset
+          </button>
+        </div>
+      )}
+      {mode && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <p style={{ margin: 0, fontSize: 13.5 }}>
+            {mode === "config"
+              ? "Clears your configuration — household, sensors, activities, rules, models and account — and re-runs the setup wizard. Your recorded sensor history is kept."
+              : "Erases EVERYTHING — configuration, account, and all recorded sensor history, features and trained models. This cannot be undone."}
+          </p>
+          <Row label="Type RESET to confirm">
+            <input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="RESET"
+                   style={{ maxWidth: 160 }} />
+          </Row>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn btn-primary" disabled={confirm !== "RESET" || busy} onClick={run}
+                    style={{ background: "var(--danger)", borderColor: "var(--danger)" }}>
+              {busy ? "Resetting…" : mode === "factory" ? "Erase everything" : "Reset & re-run setup"}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => setMode(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   useEffect(() => {
     if (window.location.hash) {
@@ -479,6 +598,7 @@ export default function Settings() {
       <Appearance />
       <div id="account"><Account /></div>
       <System />
+      <DangerZone />
     </section>
   );
 }
