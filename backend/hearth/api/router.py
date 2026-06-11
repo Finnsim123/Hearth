@@ -337,6 +337,16 @@ def build_api_router(deps: dict) -> APIRouter:
             return (cols[0] if cols else None), "numeric"
 
         counts = tsdb.raw_event_counts([b.name for b in repo.bindings()], days=7)
+        # per-binding model reliance: max over promoted models of the summed
+        # importance of that binding's feature columns (0 if no model yet)
+        from ..domain.features.evidence import binding_tiers
+        tiers = binding_tiers(repo.bindings())
+        imp_by_col: dict = {}
+        for m in repo.models():
+            if not m.promoted:
+                continue
+            for col, v in (m.metrics.get("importance_all") or {}).items():
+                imp_by_col[col] = max(imp_by_col.get(col, 0.0), float(v))
         out = []
         for b in repo.bindings():
             cols = [c for c in feats.columns
@@ -345,13 +355,16 @@ def build_api_router(deps: dict) -> APIRouter:
             present = bool(cols) and any(feats[c].notna().any() for c in cols)
             col, kind = _pick_col(cols, b.name)
             spark = _spark(col) if col and varies else []
+            model_use = round(sum(imp_by_col.get(c, 0.0) for c in cols), 4)
             out.append({"id": b.id, "name": b.name, "role": b.role.value,
                         "entity_id": b.entity_id, "enabled": b.enabled,
                         "status": ("alive" if varies else
                                    "constant" if present else "no_data"),
                         "spark": spark, "kind": kind,
                         "obs": int(counts.get(b.name, 0)),
-                        "per_day": round(counts.get(b.name, 0) / 7, 1)})
+                        "per_day": round(counts.get(b.name, 0) / 7, 1),
+                        "feature": col, "model_use": model_use,
+                        "room": b.room, "tier": tiers.get(b.name, 2)})
         # class balance from confirmed + bootstrap labels (recent window)
         classes: dict[str, int] = {}
         for p in persons:

@@ -42,7 +42,7 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
-type Health = { name: string; status: string; spark: number[]; kind: string; obs: number; per_day: number };
+type Health = { name: string; status: string; spark: number[]; kind: string; obs: number; per_day: number; feature: string | null; model_use: number; room: string | null; tier: number };
 
 /** A 7-day signal sparkline of what the MODEL sees (the feature value,
  *  normalized 0–1). Binary roles render as a green barcode; numeric as a
@@ -121,6 +121,14 @@ function BindingRow({ b, persons, health, onChange }: {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <strong style={{ fontSize: 13.5 }}>{b.name}</strong>
           <RoleBadge role={b.role} />
+          {health && health.model_use > 0.001 && (
+            <span title={`This sensor accounts for ${(health.model_use * 100).toFixed(1)}% of the live model's total feature importance.`}
+                  style={{ fontSize: 11, padding: "1px 7px", borderRadius: 99, fontWeight: 600,
+                           color: "var(--accent)",
+                           background: "color-mix(in srgb, var(--accent) 14%, transparent)" }}>
+              model uses {(health.model_use * 100).toFixed(health.model_use >= 0.1 ? 0 : 1)}%
+            </span>
+          )}
           {status && HEALTH_BADGE[status] && (
             <span title={status === "alive" ? "Producing varying signal — a usable feature."
                        : status === "constant" ? "Bound, but the value never changes in recent data — the model can't learn from a constant."
@@ -153,7 +161,14 @@ function BindingRow({ b, persons, health, onChange }: {
           <span style={{ fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>“{llmReason}”</span>
         )}
       </div>
-      <Sparkline h={health} />
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+        <Sparkline h={health} />
+        {health?.feature && (
+          <code style={{ fontSize: 10.5, color: "var(--text-dim)" }} title="The exact feature column this sparkline plots — the model's actual input, after 1-min normalization + 30-min windowing.">
+            {health.feature}
+          </code>
+        )}
+      </div>
       {health && (
         <span title={`${health.obs.toLocaleString()} observations in 7 days · ~${health.per_day.toLocaleString()}/day`}
               style={{ fontSize: 11.5, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums",
@@ -181,6 +196,8 @@ export default function Sensors() {
   const [persons, setPersons] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
   const [role, setRole] = useState("all");
+  const [statusF, setStatusF] = useState("all");
+  const [roomF, setRoomF] = useState("all");
   const [cleanMsg, setCleanMsg] = useState("");
   const load = () => fetch("/api/bindings").then(j).then(setBindings).catch(() => setBindings([]));
   useEffect(() => {
@@ -198,16 +215,21 @@ export default function Sensors() {
   const roles = useMemo(
     () => Array.from(new Set((bindings ?? []).map((b) => b.role))).sort(),
     [bindings]);
+  const rooms = useMemo(
+    () => Array.from(new Set((bindings ?? []).map((b) => b.room).filter(Boolean) as string[])).sort(),
+    [bindings]);
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return (bindings ?? [])
       .filter((b) => role === "all" || b.role === role)
+      .filter((b) => roomF === "all" || b.room === roomF)
+      .filter((b) => statusF === "all" || health[b.name]?.status === statusF)
       .filter((b) => !needle
         || b.entity_id.toLowerCase().includes(needle)
         || b.name.toLowerCase().includes(needle)
         || (b.room ?? "").toLowerCase().includes(needle))
       .sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
-  }, [bindings, q, role]);
+  }, [bindings, q, role, roomF, statusF, health]);
   const emptyCount = useMemo(
     () => (bindings ?? []).filter((b) => b.enabled && b.role !== "person"
       && health[b.name]?.status === "no_data").length,
@@ -255,6 +277,18 @@ export default function Sensors() {
         <select value={role} onChange={(e) => setRole(e.target.value)}>
           <option value="all">All roles</option>
           {roles.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        {rooms.length > 0 && (
+          <select value={roomF} onChange={(e) => setRoomF(e.target.value)}>
+            <option value="all">All rooms</option>
+            {rooms.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        )}
+        <select value={statusF} onChange={(e) => setStatusF(e.target.value)}>
+          <option value="all">Any signal</option>
+          <option value="alive">Live</option>
+          <option value="constant">No variation</option>
+          <option value="no_data">No data</option>
         </select>
       </div>
       {bindings === null && <p style={{ color: "var(--text-dim)" }}>Loading…</p>}

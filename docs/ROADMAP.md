@@ -70,6 +70,19 @@ training run" still need verification on a real fresh install — check the
 Models page confirmed-accuracy before/after naming.
 
 ### Research bets — open (deliberately deferred)
+- **Data-driven feature admission** (replaces the hand-written binding gate as
+  labels accumulate). The setup heuristic + blocklist is a PRIOR for the
+  cold-start, scarce-label regime: with ~10 confirmed labels a junk feature
+  spuriously correlates with the target (the alarm-clock failure), so a tight
+  gate is correct EARLY. It is wrong as a permanent law — some excluded
+  entities (network throughput, router device counts, specific power sensors)
+  carry real behavioural signal. Plan: once a person crosses ~300 confirmed
+  labels (spurious-correlation risk has dropped), periodically re-admit
+  borderline-excluded entities as CUSTOM bindings, retrain, and KEEP only the
+  ones the importance chart earns — evidence replaces assumption. Gate the
+  experiment on label count + a hold-out accuracy check so it can't regress the
+  live model. Until then the appeal path (manual bind + LLM-reasoned override)
+  covers the long tail.
 - Change-point segmentation experiment (P4)
 - HEPA-style embedder behind the `Embedder` port (feature-flagged): pretrain on
   the home's unlabeled stream, side-by-side vs RF in the registry,

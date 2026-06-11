@@ -270,3 +270,27 @@ AS the movie starts"). And no NEW grid window even exists between 5-min marks.
 
 End-to-end latency: ingest flush (≤5 s) + debounce (3 s) + predict (<1 s) +
 HA event (instant) ≈ under 10 s from sensor change to automation.
+
+
+## Feature selection: prior now, evidence later (added June 2026)
+
+The 1700→~248 entity funnel (disabled → unmapped role → diagnostics blocklist →
+stateless-domain physics gate → LLM selectivity → dedupe) is a deliberate PRIOR,
+not a claim that excluded entities are signal-free. Justification: tree
+ensembles are robust to *uninformative* features (Grinsztajn 2022) but NOT to
+features that *spuriously correlate* with the label in a small sample — and with
+~10 confirmed labels that risk is high (the partner-alarm incident). The gate's
+real job is shrinking the spurious-correlation search space while labels are
+scarce.
+
+Two consequences, both now reflected in the design:
+1. **Relaxed network presence** — a member's phone device_tracker (role person)
+   and router/network occupancy proxies (connected-device count, throughput;
+   role custom) are no longer blanket-excluded; the heuristic recognizes device
+   counts and the LLM prompt is told to include phone trackers / occupancy
+   signals while still skipping generic per-device trackers.
+2. **Data-driven admission (roadmap)** — once ≥~300 confirmed labels exist, the
+   gate should stop being authoritative: periodically re-admit borderline
+   entities, retrain, keep by importance behind a hold-out check. Evidence
+   replaces the heuristic. The appeal path (manual bind + LLM override) covers
+   the tail until then.

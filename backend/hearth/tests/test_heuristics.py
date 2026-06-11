@@ -76,3 +76,16 @@ def test_gate_is_appealable_but_physics_is_not():
     assert not is_bindable("button.calibrate", Role.BED, override=True)
     # blocklist: never overridable either
     assert not is_bindable("sensor.har_prob_away", Role.ENV, override=True)
+
+
+def test_network_occupancy_proxy_binds_as_custom():
+    from hearth.domain.onboarding.advisor import suggest_role, is_bindable
+    from hearth.domain.schemas import Role
+    e = {"entity_id": "sensor.router_connected_devices", "domain": "sensor",
+         "device_class": None, "unit": None, "friendly_name": "Devices connected"}
+    assert suggest_role(e) == Role.CUSTOM
+    assert is_bindable("sensor.router_connected_devices", Role.CUSTOM) is True
+    # a generic per-device tracker still isn't auto-bound by the heuristic
+    laptop = {"entity_id": "device_tracker.dells_laptop", "domain": "device_tracker",
+              "device_class": None, "unit": None, "friendly_name": "Dell laptop"}
+    assert suggest_role(laptop) is None

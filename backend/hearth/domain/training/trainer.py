@@ -125,8 +125,11 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
         metrics["excluded_features"] = sorted(excluded)
     try:                                   # glass-box: top-15 feature importances
         imp = est.model.feature_importances_
-        ranked = sorted(zip(est.columns, imp), key=lambda kv: -kv[1])[:15]
-        metrics["feature_importances"] = {c: round(float(v), 4) for c, v in ranked}
+        ranked = sorted(zip(est.columns, imp), key=lambda kv: -kv[1])
+        metrics["feature_importances"] = {c: round(float(v), 4) for c, v in ranked[:15]}
+        # full vector (cheap JSON) — Sensors page sums per binding to show
+        # exactly how much the model relies on each sensor
+        metrics["importance_all"] = {c: round(float(v), 5) for c, v in ranked if v > 0}
         # evidence profile: where the model's weight sits across trust tiers
         from ..features.evidence import evidence_profile
         metrics["evidence_profile"] = evidence_profile(

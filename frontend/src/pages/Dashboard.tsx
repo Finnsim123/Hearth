@@ -4,7 +4,7 @@
  *   steady:     avatar hero cards · today ribbon · needs-you · trust · pulse
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Avatar from "../components/Avatar";
 import { Icon, type IconName } from "../icons";
 
@@ -272,6 +272,77 @@ function Pulse({ j, hasTsdb }: { j?: Journey; hasTsdb: boolean }) {
   );
 }
 
+type Health = { name: string; status: string; role: string; room: string | null; tier: number };
+
+const TIER_META: Record<number, [string, string]> = {
+  1: ["direct", "var(--ok, #34D399)"],      // bed, presence, person, media, door
+  2: ["behavioral", "var(--accent)"],        // power, lights, steps
+  3: ["ambient", "#F472B6"],                 // temp, CO2, humidity, battery
+};
+
+/** Sensor coverage by room, segmented by evidence tier. Long green bars = rooms
+ *  we can see well (direct sensors); short/pink bars = rooms we barely sense. */
+function SensorCoverage() {
+  const [rows, setRows] = useState<Health[] | null>(null);
+  useEffect(() => {
+    fetch("/api/bindings/health").then((r) => r.json())
+      .then((h) => setRows((h.bindings ?? []).filter((b: Health) => b.status === "alive")))
+      .catch(() => setRows([]));
+  }, []);
+  if (!rows || rows.length === 0) return null;
+
+  const byRoom: Record<string, Record<number, number>> = {};
+  for (const b of rows) {
+    const room = b.room || "Unassigned";
+    (byRoom[room] ??= { 1: 0, 2: 0, 3: 0 })[b.tier || 2] += 1;
+  }
+  const entries = Object.entries(byRoom)
+    .map(([room, t]) => ({ room, t, total: (t[1] || 0) + (t[2] || 0) + (t[3] || 0) }))
+    .sort((a, b) => b.total - a.total);
+  const max = Math.max(...entries.map((e) => e.total), 1);
+
+  return (
+    <section className="card" style={{ padding: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <Icon name="sensors" size={18} />
+        <h3 style={{ margin: 0, fontSize: 16 }}>Sensor coverage</h3>
+      </div>
+      <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--text-dim)" }}>
+        Live sensors per room, coloured by how directly they sense people. Short or pink
+        bars are rooms Hearth can barely see — add a presence or motion sensor there.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {entries.map(({ room, t, total }) => (
+          <div key={room} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 13, width: 110, textAlign: "right", flexShrink: 0,
+                           color: total <= 1 ? "var(--danger)" : "var(--text)",
+                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {room}
+            </span>
+            <div style={{ flex: 1, display: "flex", height: 16, borderRadius: 4, overflow: "hidden",
+                          background: "var(--surface-2)", width: `${(total / max) * 100}%`, minWidth: 24 }}>
+              {[1, 2, 3].map((tier) => (t[tier] || 0) > 0 && (
+                <div key={tier} title={`${t[tier]} ${TIER_META[tier][0]} sensor${t[tier] > 1 ? "s" : ""}`}
+                     style={{ flex: t[tier], background: TIER_META[tier][1] }} />
+              ))}
+            </div>
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)", width: 24,
+                           fontVariantNumeric: "tabular-nums" }}>{total}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 16, marginTop: 12, fontSize: 12, color: "var(--text-dim)" }}>
+        {[1, 2, 3].map((tier) => (
+          <span key={tier} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: TIER_META[tier][1] }} />
+            {TIER_META[tier][0]}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function Dashboard() {
   const preds = useQuery<{ persons: Record<string, Pred[]>; note?: string }>({
     queryKey: ["predictions"],
@@ -305,6 +376,7 @@ export default function Dashboard() {
         </div>
       )}
       <NeedsYou questions={inbox.data ?? []} />
+      {!coldStart && <SensorCoverage />}
       <Pulse j={journey.data} hasTsdb={!preds.data?.note} />
     </div>
   );

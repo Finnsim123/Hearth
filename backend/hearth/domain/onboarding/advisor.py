@@ -21,6 +21,11 @@ _NAME_HINTS: list[tuple[str, Role]] = [
     (r"alarm|wecker|wake", Role.ALARM_TIME),
     (r"door|window|opening|contact", Role.DOOR),
     (r"co2|pm2|pm10|voc|humidity|temperature|lux|illuminance", Role.ENV),
+    # household-occupancy proxies from the network: a router's connected-device
+    # count rises when people are home (CUSTOM = numeric mean/max/delta, the
+    # model decides the threshold). Generic per-device trackers stay excluded.
+    (r"connected_devices|devices_connected|online_devices|device_count|"
+     r"num_clients|clients_total|network_clients", Role.CUSTOM),
 ]
 _UNIT_ROLES = {"W": Role.POWER, "kW": Role.POWER, "ppm": Role.ENV, "µg/m³": Role.ENV,
                "°C": Role.ENV, "°F": Role.ENV, "%": Role.ENV, "lx": Role.ENV,
