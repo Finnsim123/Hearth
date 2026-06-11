@@ -21,7 +21,9 @@ type Pred = { time: string; predicted: string; smoothed: string; confidence: num
 type Person = { id: string; name: string; avatar?: string | null; enabled: boolean };
 type Journey = { recording_since: string | null; days: number; events_24h: number;
                  sensors_bound: number; milestones: { recording: boolean; patterns: boolean; model: boolean } };
-type Question = { id: number; person_id: string; window_ts: string; predicted: string; confidence: number };
+type Question = { id: number; person_id: string; window_ts: string; predicted: string;
+                  confidence: number; alternatives: string[] };
+type Activity = { slug: string; name: string; enabled: boolean };
 
 const ACT: Record<string, string> = {
   sleeping: "var(--act-sleeping)", away: "var(--act-away)", home: "var(--act-home)",
@@ -278,24 +280,81 @@ function JourneyCard({ j }: { j: Journey }) {
   );
 }
 
-function NeedsYou({ questions }: { questions: Question[] }) {
+function QuestionRow({ q, activities }: { q: Question; activities: Activity[] }) {
+  const qc = useQueryClient();
+  const [choosing, setChoosing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const send = async (slug: string) => {
+    setBusy(true);
+    try {
+      await fetch(`/api/inbox/${q.id}/answer`, { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer: slug }) });
+      qc.invalidateQueries({ queryKey: ["inbox"] });
+      qc.invalidateQueries({ queryKey: ["predictions"] });
+      qc.invalidateQueries({ queryKey: ["predictions_week"] });
+    } catch { setBusy(false); }
+  };
+  const skip = async () => {
+    setBusy(true);
+    try { await fetch(`/api/inbox/${q.id}/skip`, { method: "POST" }); qc.invalidateQueries({ queryKey: ["inbox"] }); }
+    catch { setBusy(false); }
+  };
+  // "No, it was…" options: model's alternatives first, then the rest of the
+  // taxonomy, minus the activity we just rejected.
+  const drop = new Set([q.predicted]);
+  const options = [...q.alternatives, ...activities.filter((a) => a.enabled).map((a) => a.slug)]
+    .filter((s, i, arr) => !drop.has(s) && arr.indexOf(s) === i).slice(0, 7);
+  return (
+    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 16px" }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <Icon name="question" size={18} />
+        <span style={{ fontSize: 14, flex: 1, minWidth: 180 }}>
+          {t(q.window_ts)} — was <strong style={{ fontWeight: 500, textTransform: "capitalize" }}>{q.person_id}</strong>{" "}
+          {q.predicted.replace("_", " ")}? <span style={{ color: "var(--text-dim)" }}>({Math.round(q.confidence * 100)}% sure)</span>
+        </span>
+        {!choosing ? (
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-primary" disabled={busy} onClick={() => send(q.predicted)}
+                    style={{ minWidth: 64 }}>Yes</button>
+            <button className="btn btn-secondary" disabled={busy} onClick={() => setChoosing(true)}
+                    style={{ minWidth: 64 }}>No</button>
+          </div>
+        ) : (
+          <button className="btn btn-ghost" disabled={busy} onClick={() => setChoosing(false)}
+                  style={{ fontSize: 13 }}>Cancel</button>
+        )}
+      </div>
+      {choosing && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontSize: 13, color: "var(--text-dim)" }}>What was {q.person_id} actually doing?</span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {options.map((slug) => (
+              <button key={slug} className="btn btn-secondary" disabled={busy} onClick={() => send(slug)}
+                      style={{ display: "inline-flex", gap: 6, alignItems: "center", textTransform: "capitalize" }}>
+                <Icon name={icon(slug)} size={15} />{slug.replace("_", " ")}
+              </button>
+            ))}
+            <button className="btn btn-ghost" disabled={busy} onClick={skip}
+                    style={{ fontSize: 13 }} title="Not sure — ask me later">Skip</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NeedsYou({ questions, activities }: { questions: Question[]; activities: Activity[] }) {
   if (!questions.length) return null;
   return (
     <section>
       <p className="label" style={{ margin: "0 0 8px" }}>Needs you</p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {questions.slice(0, 3).map((q) => (
-          <div key={q.id} className="card" style={{ display: "flex", gap: 12, alignItems: "center", padding: "12px 16px" }}>
-            <Icon name="question" size={18} />
-            <span style={{ fontSize: 14 }}>
-              {t(q.window_ts)} — was <strong style={{ fontWeight: 500 }}>{q.person_id}</strong>{" "}
-              {q.predicted.replace("_", " ")}? ({Math.round(q.confidence * 100)}% sure)
-            </span>
-            <a href="/inbox" className="btn btn-secondary" style={{ marginLeft: "auto", textDecoration: "none", fontSize: 13 }}>
-              Answer
-            </a>
-          </div>
-        ))}
+        {questions.slice(0, 3).map((q) => <QuestionRow key={q.id} q={q} activities={activities} />)}
+        {questions.length > 3 && (
+          <a href="/inbox" style={{ fontSize: 13, color: "var(--text-dim)", textDecoration: "none" }}>
+            +{questions.length - 3} more in your inbox →
+          </a>
+        )}
       </div>
     </section>
   );
@@ -530,6 +589,9 @@ export default function Dashboard() {
     queryKey: ["inbox"], queryFn: () => fetch("/api/inbox").then((r) => r.json()),
     refetchInterval: 120_000,
   });
+  const activities = useQuery<Activity[]>({
+    queryKey: ["activities"], queryFn: () => fetch("/api/activities").then((r) => r.json()),
+  });
 
   const byPerson = preds.data?.persons ?? {};
   const byPersonWeek = predsWeek.data?.persons ?? {};
@@ -547,7 +609,7 @@ export default function Dashboard() {
                                           weekPreds={byPersonWeek[p.id] ?? []} />)}
         </div>
       )}
-      <NeedsYou questions={inbox.data ?? []} />
+      <NeedsYou questions={inbox.data ?? []} activities={activities.data ?? []} />
       <div style={{ display: "grid", gap: 16, alignItems: "start",
                     gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))" }}>
         <Card icon="flow" title="Live data flow"
