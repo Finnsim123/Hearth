@@ -336,81 +336,68 @@ def build_api_router(deps: dict) -> APIRouter:
         if tsdb is None:
             return {"bindings": [], "classes": {}, "note": "InfluxDB not connected"}
         from datetime import datetime, timedelta, timezone
-        from ..domain.features.registry import feature_set_version
-        fset = feature_set_version(repo.get_setting("composites", []) or [],
-                                   repo.get_setting("time_granularity", "coarse") or "coarse")
+        from ..domain.features.registry import recipe_for
         hours = max(1, min(int(hours), 168 * 4))   # clamp 1h .. 4w
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=hours)
         persons = [p for p in repo.persons() if p.enabled]
-        # union of each person's recent feature matrix (binding cols are shared
-        # + that person's personal sensors)
-        import pandas as pd
-        frames = [tsdb.read_features(p.id, fset, start, end) for p in persons]
-        feats = pd.concat([f for f in frames if not f.empty], axis=0) \
-            if any(not f.empty for f in frames) else pd.DataFrame()
-        SPARK_N = 60   # downsample to ~60 points across the window
-        BINARY_SUFFIXES = ("frac", "occupied", "on", "any", "playing", "active",
-                           "home_frac", "home_last", "on_last", "on_frac",
-                           "imminent", "opened_any")
+        bindings = repo.bindings()
 
-        def _spark(col):
-            ser = feats[col].dropna()
-            if ser.empty:
+        # Sparkline = the raw signal over the selected window. Always dense and
+        # window-reactive (the feature store is sparse + churns on feature-set
+        # version bumps); the raw trace IS the model's per-window input.
+        traces = tsdb.raw_traces([b.name for b in bindings], start, end, buckets=60)
+        BINARY_ROLES = {"presence", "door", "focus", "media"}
+
+        def _norm(vals):
+            if not vals:
                 return []
-            # bucket the window into SPARK_N slots, mean per slot, normalized 0..1
-            ser = ser.sort_index()
-            n = len(ser)
-            step = max(1, n // SPARK_N)
-            vals = [float(ser.iloc[i:i + step].mean()) for i in range(0, n, step)]
             lo, hi = min(vals), max(vals)
             rng = hi - lo
             return [round((v - lo) / rng, 3) if rng > 1e-9 else 0.0 for v in vals]
 
-        def _pick_col(cols, name):
-            # prefer a 'binary-ish' suffix so presence/bed read as a barcode
-            for suf in BINARY_SUFFIXES:
-                c = f"{name}_{suf}"
-                if c in cols:
-                    return c, "binary"
-            return (cols[0] if cols else None), "numeric"
-
-        counts = tsdb.raw_event_counts([b.name for b in repo.bindings()], days=7)
+        counts = tsdb.raw_event_counts([b.name for b in bindings], days=7)
+        from ..domain.features.evidence import binding_tiers
+        tiers = binding_tiers(bindings)
         # per-binding model reliance: max over promoted models of the summed
         # importance of that binding's feature columns (0 if no model yet)
-        from ..domain.features.evidence import binding_tiers
-        tiers = binding_tiers(repo.bindings())
         imp_by_col: dict = {}
         for m in repo.models():
             if not m.promoted:
                 continue
             for col, v in (m.metrics.get("importance_all") or {}).items():
                 imp_by_col[col] = max(imp_by_col.get(col, 0.0), float(v))
+
         out = []
-        for b in repo.bindings():
-            cols = [c for c in feats.columns
-                    if c == b.name or c.startswith(b.name + "_")] if not feats.empty else []
-            varies = any(feats[c].nunique(dropna=True) > 1 for c in cols)
-            present = bool(cols) and any(feats[c].notna().any() for c in cols)
-            col, kind = _pick_col(cols, b.name)
-            spark = _spark(col) if col and varies else []
-            model_use = round(sum(imp_by_col.get(c, 0.0) for c in cols), 4)
+        for b in bindings:
+            trace = traces.get(b.name, [])
+            if not trace:
+                status = "no_data"
+            elif max(trace) - min(trace) < 1e-9:
+                status = "constant"
+            else:
+                status = "alive"
+            kind = "binary" if b.role.value in BINARY_ROLES else "numeric"
+            suffixes = recipe_for(b.role).suffixes
+            feature = f"{b.name}_{suffixes[0]}" if suffixes else b.name
+            model_use = round(sum(v for c, v in imp_by_col.items()
+                                  if c == b.name or c.startswith(b.name + "_")), 4)
             out.append({"id": b.id, "name": b.name, "role": b.role.value,
                         "entity_id": b.entity_id, "enabled": b.enabled,
-                        "status": ("alive" if varies else
-                                   "constant" if present else "no_data"),
-                        "spark": spark, "kind": kind,
+                        "status": status,
+                        "spark": _norm(trace) if status == "alive" else [],
+                        "kind": kind,
                         "obs": int(counts.get(b.name, 0)),
                         "per_day": round(counts.get(b.name, 0) / 7, 1),
-                        "feature": col, "model_use": model_use,
+                        "feature": feature, "model_use": model_use,
                         "room": b.room, "tier": tiers.get(b.name, 2)})
-        # class balance from confirmed + bootstrap labels (recent window)
+        # class balance from confirmed + bootstrap labels (stable 7-day window)
         classes: dict[str, int] = {}
+        label_start = end - timedelta(days=7)
         for p in persons:
-            for ev in tsdb.read_labels(p.id, start, end):
+            for ev in tsdb.read_labels(p.id, label_start, end):
                 classes[ev.label] = classes.get(ev.label, 0) + 1
-        return {"bindings": out, "classes": classes,
-                "windows": int(len(feats)) if not feats.empty else 0}
+        return {"bindings": out, "classes": classes, "hours": hours}
 
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:

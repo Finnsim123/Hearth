@@ -376,6 +376,41 @@ from(bucket: "{RAW_BUCKET}")
             log.warning("raw_event_counts failed: %s", exc)
         return {n: out.get(n, 0) for n in names}
 
+    def raw_traces(self, names: list[str], start: datetime, end: datetime,
+                   buckets: int = 60) -> dict[str, list[float]]:
+        """{binding.name: [downsampled numeric values]} over [start, end], ~buckets
+        points each. Numeric field only — string-state sensors return nothing.
+        Drives the Sensors-page sparkline so it always has dense data over the
+        chosen window (independent of feature-store / feature-set churn)."""
+        if not names:
+            return {}
+        span = max((end - start).total_seconds(), 60.0)
+        every = max(60, int(span // max(buckets, 1)))
+        flux = f"""
+from(bucket: "{RAW_BUCKET}")
+  |> range(start: {start.isoformat()}, stop: {end.isoformat()})
+  |> filter(fn: (r) => r._field == "num")
+  |> aggregateWindow(every: {every}s, fn: mean, createEmpty: false)
+  |> keep(columns: ["_time", "_value", "_measurement"])
+"""
+        series: dict[str, list[tuple]] = {}
+        try:
+            for table in self.query_api.query(flux):
+                for rec in table.records:
+                    meas = rec.values.get("_measurement", "")
+                    if meas.startswith("raw_"):
+                        series.setdefault(meas[4:], []).append((rec.get_time(), rec.get_value()))
+        except Exception as exc:
+            log.warning("raw_traces failed: %s", exc)
+            return {}
+        wanted = set(names)
+        out: dict[str, list[float]] = {}
+        for name, pts in series.items():
+            if name in wanted:
+                pts.sort(key=lambda p: p[0])
+                out[name] = [float(v) for _, v in pts if v is not None]
+        return out
+
     def count_raw_events(self, hours: int = 24) -> int:
         flux = f"""
 from(bucket: "{RAW_BUCKET}")

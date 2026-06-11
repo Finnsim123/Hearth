@@ -44,9 +44,9 @@ function RoleBadge({ role }: { role: string }) {
 
 type Health = { name: string; status: string; spark: number[]; kind: string; obs: number; per_day: number; feature: string | null; model_use: number; room: string | null; tier: number };
 
-/** A 7-day signal sparkline of what the MODEL sees (the feature value,
- *  normalized 0–1). Binary roles render as a green barcode; numeric as a
- *  blue line; dead sensors as a dashed flat baseline. */
+/** Sparkline of the raw signal over the selected window (1H/24H/7D), normalized
+ *  0–1 — the per-window input the model aggregates. Binary roles render as a
+ *  green barcode; numeric as a line; dead sensors as a dashed flat baseline. */
 function Sparkline({ h }: { h?: Health }) {
   const W = 200, H = 22;
   if (!h || h.status !== "alive" || h.spark.length === 0) {
@@ -64,7 +64,7 @@ function Sparkline({ h }: { h?: Health }) {
     const bw = W / n;
     return (
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} preserveAspectRatio="none"
-           style={{ flexShrink: 0 }} aria-label={`${h.name} signal, 7 days`}>
+           style={{ flexShrink: 0 }} aria-label={`${h.name} signal`}>
         <rect x="0" y="4" width={W} height={H - 8} fill="var(--surface-2)" rx="2" />
         {h.spark.map((v, i) => v > 0.05 && (
           <rect key={i} x={i * bw} y="4" width={Math.max(bw - 0.3, 0.6)} height={H - 8}
@@ -76,7 +76,7 @@ function Sparkline({ h }: { h?: Health }) {
   const pts = h.spark.map((v, i) => `${x(i).toFixed(1)},${(H - 3 - v * (H - 6)).toFixed(1)}`).join(" ");
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} preserveAspectRatio="none"
-         style={{ flexShrink: 0 }} aria-label={`${h.name} signal, 7 days`}>
+         style={{ flexShrink: 0 }} aria-label={`${h.name} signal`}>
       <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="1.5"
                 vectorEffect="non-scaling-stroke" />
     </svg>
@@ -293,38 +293,40 @@ export default function Sensors() {
         influence predictions; changes apply at the next feature build.
       </p>
       {cleanMsg && <p style={{ margin: 0, fontSize: 13.5, color: "var(--accent)" }}>{cleanMsg}</p>}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: 1, minWidth: 220 }}>
-          <input placeholder="Search entity, name, room…" value={q}
-                 onChange={(e) => setQ(e.target.value)} style={{ width: "100%" }} />
-        </div>
-        <select value={role} onChange={(e) => setRole(e.target.value)}>
-          <option value="all">All roles</option>
-          {roles.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
-        {rooms.length > 0 && (
-          <select value={roomF} onChange={(e) => setRoomF(e.target.value)}>
-            <option value="all">All rooms</option>
-            {rooms.map((r) => <option key={r} value={r}>{r}</option>)}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <input placeholder="Search entity, name, room…" value={q}
+               onChange={(e) => setQ(e.target.value)} style={{ width: "100%", boxSizing: "border-box" }} />
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <select value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="all">All roles</option>
+            {roles.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
-        )}
-        <select value={statusF} onChange={(e) => setStatusF(e.target.value)}>
-          <option value="all">Any signal</option>
-          <option value="alive">Live</option>
-          <option value="constant">No variation</option>
-          <option value="no_data">No data</option>
-        </select>
-        <div style={{ display: "inline-flex", border: "1px solid var(--border)",
-                      borderRadius: 8, overflow: "hidden" }} title="Sparkline time window">
-          {[[1, "1H"], [24, "24H"], [168, "7D"]].map(([h, lbl]) => (
-            <button key={h as number} onClick={() => setSparkHours(h as number)}
-                    style={{ border: "none", padding: "0 11px", height: 34, cursor: "pointer",
-                             fontSize: 12.5, fontWeight: sparkHours === h ? 600 : 400,
-                             background: sparkHours === h ? "var(--accent)" : "transparent",
-                             color: sparkHours === h ? "#fff" : "var(--text-dim)" }}>
-              {lbl}
-            </button>
-          ))}
+          {rooms.length > 0 && (
+            <select value={roomF} onChange={(e) => setRoomF(e.target.value)}>
+              <option value="all">All rooms</option>
+              {rooms.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          <select value={statusF} onChange={(e) => setStatusF(e.target.value)}>
+            <option value="all">Any signal</option>
+            <option value="alive">Live</option>
+            <option value="constant">No variation</option>
+            <option value="no_data">No data</option>
+          </select>
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-dim)" }}>Sparkline:</span>
+          <div style={{ display: "inline-flex", height: 34, border: "1px solid var(--border)",
+                        borderRadius: 8, overflow: "hidden" }} title="Sparkline time window">
+            {[[1, "1H"], [24, "24H"], [168, "7D"]].map(([h, lbl]) => (
+              <button key={h as number} onClick={() => setSparkHours(h as number)}
+                      style={{ display: "flex", alignItems: "center", justifyContent: "center",
+                               border: "none", padding: "0 12px", cursor: "pointer", lineHeight: 1,
+                               fontSize: 12.5, fontWeight: sparkHours === h ? 600 : 400,
+                               background: sparkHours === h ? "var(--accent)" : "transparent",
+                               color: sparkHours === h ? "#fff" : "var(--text-dim)" }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       {bindings === null && <p style={{ color: "var(--text-dim)" }}>Loading…</p>}
