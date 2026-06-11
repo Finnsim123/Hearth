@@ -9,6 +9,7 @@ Priority bands: away 10 < sleeping 20-29 < cooking 30 < movie 40 < eating 50.
 """
 from __future__ import annotations
 
+from ..onboarding.advisor import is_person_tracker
 from ..schemas import Activity, Binding, Role, Rule
 
 
@@ -31,10 +32,14 @@ def starter_rules(bindings: list[Binding], activities: list[Activity],
                         {"feat": "hour_of_day", "op": "<", "value": 7}, *extra]}
         return node
 
-    # away — person's own location binding says not home
+    # away — person's own location binding says not home. Only a genuine
+    # home/away tracker (zone state) backs this; a numeric distance/proximity
+    # entity wrongly in PERSON would invert it (distance 0 == home), so skip it.
     if "away" in slugs:
         for b in _bindings_by_role(bindings, Role.PERSON, person_id):
             if person_id and b.person_id != person_id:
+                continue
+            if not is_person_tracker(b.entity_id):
                 continue
             out.append(Rule(activity_slug="away", person_id=b.person_id,
                             priority=10,

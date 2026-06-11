@@ -364,7 +364,11 @@ def build_api_router(deps: dict) -> APIRouter:
         events = deps.get("events")
         if events is None:
             raise HTTPException(409, "Connect Home Assistant first")
-        from ..domain.onboarding.person_link import ensure_member_persons
+        from ..domain.onboarding.person_link import (ensure_member_persons,
+                                                      repair_person_bindings)
+        # first heal any numeric distance/proximity entity wrongly given the
+        # PERSON role (and its inverted away rule), then (re)link real trackers.
+        repaired = repair_person_bindings(repo)
         inv = [e for e in await events.discover_entities() if not e.get("disabled")]
         matches = {}
         if repo.get_connection("llm"):
@@ -374,7 +378,7 @@ def build_api_router(deps: dict) -> APIRouter:
             except Exception:
                 log.exception("relink: LLM match failed — name fallback only")
         linked = ensure_member_persons(repo, inv, matches)
-        return {"linked": linked}
+        return {"linked": linked, **repaired}
 
     @api.get("/buddy")
     def buddy() -> dict:

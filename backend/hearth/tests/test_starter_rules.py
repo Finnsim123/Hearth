@@ -20,6 +20,20 @@ BINDINGS = [
 ]
 
 
+def test_distance_entity_never_makes_an_away_rule():
+    """Regression: a numeric distance/proximity entity that slipped into the
+    PERSON role must NOT generate the away rule. distance == 0 means HOME, the
+    opposite of home_last == 0 — so the rule would be inverted. The proximity
+    signal belongs to the model as a CUSTOM feature, not a rule."""
+    bad = [Binding(entity_id="device_tracker.alex_iphone_distance", role=Role.PERSON,
+                   name="alex_iphone_distance", person_id="alex")]
+    assert starter_rules(bad, ACTS) == []
+    # a genuine tracker still gets its away rule
+    good = [Binding(entity_id="person.alex", role=Role.PERSON,
+                    name="alex_loc", person_id="alex")]
+    assert any(r.activity_slug == "away" for r in starter_rules(good, ACTS))
+
+
 def test_rules_cover_supported_activities():
     rules = starter_rules(BINDINGS, ACTS)
     by_activity = {r.activity_slug for r in rules}

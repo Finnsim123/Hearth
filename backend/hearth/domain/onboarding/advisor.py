@@ -26,6 +26,10 @@ _NAME_HINTS: list[tuple[str, Role]] = [
     # model decides the threshold). Generic per-device trackers stay excluded.
     (r"connected_devices|devices_connected|online_devices|device_count|"
      r"num_clients|clients_total|network_clients", Role.CUSTOM),
+    # proximity/distance-to-home is a NUMBER, not a home/away state. It belongs
+    # to the model as a numeric feature (small distance → home, large → away,
+    # threshold learned), NEVER the PERSON role — see _NOT_A_TRACKER below.
+    (r"distance|proximity|afstand|nearest", Role.CUSTOM),
 ]
 _UNIT_ROLES = {"W": Role.POWER, "kW": Role.POWER, "ppm": Role.ENV, "µg/m³": Role.ENV,
                "°C": Role.ENV, "°F": Role.ENV, "%": Role.ENV, "lx": Role.ENV,
@@ -44,6 +48,25 @@ _DOMAIN_ROLES = {"light": Role.LIGHT, "media_player": Role.MEDIA, "person": Role
 
 def _slugify(entity_id: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", entity_id.split(".", 1)[-1].lower()).strip("_")
+
+
+# A real home/away tracker emits zone STATES ("home"/"not_home"/"work"); the
+# PERSON role + away rule (home_last == 0) assume exactly that. Companion-app
+# *distance*/*proximity* entities are NUMBERS — distance 0 means HOME, the
+# opposite of what home_last == 0 encodes. They must never back the PERSON role;
+# they feed the model as CUSTOM numeric features instead. This guard is the one
+# place that decides "is this entity a genuine home/away tracker?".
+_NOT_A_TRACKER = re.compile(r"distance|proximity|afstand|nearest|"
+                            r"_km\b|_mi\b|_miles?\b|_meters?\b|_metres?\b")
+
+
+def is_person_tracker(entity_id: str, friendly_name: str = "") -> bool:
+    """True only for entities that report home/away (PERSON role). Numeric
+    proximity/distance sensors are excluded — they are model features, not
+    presence trackers."""
+    if entity_id.split(".")[0] not in ("person", "device_tracker"):
+        return False
+    return not _NOT_A_TRACKER.search(f"{entity_id} {friendly_name}".lower())
 
 
 # Diagnostics / infrastructure / forecasts — never useful for activity sensing.

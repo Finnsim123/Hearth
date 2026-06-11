@@ -203,14 +203,17 @@ class OpenRouterAdvisor:
         (person.* preferred, device_tracker.* fallback). Names may be nicknames
         or in any language — this is exactly the messy-name → structure job the
         LLM is for. Returns {member_id: entity_id}; unknowns degrade to {}."""
+        from ..domain.onboarding.advisor import is_person_tracker
         cands = [e for e in inventory
-                 if e["entity_id"].split(".")[0] in ("person", "device_tracker")
+                 if is_person_tracker(e["entity_id"], e.get("friendly_name") or "")
                  and not e.get("disabled")]
         if not members or not cands:
             return {}
         system = (
             "Match each household member to the Home Assistant entity that tracks "
-            "whether THEY are home or away. Prefer person.* over device_tracker.*. "
+            "whether THEY are home or away (a zone state like home/not_home). "
+            "Prefer person.* over device_tracker.*. Never pick a numeric "
+            "distance/proximity sensor — that is not a home/away state. "
             "Names may be nicknames or in another language — infer (e.g. 'Alex' ↔ "
             "person.alexander_jansen). Reply ONLY a JSON object {member_id: entity_id "
             "or null}, one entry per member, entity_id chosen from the candidates.")

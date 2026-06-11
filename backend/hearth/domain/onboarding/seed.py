@@ -65,9 +65,10 @@ async def run_seed(repo, events) -> None:
                 pass
 
         # member person-entity bindings always carry person_id (update-or-create)
+        from .advisor import is_person_tracker
         for m in pending.get("members", []):
             ent = m.get("personEntity")
-            if not ent:
+            if not ent or not is_person_tracker(ent):
                 continue
             existing = next((b for b in repo.bindings() if b.entity_id == ent), None)
             if existing is not None:
@@ -85,7 +86,8 @@ async def run_seed(repo, events) -> None:
         # Backstop linking: every member must have a person.* binding for the
         # away rule to work. The LLM handles messy names → the right member;
         # a name-token fallback covers no-key installs. Then guarantee core roles.
-        from .person_link import ensure_member_persons, force_core_roles
+        from .person_link import (ensure_member_persons, force_core_roles,
+                                   repair_person_bindings)
         llm_matches = {}
         if advisor is not None:
             try:
@@ -94,6 +96,9 @@ async def run_seed(repo, events) -> None:
                 log.exception("LLM person match failed — name fallback only")
         linked = ensure_member_persons(repo, usable, llm_matches)
         force_core_roles(repo, usable)
+        # heal any numeric distance/proximity entity that slipped into PERSON
+        # before generating rules, so no inverted away rule is ever written.
+        repair_person_bindings(repo)
         if linked:
             log.info("setup seeding: linked %d member(s) to a home/away entity", linked)
 
