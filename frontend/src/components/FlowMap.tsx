@@ -104,9 +104,9 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
             <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={9}
                   fill="var(--surface-2)" stroke={ring}
                   strokeWidth={nd.status === "alert" || hover === id ? 2 : 1.4} />
-            <text x={cx(id)} y={n.y + 23} textAnchor="middle" fontSize={13} fontWeight={600}
+            <text x={cx(id)} y={n.y + 23} textAnchor="middle" fontSize={15.5} fontWeight={600}
                   fill="var(--text)" style={{ pointerEvents: "none" }}>{nd.label}</text>
-            <text x={cx(id)} y={n.y + 41} textAnchor="middle" fontSize={11.5}
+            <text x={cx(id)} y={n.y + 41} textAnchor="middle" fontSize={13.5}
                   fill={nd.status === "ask" ? "var(--accent)" : "var(--text-dim)"}
                   style={{ pointerEvents: "none" }}>{nd.value}</text>
           </g>
@@ -115,11 +115,11 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
 
       {/* edge throughput label (ingest rate) */}
       {f.edges.ha_raw?.label && (
-        <text x={190} y={100} textAnchor="middle" fontSize={10.5} fill="var(--text-dim)"
+        <text x={190} y={98} textAnchor="middle" fontSize={12.5} fill="var(--text-dim)"
               style={{ pointerEvents: "none" }}>{f.edges.ha_raw.label}</text>
       )}
       {!compact && (
-        <text x={745} y={338} textAnchor="middle" fontSize={10.5} fill="var(--text-dim)"
+        <text x={745} y={340} textAnchor="middle" fontSize={12.5} fill="var(--text-dim)"
               style={{ pointerEvents: "none" }}>your answers</text>
       )}
 
