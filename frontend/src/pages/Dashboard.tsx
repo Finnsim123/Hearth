@@ -9,6 +9,7 @@ import Avatar from "../components/Avatar";
 import { Icon, type IconName } from "../icons";
 import { packSiblings, enclose, type C } from "../bubbles";
 import { useIsMobile } from "../useMedia";
+import FlowMap from "../components/FlowMap";
 
 type Pred = { time: string; predicted: string; smoothed: string; confidence: number;
               model_version: string; probs: Record<string, number>
@@ -497,6 +498,7 @@ export default function Dashboard() {
         </div>
       )}
       <NeedsYou questions={inbox.data ?? []} />
+      <FlowMap compact />
       {!coldStart && <SensorCoverage />}
       <Pulse j={journey.data} hasTsdb={!preds.data?.note} />
     </div>

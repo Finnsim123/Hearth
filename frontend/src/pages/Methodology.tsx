@@ -6,6 +6,7 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "../icons";
+import FlowMap from "../components/FlowMap";
 
 type M = Record<string, any>;
 
@@ -311,6 +312,12 @@ export default function Methodology() {
         The whole pipeline, step by step, with your instance's own numbers. Click any step to expand it.
         {m.generated_at && <> <span style={{ opacity: 0.7 }}>As of {new Date(m.generated_at).toLocaleString()}.</span></>}
       </p>
+      <div className="card" style={{ padding: 16 }}>
+        <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--text-dim)" }}>
+          Live data flow — dots move at your real throughput. Hover a stage for detail; click it to open that page.
+        </p>
+        <FlowMap />
+      </div>
       {sections.map((s, i) => (
         <details key={s.id} id={s.id}
                  style={{ border: "1px solid var(--border)", borderRadius: 12,

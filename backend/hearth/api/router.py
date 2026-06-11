@@ -344,6 +344,17 @@ def build_api_router(deps: dict) -> APIRouter:
             return {"phase": "live", "tone": "live", "title": "Watching & predicting",
                     "detail": "", "progress": None, "cta": None}
 
+    @api.get("/flow")
+    def flow() -> dict:
+        """Live pipeline map (nodes + edges + this instance's numbers) for the
+        animated data-flow diagram. Pure read; never throws."""
+        from ..domain.flow import flow_state
+        try:
+            return flow_state(repo, deps.get("tsdb"))
+        except Exception:
+            log.exception("flow_state failed")
+            return {"phase": "live", "tone": "live", "nodes": {}, "edges": {}}
+
     @api.get("/methodology")
     def methodology() -> dict:
         """Live numbers that personalise the Methodology page (docs/METHODOLOGY.md).

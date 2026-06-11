@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
 
-/** True when the viewport is at or below `maxWidth` (phone / narrow tablet).
- *  Drives the responsive shell and per-page mobile layouts. */
-export function useIsMobile(maxWidth = 720): boolean {
-  const query = `(max-width: ${maxWidth}px)`;
+export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(
     () => typeof window !== "undefined" && window.matchMedia(query).matches,
   );
@@ -15,4 +12,14 @@ export function useIsMobile(maxWidth = 720): boolean {
     return () => mq.removeEventListener("change", on);
   }, [query]);
   return matches;
+}
+
+/** True when the viewport is at or below `maxWidth` (phone / narrow tablet). */
+export function useIsMobile(maxWidth = 720): boolean {
+  return useMediaQuery(`(max-width: ${maxWidth}px)`);
+}
+
+/** True when the user asked the OS to minimise motion — disable the dots. */
+export function usePrefersReducedMotion(): boolean {
+  return useMediaQuery("(prefers-reduced-motion: reduce)");
 }
