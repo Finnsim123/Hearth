@@ -177,6 +177,31 @@ class OpenRouterAdvisor:
                     continue
         return out
 
+    # ── room reconciliation ──────────────────────────────────────────────────
+    async def propose_room_canon(self, rooms: list[str]) -> dict[str, str]:
+        """Map messy room names to a merged canonical set — folding SEMANTIC
+        duplicates a string compare misses (Sleepingroom→Bedroom, Backoffice→
+        Office). Returns {original: canonical}; unknown/garbage degrades to {}."""
+        if len(rooms) < 2:
+            return {}
+        system = (
+            "You normalise smart-home room/area names. Given a list, merge ones "
+            "that mean the SAME physical room into a single canonical English "
+            "name (e.g. 'Sleepingroom'->'Bedroom', 'livingroom'/'Living_room'->"
+            "'Living Room', 'Backoffice'->'Office'). Keep genuinely distinct "
+            "rooms separate. Names may be in any language. Reply ONLY a JSON "
+            "object mapping every input string to its canonical name: "
+            "{\"input\": \"Canonical\"}.")
+        try:
+            res = await self._chat(system, json.dumps(rooms), max_tokens=2000)
+        except Exception as exc:
+            log.warning("propose_room_canon failed: %s", exc)
+            return {}
+        if not isinstance(res, dict):
+            return {}
+        return {str(k): str(v).strip()[:40] for k, v in res.items()
+                if isinstance(v, str) and v.strip()}
+
     # ── taxonomy ─────────────────────────────────────────────────────────────
     async def propose_taxonomy(self, inventory: list[dict]) -> list[Activity]:
         domains = sorted({e["entity_id"].split(".")[0] for e in inventory})

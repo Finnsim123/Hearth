@@ -299,12 +299,32 @@ def build_api_router(deps: dict) -> APIRouter:
         return await sync_inventory(repo, events,
                                     use_llm=repo.get_connection("llm") is not None)
 
+    @api.post("/rooms/tidy")
+    async def rooms_tidy() -> dict:
+        """Merge duplicate rooms: fold case/separator variants deterministically,
+        then (if an LLM key is set) fold semantic duplicates too."""
+        from ..domain.onboarding.rooms import (
+            apply_room_mapping, tidy_rooms_deterministic)
+        det = tidy_rooms_deterministic(repo)
+        merged_llm = 0
+        if repo.get_connection("llm") and len(det["rooms"]) > 1:
+            try:
+                from ..adapters.openrouter_llm import OpenRouterAdvisor
+                mapping = await OpenRouterAdvisor(repo).propose_room_canon(det["rooms"])
+                merged_llm = apply_room_mapping(repo, mapping)
+            except Exception:
+                pass
+        rooms_now = sorted({b.room for b in repo.bindings() if b.room})
+        return {"changed": det["changed"] + merged_llm, "rooms": rooms_now}
+
     @api.get("/bindings/health")
-    def bindings_health() -> dict:
-        """Per-binding signal health over the last 7 days, plus the training
-        class balance. Answers 'is this sensor actually a feature?' — a binding
-        whose feature columns never vary is dead weight the model ignores, and
-        a class with 0 windows can never be predicted (no examples to learn)."""
+    def bindings_health(hours: int = 168) -> dict:
+        """Per-binding signal health over a selectable window (1h / 24h / 7d via
+        ?hours=), plus the training class balance. Answers 'is this sensor
+        actually a feature?' — a binding whose feature columns never vary is dead
+        weight the model ignores, and a class with 0 windows can never be
+        predicted (no examples to learn). The sparkline reflects the window;
+        obs/per_day stay a stable 7-day rate."""
         tsdb = deps.get("tsdb")
         if tsdb is None:
             return {"bindings": [], "classes": {}, "note": "InfluxDB not connected"}
@@ -312,8 +332,9 @@ def build_api_router(deps: dict) -> APIRouter:
         from ..domain.features.registry import feature_set_version
         fset = feature_set_version(repo.get_setting("composites", []) or [],
                                    repo.get_setting("time_granularity", "coarse") or "coarse")
+        hours = max(1, min(int(hours), 168 * 4))   # clamp 1h .. 4w
         end = datetime.now(timezone.utc)
-        start = end - timedelta(days=7)
+        start = end - timedelta(hours=hours)
         persons = [p for p in repo.persons() if p.enabled]
         # union of each person's recent feature matrix (binding cols are shared
         # + that person's personal sensors)
@@ -431,12 +452,15 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(409, "Connect InfluxDB first")
         from datetime import datetime, timedelta, timezone
 
-        from ..adapters.influx_import import import_history
-        days = int(body.get("days", 60))
+        from ..adapters.influx_import import earliest_source_time, import_history
+        days = int(body.get("days", 60))   # 0 = import the full recorded history
         end = datetime.now(timezone.utc)
-        results = import_history(tsdb, body["source_bucket"], repo.bindings(),
-                                 end - timedelta(days=days), end)
-        return {"imported": results}
+        if days <= 0:
+            start = earliest_source_time(tsdb, body["source_bucket"]) or end - timedelta(days=90)
+        else:
+            start = end - timedelta(days=days)
+        results = import_history(tsdb, body["source_bucket"], repo.bindings(), start, end)
+        return {"imported": results, "span_days": max(1, (end - start).days)}
 
     # ── activities & rules (taxonomy) ──────────────────────────────────────
     @api.get("/activities")

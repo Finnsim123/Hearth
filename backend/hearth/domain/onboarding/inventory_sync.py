@@ -19,6 +19,7 @@ import logging
 
 from ..features.person_scope import binding_owner
 from .advisor import heuristic_bindings
+from .rooms import canonical_room, room_key
 
 log = logging.getLogger(__name__)
 
@@ -35,12 +36,14 @@ async def sync_inventory(repo, events, use_llm: bool = False) -> dict:
     existing = {b.entity_id: b for b in repo.bindings()}
     used_names = {b.name for b in existing.values()}
 
-    # 1. area/room updates for already-bound entities
+    # 1. area/room updates for already-bound entities. Compare by canonical KEY
+    #    so a casing/separator difference ("Living_room" vs "livingroom") never
+    #    counts as a change — that churn was what spawned duplicate rooms.
     rooms_updated = 0
     by_id = {e["entity_id"]: e for e in usable}
     for eid, b in existing.items():
-        area = (by_id.get(eid) or {}).get("area")
-        if area and area != b.room:
+        area = canonical_room((by_id.get(eid) or {}).get("area"))
+        if area and room_key(area) != room_key(b.room):
             b.room = area
             repo.save_binding(b)
             rooms_updated += 1
@@ -62,6 +65,7 @@ async def sync_inventory(repo, events, use_llm: bool = False) -> dict:
     for b in proposed.values():
         if not b.person_id:
             b.person_id = binding_owner(b, persons)
+        b.room = canonical_room(b.room)            # canonical from the start
         base, n = b.name, 2                        # keep feature prefixes unique
         while b.name in used_names:
             b.name, n = f"{base}_{n}", n + 1

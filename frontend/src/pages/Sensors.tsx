@@ -198,20 +198,22 @@ export default function Sensors() {
   const [role, setRole] = useState("all");
   const [statusF, setStatusF] = useState("all");
   const [roomF, setRoomF] = useState("all");
+  const [sparkHours, setSparkHours] = useState(168);   // 1h / 24h / 7d sparkline zoom
   const [cleanMsg, setCleanMsg] = useState("");
   const load = () => fetch("/api/bindings").then(j).then(setBindings).catch(() => setBindings([]));
-  useEffect(() => {
-    load();
-    fetch("/api/bindings/health").then(j).then((h) => {
-      setHealth(Object.fromEntries((h.bindings ?? []).map(
-        (b: Health) => [b.name, b])));
+  const loadHealth = (hours: number) =>
+    fetch(`/api/bindings/health?hours=${hours}`).then(j).then((h) => {
+      setHealth(Object.fromEntries((h.bindings ?? []).map((b: Health) => [b.name, b])));
       setClasses(h.classes ?? {});
     }).catch(() => {});
+  useEffect(() => {
+    load();
     fetch("/api/persons").then(j)
       .then((ps: { id: string; name: string }[]) =>
         setPersons(Object.fromEntries(ps.map((p) => [p.id, p.name]))))
       .catch(() => {});
   }, []);
+  useEffect(() => { loadHealth(sparkHours); }, [sparkHours]);
   const roles = useMemo(
     () => Array.from(new Set((bindings ?? []).map((b) => b.role))).sort(),
     [bindings]);
@@ -256,6 +258,16 @@ export default function Sensors() {
     setCleanMsg(`Removed ${r.removed} junk binding${r.removed === 1 ? "" : "s"}.`);
     load();
   };
+  const tidyRooms = async () => {
+    setCleanMsg("Tidying room names…");
+    try {
+      const r = await fetch("/api/rooms/tidy", { method: "POST" }).then(j);
+      setCleanMsg(r.changed
+        ? `Merged duplicate rooms — ${r.changed} sensor${r.changed === 1 ? "" : "s"} reassigned. Now: ${r.rooms.join(", ")}.`
+        : "Rooms already tidy — no duplicates found.");
+      load();
+    } catch { setCleanMsg("Tidy failed — check logs."); }
+  };
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 860 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -271,6 +283,7 @@ export default function Sensors() {
             </button>
           )}
           <button className="btn btn-secondary" onClick={rescan}>Rescan HA</button>
+          <button className="btn btn-secondary" onClick={tidyRooms}>Tidy rooms</button>
           <button className="btn btn-secondary" onClick={cleanup}>Clean up junk</button>
         </div>
       </div>
@@ -301,6 +314,18 @@ export default function Sensors() {
           <option value="constant">No variation</option>
           <option value="no_data">No data</option>
         </select>
+        <div style={{ display: "inline-flex", border: "1px solid var(--border)",
+                      borderRadius: 8, overflow: "hidden" }} title="Sparkline time window">
+          {[[1, "1H"], [24, "24H"], [168, "7D"]].map(([h, lbl]) => (
+            <button key={h as number} onClick={() => setSparkHours(h as number)}
+                    style={{ border: "none", padding: "0 11px", height: 34, cursor: "pointer",
+                             fontSize: 12.5, fontWeight: sparkHours === h ? 600 : 400,
+                             background: sparkHours === h ? "var(--accent)" : "transparent",
+                             color: sparkHours === h ? "#fff" : "var(--text-dim)" }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
       </div>
       {bindings === null && <p style={{ color: "var(--text-dim)" }}>Loading…</p>}
       {bindings !== null && shown.length === 0 && (

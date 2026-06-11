@@ -19,7 +19,16 @@ from .registry import all_recipes, feature_set_version, recipe_for
 
 log = logging.getLogger(__name__)
 
-WINDOW = timedelta(minutes=30)
+WINDOW = timedelta(minutes=30)           # window END cadence — shared by all roles
+DEFAULT_WINDOW_MIN = int(WINDOW.total_seconds() // 60)
+
+
+def max_window_min(bindings: list[Binding]) -> int:
+    """Longest per-role lookback among these bindings — how far read_raw must
+    pre-roll so the slowest sensor's first window has full history."""
+    from .registry import recipe_for
+    return max((recipe_for(b.role).window_min for b in bindings),
+               default=DEFAULT_WINDOW_MIN)
 
 # Time encoding. "full" = raw hour_of_day (0-23) — lets a tree memorize a
 # per-hour schedule and crowd out sensors (the clock-crutch failure). "coarse"
@@ -136,6 +145,7 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
                        for ws, v in zip(grid, idle_series.to_numpy())}
     rows = []
     empty_slice = prepared.iloc[0:0]
+    pidx = prepared.index if not prepared.empty else None   # sorted 1-min grid
     for ws in grid:
         we = ws + WINDOW
         if aligned:
@@ -164,10 +174,20 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
             row["evt_dominant_share"] = 0.0
             row["evt_idle_minutes"] = IDLE_CAP_MIN
         for b in bindings:
-            series = sl[b.name] if b.name in sl.columns else pd.Series(dtype=object)
+            recipe = recipe_for(b.role)
+            # role-aware lookback: same window END (we), per-role start. Default
+            # roles reuse the shared 30-min slice (fast path, no extra work);
+            # off-default roles take a searchsorted slice [we - window, we).
+            if recipe.window_min == DEFAULT_WINDOW_MIN or pidx is None:
+                bsl = sl
+            else:
+                hi = pidx.searchsorted(pd.Timestamp(we))
+                lo = pidx.searchsorted(pd.Timestamp(we - timedelta(minutes=recipe.window_min)))
+                bsl = prepared.iloc[lo:hi]
+            series = bsl[b.name] if b.name in bsl.columns else pd.Series(dtype=object)
             series.attrs["window_end_local_minutes"] = end_minutes
             series.attrs["imminent_window"] = float(b.options.get("imminent_window", 40))
-            for suffix, value in recipe_for(b.role).fn(series, b).items():
+            for suffix, value in recipe.fn(series, b).items():
                 row[f"{b.name}_{suffix}"] = value
         rows.append(row)
     out = pd.DataFrame(rows, index=pd.DatetimeIndex(grid, name="window_start", tz="UTC"))
@@ -225,7 +245,8 @@ def build_windows(tsdb, repo, person_id: str, start: datetime, end: datetime,
     lag_features = repo.get_setting("lag_features", []) or []
     tz = repo.get_setting("timezone", "UTC") or "UTC"
     tg = repo.get_setting("time_granularity", "coarse") or "coarse"
-    raw = tsdb.read_raw(bindings, start - timedelta(minutes=120), end)
+    preroll = max(120, max_window_min(bindings))   # cover the slowest role's lookback
+    raw = tsdb.read_raw(bindings, start - timedelta(minutes=preroll), end)
     prepared = prepare(raw, bindings) if not raw.empty else raw
     grid = window_grid(start, end, stride_min)
     if not grid:

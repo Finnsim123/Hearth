@@ -103,6 +103,30 @@ def test_feature_set_version_changes_with_composites():
     assert feature_set_version([]).startswith("v")
 
 
+def test_role_aware_window_lookback():
+    """A slow role (steps, 180-min window) looks back hours; a fast role
+    (presence, 15-min) only looks at recent minutes — both ending at the same
+    window edge."""
+    from hearth.domain.features.pipeline import extract_windows, max_window_min
+    from hearth.domain.schemas import Binding, Role
+    idx = pd.date_range("2026-01-01 00:00", "2026-01-01 02:59", freq="1min", tz="UTC")
+    prepared = pd.DataFrame({
+        "alice_steps": [float(i) for i in range(len(idx))],     # +1 every minute
+        "couch": [1.0 if i >= len(idx) - 10 else 0.0 for i in range(len(idx))],  # last 10 min
+    }, index=idx)
+    bindings = [Binding(entity_id="sensor.alice_steps", role=Role.STEPS, name="alice_steps"),
+                Binding(entity_id="binary_sensor.couch", role=Role.PRESENCE, name="couch")]
+    assert max_window_min(bindings) == 180
+    grid = [pd.Timestamp("2026-01-01 02:30", tz="UTC").to_pydatetime()]   # window ends 03:00
+    out = extract_windows(prepared, bindings, grid, "UTC")
+    row = out.iloc[0]
+    # steps: 180-min lookback spans 00:00→02:59 → ~179, NOT the 30-min ~29
+    assert row["alice_steps_delta"] > 150
+    # presence: 15-min lookback (02:45→03:00) has 10 of 15 min active → ~0.67,
+    # NOT the 30-min 10/30 ≈ 0.33
+    assert 0.6 < row["couch_frac"] < 0.75
+
+
 def test_aligned_fast_path_equals_slow_path(raw, bindings):
     """The groupby fast path must produce identical output to mask slicing."""
     from hearth.domain.features import pipeline as P

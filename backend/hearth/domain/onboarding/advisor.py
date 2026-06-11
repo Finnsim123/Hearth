@@ -57,7 +57,11 @@ _BLOCKLIST = re.compile(
     r"\bhar_|strava|identify|identificeren|trigger_level|trigger_pressure|"
     r"occupied_pressure|unoccupied_pressure|calibrate|opstartgedrag|"
     r"power_on_level|power_on_behavior|niveau_bij_opstarten|wake_word|"
-    r"start_up_color|tts_volume|print_bed|nozzle|heatbreak|cooling_fan")
+    r"start_up_color|tts_volume|print_bed|nozzle|heatbreak|cooling_fan|"
+    # controller/radio board diagnostics — a Zigbee coordinator's own chip
+    # temperature is about the dongle, never the room (cpu/core_ already above).
+    r"zigbee|coordinator|slzb|zbdongle|conbee|_chip_|chip_temp|mcu|soc_temp|"
+    r"board_temp|radio_temp|die_temp|internal_temp|node_temp|esp_temp")
 _BLOCK_DEVICE_CLASSES = {"signal_strength", "timestamp", "update", "data_size",
                          "data_rate", "duration", "monetary"}
 

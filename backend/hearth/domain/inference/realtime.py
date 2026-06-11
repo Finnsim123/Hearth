@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 from ..features.pipeline import (WINDOW, bindings_for_person, compute_features,
-                                  prepare)
+                                  max_window_min, prepare)
 from ..features.registry import feature_set_version
 from ..schemas import Prediction
 from .smoothing import smooth, transition_filter
@@ -69,7 +69,8 @@ def current_window_features(tsdb, repo, person_id: str):
     tg = repo.get_setting("time_granularity", "coarse") or "coarse"
     end = datetime.now(timezone.utc)
     start = end - WINDOW
-    raw = tsdb.read_raw(bindings, start - timedelta(minutes=120), end)
+    preroll = max(120, max_window_min(bindings))   # cover the slowest role's lookback
+    raw = tsdb.read_raw(bindings, start - timedelta(minutes=preroll), end)
     prepared = prepare(raw, bindings) if not raw.empty else raw
     return compute_features(prepared, bindings, [start], tz, composites, lag_features, tg)
 

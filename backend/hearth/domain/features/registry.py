@@ -28,6 +28,9 @@ class Recipe:
     absence_value: float          # NaN fill: 0 = "no event", -1 = "no sensor"
     slow_sensor: bool = False     # state-change-only writers (7-d lookback)
     suffixes: tuple[str, ...] = field(default_factory=tuple)  # for UI/versioning
+    window_min: int = 30          # per-role lookback (shared window END, ADR-8).
+                                  # Motion is informative over minutes; a step
+                                  # counter only over hours. Default = base 30.
 
 
 _REGISTRY: dict[Role, Recipe] = {}
@@ -59,7 +62,7 @@ def feature_set_version(extra: list[dict] | None = None,
         r = _REGISTRY[role]
         h.update(role.value.encode())
         h.update(",".join(r.suffixes).encode())
-        h.update(str((r.ffill_limit_min, r.absence_value, r.slow_sensor)).encode())
+        h.update(str((r.ffill_limit_min, r.absence_value, r.slow_sensor, r.window_min)).encode())
         h.update(inspect.getsource(r.fn).encode())
     for comp in (extra or []):
         h.update(str(sorted(comp.items())).encode())
@@ -67,16 +70,19 @@ def feature_set_version(extra: list[dict] | None = None,
 
 
 # ── default recipe set (ffill limits ported from the prototype) ────────────
-register(Recipe(Role.PRESENCE,  X.presence,   5,    0.0, suffixes=("frac", "any", "transitions")))
-register(Recipe(Role.BED,       X.bed,        10,  -1.0, suffixes=("mean", "max", "occupied")))
-register(Recipe(Role.POWER,     X.power,      10,   0.0, suffixes=("on", "max_w")))
-register(Recipe(Role.LIGHT,     X.light,      240,  0.0, suffixes=("on_last", "on_frac")))
-register(Recipe(Role.MEDIA,     X.media,      5,    0.0, suffixes=("playing", "paused", "active")))
-register(Recipe(Role.ENV,       X.env,        120,  0.0, suffixes=("mean", "delta", "max")))
-register(Recipe(Role.PERSON,    X.person,     10080, -1.0, slow_sensor=True, suffixes=("home_last", "home_frac")))
-register(Recipe(Role.FOCUS,     X.focus,      10,   0.0, suffixes=("on_last",)))
-register(Recipe(Role.ALARM_TIME, X.alarm_time, 10080, 0.0, slow_sensor=True, suffixes=("minutes_until", "imminent")))
-register(Recipe(Role.DOOR,      X.door,       0,    0.0, suffixes=("opened_any", "open_count")))
-register(Recipe(Role.STEPS,     X.steps,      30,   0.0, suffixes=("delta",)))
-register(Recipe(Role.BATTERY,   X.battery,    120,  0.0, suffixes=("delta",)))
-register(Recipe(Role.CUSTOM,    X.custom,     30,   0.0, suffixes=("mean", "max", "delta")))
+# window_min = per-role lookback ending at the shared 30-min window edge.
+# Fast/event-like roles look back minutes (responsive); slow accumulators look
+# back hours (a 3-h step delta is meaningful, a 15-min one is noise).
+register(Recipe(Role.PRESENCE,  X.presence,   5,    0.0, suffixes=("frac", "any", "transitions"), window_min=15))
+register(Recipe(Role.BED,       X.bed,        10,  -1.0, suffixes=("mean", "max", "occupied"), window_min=30))
+register(Recipe(Role.POWER,     X.power,      10,   0.0, suffixes=("on", "max_w"), window_min=30))
+register(Recipe(Role.LIGHT,     X.light,      240,  0.0, suffixes=("on_last", "on_frac"), window_min=30))
+register(Recipe(Role.MEDIA,     X.media,      5,    0.0, suffixes=("playing", "paused", "active"), window_min=15))
+register(Recipe(Role.ENV,       X.env,        120,  0.0, suffixes=("mean", "delta", "max"), window_min=60))
+register(Recipe(Role.PERSON,    X.person,     10080, -1.0, slow_sensor=True, suffixes=("home_last", "home_frac"), window_min=30))
+register(Recipe(Role.FOCUS,     X.focus,      10,   0.0, suffixes=("on_last",), window_min=30))
+register(Recipe(Role.ALARM_TIME, X.alarm_time, 10080, 0.0, slow_sensor=True, suffixes=("minutes_until", "imminent"), window_min=30))
+register(Recipe(Role.DOOR,      X.door,       0,    0.0, suffixes=("opened_any", "open_count"), window_min=30))
+register(Recipe(Role.STEPS,     X.steps,      30,   0.0, suffixes=("delta",), window_min=180))
+register(Recipe(Role.BATTERY,   X.battery,    120,  0.0, suffixes=("delta",), window_min=180))
+register(Recipe(Role.CUSTOM,    X.custom,     30,   0.0, suffixes=("mean", "max", "delta"), window_min=30))

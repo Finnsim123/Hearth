@@ -283,45 +283,79 @@ const TIER_META: Record<number, [string, string]> = {
 };
 const tierColor = (t: number) => TIER_META[t]?.[1] ?? TIER_META[2][1];
 
-type Leaf = C & { tier: number; name: string };
-type Room = { x: number; y: number; r: number; room: string;
+type Leaf = C & { tier: number; name: string; role: string; per_day: number };
+type Room = { x: number; y: number; r: number; key: string; label: string;
               leaves: Leaf[]; total: number; sparse: boolean; tiers: Record<number, number> };
 
-/** Pack each room's sensors into a disc, then pack the room-discs into a cluster.
- *  Returns absolutely-positioned rooms + leaves centred on the origin. */
-function packRooms(rows: Health[]): { rooms: Room[]; ext: number } {
-  const byRoom: Record<string, Health[]> = {};
-  for (const b of rows) (byRoom[b.room || "Unassigned"] ??= []).push(b);
+// Merge key for case / separator variants ("Living_room" == "livingroom").
+const roomKey = (room: string | null) =>
+  (room || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "unassigned";
+// Prettiest display from a set of original spellings: prefer the one that
+// splits into the most words, then title-case it ("Living_room" → "Living Room").
+const prettyRoom = (originals: string[]) => {
+  const rep = originals.reduce((best, o) =>
+    o.split(/[^a-zA-Z0-9]+/).filter(Boolean).length >
+    best.split(/[^a-zA-Z0-9]+/).filter(Boolean).length ? o : best, originals[0]);
+  return rep.split(/[^a-zA-Z0-9]+/).filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1)).join(" ") || "Unassigned";
+};
 
+const W = 1040;            // layout width in svg units (scales to card width)
+const GAP_X = 20, GAP_Y = 16, LABEL_H = 26;
+
+/** Pack each room's sensors into a disc, then lay the room-discs out in rows
+ *  that fill the available width (no central clump). Mutates positions. */
+function layoutRooms(rows: Health[]): { rooms: Room[]; height: number } {
+  const groups: Record<string, { label: string; list: Health[]; originals: Set<string> }> = {};
+  for (const b of rows) {
+    const k = roomKey(b.room);
+    (groups[k] ??= { label: "", list: [], originals: new Set() });
+    groups[k].list.push(b);
+    groups[k].originals.add(b.room || "Unassigned");
+  }
   const maxPD = Math.max(1, ...rows.map((b) => b.per_day ?? 0));
-  const leafR = (b: Health) => 5 + Math.sqrt((b.per_day ?? 0) / maxPD) * 9;  // 5–14px
+  const leafR = (b: Health) => 5 + Math.sqrt((b.per_day ?? 0) / maxPD) * 9;   // 5–14px
 
-  const rooms: Room[] = Object.entries(byRoom).map(([room, list]) => {
-    const leaves: Leaf[] = list.map((b) => ({ x: 0, y: 0, r: leafR(b), tier: b.tier || 2, name: b.name }));
+  const rooms: Room[] = Object.entries(groups).map(([key, g]) => {
+    const leaves: Leaf[] = g.list.map((b) => ({
+      x: 0, y: 0, r: leafR(b), tier: b.tier || 2, name: b.name,
+      role: b.role, per_day: b.per_day ?? 0 }));
     packSiblings(leaves);
     const e = enclose(leaves);
-    for (const l of leaves) { l.x -= e.x; l.y -= e.y; }           // re-centre on room origin
+    for (const l of leaves) { l.x -= e.x; l.y -= e.y; }
     const tiers: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
     for (const l of leaves) tiers[l.tier] = (tiers[l.tier] || 0) + 1;
-    return { x: 0, y: 0, r: e.r + 7, room, leaves, total: leaves.length,
-             sparse: leaves.length <= 1, tiers };
-  }).sort((a, b) => b.r - a.r);                                   // big rooms first → centred
+    return { x: 0, y: 0, r: e.r + 7, key, label: prettyRoom([...g.originals]),
+             leaves, total: leaves.length, sparse: leaves.length <= 1, tiers };
+  }).sort((a, b) => b.r - a.r);
 
-  packSiblings(rooms as unknown as C[]);
-  const whole = enclose(rooms as unknown as C[]);
-  let ext = 0;
+  // shelf-pack rooms into centered rows that fill the width
+  const rowsOf: Room[][] = [];
+  let row: Room[] = [], x = 0;
   for (const rm of rooms) {
-    rm.x -= whole.x; rm.y -= whole.y;
-    ext = Math.max(ext, Math.hypot(rm.x, rm.y) + rm.r);
+    if (row.length && x + 2 * rm.r > W) { rowsOf.push(row); row = []; x = 0; }
+    rm.x = x + rm.r; x += 2 * rm.r + GAP_X; row.push(rm);
   }
-  return { rooms, ext: ext + 18 };
+  if (row.length) rowsOf.push(row);
+
+  let y = GAP_Y;
+  for (const r of rowsOf) {
+    const rowR = Math.max(...r.map((rm) => rm.r));
+    const rowW = r.reduce((s, rm) => s + 2 * rm.r, 0) + GAP_X * (r.length - 1);
+    const off = (W - rowW) / 2;
+    for (const rm of r) { rm.x += off; rm.y = y + rowR; }
+    y += 2 * rowR + LABEL_H + GAP_Y;
+  }
+  return { rooms, height: y };
 }
 
-/** Sensor coverage as a nested bubble chart: each room is a bubble packed into a
- *  cluster, holding one dot per live sensor (size = how often it fires, colour =
- *  evidence tier). Small or all-pink rooms are ones Hearth can barely see. */
+/** Sensor coverage bubble chart: rooms laid out across the width, each holding
+ *  one dot per live sensor (size = how often it fires, colour = evidence tier).
+ *  Click a room to list its sensors. Small/all-pink rooms = barely sensed. */
 function SensorCoverage() {
   const [rows, setRows] = useState<Health[] | null>(null);
+  const [sel, setSel] = useState<string | null>(null);
+  const [hover, setHover] = useState<string | null>(null);
   useEffect(() => {
     fetch("/api/bindings/health").then((r) => r.json())
       .then((h) => setRows((h.bindings ?? []).filter((b: Health) => b.status === "alive")))
@@ -329,7 +363,8 @@ function SensorCoverage() {
   }, []);
   if (!rows || rows.length === 0) return null;
 
-  const { rooms, ext } = packRooms(rows);
+  const { rooms, height } = layoutRooms(rows);
+  const selected = rooms.find((r) => r.key === sel) || null;
 
   return (
     <section className="card" style={{ padding: 20 }}>
@@ -339,40 +374,63 @@ function SensorCoverage() {
       </div>
       <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--text-dim)" }}>
         Each cluster is a room; each dot is a live sensor — bigger dots fire more often,
-        colour is how directly it senses people. Small or all-pink rooms are ones Hearth
-        can barely see.
+        colour is how directly it senses people. Click a room to see its sensors.
       </p>
-      <svg viewBox={`${-ext} ${-ext} ${2 * ext} ${2 * ext}`} role="img"
-           style={{ width: "100%", maxHeight: 440, display: "block" }}>
+      <svg viewBox={`0 0 ${W} ${height}`} role="img"
+           style={{ width: "100%", display: "block" }}>
         {rooms.map((rm) => {
-          const fs = Math.max(9, Math.min(13, rm.r * 0.17));
-          const tip = [1, 2, 3].filter((t) => rm.tiers[t]).map((t) => `${rm.tiers[t]} ${TIER_META[t][0]}`).join(" · ");
+          const active = rm.key === sel || rm.key === hover;
+          const dim = (sel || hover) && !active;
           return (
-            <g key={rm.room}>
-              <title>{rm.room} — {rm.total} sensors ({tip})</title>
+            <g key={rm.key} onClick={() => setSel(sel === rm.key ? null : rm.key)}
+               onMouseEnter={() => setHover(rm.key)} onMouseLeave={() => setHover(null)}
+               style={{ cursor: "pointer", opacity: dim ? 0.45 : 1, transition: "opacity .12s" }}>
+              <title>{rm.label} — {rm.total} sensor{rm.total === 1 ? "" : "s"}</title>
               <circle cx={rm.x} cy={rm.y} r={rm.r}
-                      fill="var(--surface-2)" fillOpacity={0.35}
-                      stroke={rm.sparse ? "var(--danger)" : "var(--border)"}
-                      strokeWidth={rm.sparse ? 1.8 : 1} />
+                      fill="var(--surface-2)" fillOpacity={active ? 0.55 : 0.32}
+                      stroke={rm.sparse ? "var(--danger)" : active ? "var(--accent)" : "var(--border)"}
+                      strokeWidth={active ? 2 : rm.sparse ? 1.8 : 1} />
               {rm.leaves.map((l, i) => (
                 <circle key={i} cx={rm.x + l.x} cy={rm.y + l.y} r={l.r}
                         fill={tierColor(l.tier)} fillOpacity={0.92}
-                        stroke="var(--surface)" strokeWidth={0.6}>
-                  <title>{l.name}</title>
-                </circle>
+                        stroke="var(--surface)" strokeWidth={0.6} />
               ))}
-              <text x={rm.x} y={rm.y - rm.r + fs + 3} textAnchor="middle"
-                    fontSize={fs} fontWeight={600}
-                    fill={rm.sparse ? "var(--danger)" : "var(--text)"}
-                    style={{ pointerEvents: "none", paintOrder: "stroke" }}
-                    stroke="var(--surface)" strokeWidth={2.4} strokeLinejoin="round">
-                {rm.room} · {rm.total}
+              <text x={rm.x} y={rm.y + rm.r + 16} textAnchor="middle"
+                    fontSize={12.5} fill={rm.sparse ? "var(--danger)" : "var(--text-dim)"}
+                    style={{ pointerEvents: "none" }}>
+                {rm.label}
+                <tspan fill={rm.sparse ? "var(--danger)" : "var(--text)"} fontWeight={600}> {rm.total}</tspan>
               </text>
             </g>
           );
         })}
       </svg>
-      <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 12, color: "var(--text-dim)",
+      {selected && (
+        <div style={{ marginTop: 4, padding: "12px 14px", borderRadius: 10,
+                      background: "var(--surface-2)", border: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <strong style={{ fontSize: 14 }}>{selected.label}</strong>
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+              {selected.total} live sensor{selected.total === 1 ? "" : "s"}
+            </span>
+            <button className="btn btn-ghost" onClick={() => setSel(null)}
+                    style={{ marginLeft: "auto", fontSize: 12 }}>Close</button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {[...selected.leaves].sort((a, b) => b.per_day - a.per_day).map((l) => (
+              <span key={l.name} title={`${l.role} · ~${l.per_day.toLocaleString()}/day`}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
+                             padding: "3px 9px", borderRadius: 99, background: "var(--surface)",
+                             border: "1px solid var(--border)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: tierColor(l.tier) }} />
+                {l.name}
+                <span style={{ color: "var(--text-dim)" }}>{l.role}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 12, color: "var(--text-dim)",
                     justifyContent: "center" }}>
         {[1, 2, 3].map((tier) => (
           <span key={tier} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
