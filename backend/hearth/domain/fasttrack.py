@@ -41,6 +41,25 @@ async def run_fast_track(repo, tsdb, store, notifier=None) -> None:
         _status(repo, "imported", points=imported)
         log.info("fast track: %d points imported", imported)
 
+        # prune empties: a sensor with NO imported history is an empty column —
+        # it can only add noise to the feature matrix. Disable (not delete) so
+        # it's excluded from features but reviewable/re-enablable on the Sensors
+        # page once it starts producing data. person bindings are always kept.
+        pruned = []
+        from ..schemas import Role
+        for b in bindings:
+            if results.get(b.name, 0) == 0 and b.role != Role.PERSON:
+                b.enabled = False
+                repo.save_binding(b)
+                pruned.append(b.name)
+        if pruned:
+            _status(repo, "pruned_empty", count=len(pruned))
+            log.info("fast track: disabled %d empty sensors: %s",
+                     len(pruned), ", ".join(pruned[:12]))
+            repo.set_setting("fasttrack.pruned", pruned)
+        # rebuild the live binding list (pruned ones excluded downstream)
+        bindings = [b for b in repo.bindings() if b.enabled]
+
         _status(repo, "building_features")
         from .features.pipeline import build_windows
         n_windows = 0

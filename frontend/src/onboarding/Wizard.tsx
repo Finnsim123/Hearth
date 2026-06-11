@@ -297,7 +297,8 @@ function StepInflux({ d, set, next, back }: StepProps) {
                 {i.sourceBucket && (
                   <Callout icon="check">
                     Data found in “{i.sourceBucket}” — after setup Hearth imports it for your
-                    bound sensors, so the journey can skip straight ahead.
+                    bound sensors, so the journey can skip straight ahead. Sensors with no
+                    history are skipped automatically — review them anytime on the Sensors page.
                   </Callout>
                 )}
               </>

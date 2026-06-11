@@ -173,3 +173,24 @@ def test_api_token_bearer_scope(client):
     tid = next(t["id"] for t in c.get("/api/tokens").json() if not t["revoked"])
     c.delete(f"/api/tokens/{tid}")
     assert fresh.get("/api/persons", headers=bearer).status_code == 403
+
+
+def test_prune_empty_disables_zero_obs_but_keeps_person(client):
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)
+    from hearth.domain.schemas import Binding, Role
+    repo.save_binding(Binding(entity_id="binary_sensor.sofa", role=Role.PRESENCE, name="sofa"))
+    repo.save_binding(Binding(entity_id="sensor.dead", role=Role.ENV, name="dead"))
+    repo.save_binding(Binding(entity_id="person.alex", role=Role.PERSON, name="alex_loc"))
+
+    class Tsdb:
+        def raw_event_counts(self, names, days=7):
+            return {"sofa": 5000, "dead": 0, "alex_loc": 0}
+    repo_tsdb = c.app.state.deps
+    repo_tsdb["tsdb"] = Tsdb()
+
+    r = c.post("/api/bindings/prune-empty").json()
+    assert r["disabled"] == 1 and r["names"] == ["dead"]   # person kept, sofa kept
+    by_name = {b.name: b for b in repo.bindings()}
+    assert by_name["dead"].enabled is False
+    assert by_name["sofa"].enabled is True and by_name["alex_loc"].enabled is True

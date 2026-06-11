@@ -243,6 +243,26 @@ def build_api_router(deps: dict) -> APIRouter:
         repo.delete_binding(binding_id)
         return {"ok": True}
 
+    @api.post("/bindings/prune-empty")
+    def prune_empty() -> dict:
+        """Disable bindings that have NO observations in the last 7 days — empty
+        feature columns that only add noise. Person bindings are kept. Reversible
+        on this page once the sensor produces data."""
+        from ..domain.schemas import Role
+        tsdb = deps.get("tsdb")
+        if tsdb is None:
+            raise HTTPException(409, "Connect InfluxDB first")
+        names = [b.name for b in repo.bindings() if b.enabled]
+        counts = tsdb.raw_event_counts(names, days=7)
+        pruned = []
+        for b in repo.bindings():
+            if (b.enabled and b.role != Role.PERSON
+                    and counts.get(b.name, 0) == 0):
+                b.enabled = False
+                repo.save_binding(b)
+                pruned.append(b.name)
+        return {"disabled": len(pruned), "names": pruned}
+
     @api.post("/bindings/cleanup")
     def bindings_cleanup() -> dict:
         """Prune seeded bindings the improved heuristics would no longer

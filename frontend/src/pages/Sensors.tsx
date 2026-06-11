@@ -208,6 +208,16 @@ export default function Sensors() {
         || (b.room ?? "").toLowerCase().includes(needle))
       .sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
   }, [bindings, q, role]);
+  const emptyCount = useMemo(
+    () => (bindings ?? []).filter((b) => b.enabled && b.role !== "person"
+      && health[b.name]?.status === "no_data").length,
+    [bindings, health]);
+  const pruneEmpty = async () => {
+    if (!window.confirm("Disable every bound sensor with no data in the last 7 days? They add empty columns to the model. You can re-enable any of them here once they start reporting.")) return;
+    const r = await fetch("/api/bindings/prune-empty", { method: "POST" }).then(j);
+    setCleanMsg(`Disabled ${r.disabled} empty sensor${r.disabled === 1 ? "" : "s"}.`);
+    load();
+  };
   const cleanup = async () => {
     if (!window.confirm("Remove bindings that fail the physics check (buttons, scripts, configuration entities…)? Person bindings are always kept.")) return;
     const r = await fetch("/api/bindings/cleanup", { method: "POST" }).then(j);
@@ -222,9 +232,14 @@ export default function Sensors() {
         <span style={{ fontSize: 13.5, color: "var(--text-dim)" }}>
           {bindings ? `${bindings.length} bound · ${bindings.filter((b) => b.enabled).length} active` : ""}
         </span>
-        <button className="btn btn-secondary" style={{ marginLeft: "auto" }} onClick={cleanup}>
-          Clean up junk
-        </button>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {emptyCount > 0 && (
+            <button className="btn btn-secondary" onClick={pruneEmpty}>
+              Disable empty ({emptyCount})
+            </button>
+          )}
+          <button className="btn btn-secondary" onClick={cleanup}>Clean up junk</button>
+        </div>
       </div>
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)", maxWidth: 640 }}>
         Every Home Assistant entity Hearth listens to, and the <em>role</em> it was given —
