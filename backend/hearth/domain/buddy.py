@@ -36,6 +36,15 @@ _FT_COPY = {
 }
 
 
+def _span_phrase(days: int) -> str:
+    if days < 45:
+        return f"{days} days"
+    if days < 365:
+        return f"~{round(days / 30)} months"
+    years = days / 365
+    return f"~{years:.0f} years" if years >= 1.95 else "~1 year"
+
+
 def _state(phase, tone, title, detail, progress=None, cta=None) -> dict:
     return {"phase": phase, "tone": tone, "title": title, "detail": detail,
             "progress": progress, "cta": cta}
@@ -51,7 +60,7 @@ def _fasttrack(ft: dict) -> dict:
         progress = (lo + hi) / 2
     title, detail = _FT_COPY.get(stage, ("Setting things up", "One moment"))
     if stage == "importing" and ft.get("span_days"):
-        detail = f"Reading the last {int(ft['span_days'])} days of history"
+        detail = f"Reading {_span_phrase(int(ft['span_days']))} of history"
     if stage == "imported" and ft.get("points"):
         detail = f"Imported {int(ft['points']):,} readings — tidying up"
     if stage == "discovered" and ft.get("found"):

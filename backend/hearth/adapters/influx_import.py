@@ -37,9 +37,11 @@ def earliest_source_time(store: InfluxStore, source_bucket: str) -> datetime | N
     """The oldest timestamp anywhere in the source bucket — i.e. when this home
     started recording. Used to import the FULL history instead of a fixed
     window. One scan, run once from the wizard / fast-track."""
+    # NB: range(start: 0) means "0 seconds ago" in Flux (relative duration) — an
+    # empty window. Use an absolute epoch so we actually scan ALL of time.
     flux = f'''
 from(bucket: "{source_bucket}")
-  |> range(start: 0)
+  |> range(start: 1970-01-01T00:00:00Z)
   |> filter(fn: (r) => r._field == "value" or r._field == "state")
   |> first()
   |> group()
