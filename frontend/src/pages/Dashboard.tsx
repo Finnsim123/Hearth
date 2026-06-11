@@ -169,7 +169,68 @@ function BasedOn({ latest }: { latest: Pred }) {
   );
 }
 
-function PersonCard({ person, preds }: { person: Person; preds: Pred[] }) {
+const WK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** A week of activity at a glance: 7 day-columns × 24 hour-rows, each cell the
+ *  dominant predicted activity that hour. Fills in as the days roll by. */
+function WeekHeatmap({ preds }: { preds: Pred[] }) {
+  if (!preds.length) return null;
+  const now = new Date();
+  const days: { key: string; label: string }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now); d.setDate(now.getDate() - i);
+    days.push({ key: d.toDateString(), label: WK[d.getDay()] });
+  }
+  const grid: Record<string, Record<number, Record<string, number>>> = {};
+  for (const p of preds) {
+    const d = new Date(p.time);
+    const key = d.toDateString(), h = d.getHours();
+    const s = p.smoothed || p.predicted;
+    ((grid[key] ??= {})[h] ??= {});
+    grid[key][h][s] = (grid[key][h][s] || 0) + 1;
+  }
+  const dominant = (key: string, h: number): string | null => {
+    const c = grid[key]?.[h];
+    return c ? Object.entries(c).sort((a, b) => b[1] - a[1])[0][0] : null;
+  };
+  const cells: JSX.Element[] = [<div key="corner" />];
+  days.forEach((d, i) => cells.push(
+    <div key={"d" + i} style={{ fontSize: 10, color: "var(--text-dim)", textAlign: "center" }}>{d.label}</div>));
+  for (let h = 0; h < 24; h++) {
+    cells.push(
+      <div key={"hl" + h} style={{ fontSize: 9, color: "var(--text-dim)", textAlign: "right",
+                                   paddingRight: 4, lineHeight: "7px" }}>
+        {h % 6 === 0 ? String(h).padStart(2, "0") : ""}
+      </div>);
+    days.forEach((d, i) => {
+      const st = dominant(d.key, h);
+      const hh = String(h).padStart(2, "0");
+      cells.push(
+        <div key={`c${h}-${i}`}
+             title={st ? `${d.label} ${hh}:00 — ${st.replace("_", " ")}` : `${d.label} ${hh}:00 — no data`}
+             style={{ height: 7, borderRadius: 2, background: st ? color(st) : "var(--surface-2)" }} />);
+    });
+  }
+  const present = Array.from(new Set(preds.map((p) => p.smoothed || p.predicted)));
+  return (
+    <div>
+      <p className="label" style={{ margin: "0 0 6px" }}>This week · hour of day</p>
+      <div style={{ display: "grid", gridTemplateColumns: "18px repeat(7, 1fr)", gap: 2, rowGap: 1 }}>
+        {cells}
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+        {present.map((s) => (
+          <span key={s} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11,
+                                 color: "var(--text-dim)", textTransform: "capitalize" }}>
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: color(s) }} /> {s.replace("_", " ")}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PersonCard({ person, preds, weekPreds }: { person: Person; preds: Pred[]; weekPreds: Pred[] }) {
   const latest = preds[0];
   const ruleBased = latest?.model_version?.startsWith("rules");
   return (
@@ -194,6 +255,7 @@ function PersonCard({ person, preds }: { person: Person; preds: Pred[] }) {
           <span style={{ fontSize: 13, color: "var(--text-dim)" }}>no predictions yet</span>
         </div>
       )}
+      <WeekHeatmap preds={weekPreds} />
       <Ribbon preds={preds} ruleBased={!!ruleBased} personId={person.id} />
       {latest && <BasedOn latest={latest} />}
     </div>
@@ -471,6 +533,11 @@ export default function Dashboard() {
     queryFn: () => fetch("/api/predictions?hours=24").then((r) => r.json()),
     refetchInterval: 60_000,
   });
+  const predsWeek = useQuery<{ persons: Record<string, Pred[]> }>({
+    queryKey: ["predictions_week"],
+    queryFn: () => fetch("/api/predictions?hours=168").then((r) => r.json()),
+    refetchInterval: 300_000,
+  });
   const persons = useQuery<Person[]>({
     queryKey: ["persons"], queryFn: () => fetch("/api/persons").then((r) => r.json()),
   });
@@ -484,6 +551,7 @@ export default function Dashboard() {
   });
 
   const byPerson = preds.data?.persons ?? {};
+  const byPersonWeek = predsWeek.data?.persons ?? {};
   const members = (persons.data ?? []).filter((p) => p.enabled);
   const anyPredictions = Object.values(byPerson).some((l) => l.length > 0);
   const coldStart = !anyPredictions;
@@ -494,7 +562,8 @@ export default function Dashboard() {
         <JourneyCard j={journey.data} />
       ) : (
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          {members.map((p) => <PersonCard key={p.id} person={p} preds={byPerson[p.id] ?? []} />)}
+          {members.map((p) => <PersonCard key={p.id} person={p} preds={byPerson[p.id] ?? []}
+                                          weekPreds={byPersonWeek[p.id] ?? []} />)}
         </div>
       )}
       <NeedsYou questions={inbox.data ?? []} />
