@@ -76,6 +76,16 @@ async def sync_inventory(repo, events, use_llm: bool = False) -> dict:
         except Exception:
             log.exception("inventory sync: save_binding failed for %s", b.entity_id)
 
+    # cache funnel stats for the Methodology page (entity total → bound count)
+    bound_ids = {b.entity_id for b in repo.bindings()}
+    leftover = [e["entity_id"] for e in usable if e["entity_id"] not in bound_ids]
+    try:
+        repo.set_setting("inventory.scan", {
+            "entity_total": len(inventory), "usable": len(usable),
+            "bindable_count": len(bound_ids), "filtered_examples": leftover[:6]})
+    except Exception:
+        log.debug("inventory sync: scan-stats cache failed", exc_info=True)
+
     if added or rooms_updated:
         log.info("inventory sync: +%d new sensors, %d rooms updated", added, rooms_updated)
     return {"added": added, "rooms_updated": rooms_updated, "seen": len(usable)}

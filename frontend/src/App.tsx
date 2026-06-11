@@ -14,6 +14,7 @@ import Activities from "./pages/Activities";
 import Patterns from "./pages/Patterns";
 import Models from "./pages/Models";
 import Sensors from "./pages/Sensors";
+import Methodology from "./pages/Methodology";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import Login from "./components/Login";
@@ -26,6 +27,7 @@ const tabs = [
   ["/patterns", "Patterns"],
   ["/models", "Models"],
   ["/sensors", "Sensors"],
+  ["/methodology", "How it works"],
   ["/settings", "Settings"],
 ] as const;
 
@@ -194,6 +196,7 @@ export default function App() {
           <Route path="/patterns" element={<Patterns />} />
           <Route path="/models" element={<Models />} />
           <Route path="/sensors" element={<Sensors />} />
+          <Route path="/methodology" element={<Methodology />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/onboarding" element={<Onboarding />} />
         </Routes>

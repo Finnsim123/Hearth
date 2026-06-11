@@ -301,10 +301,10 @@ const prettyRoom = (originals: string[]) => {
 };
 
 const W = 1040;            // layout width in svg units (scales to card width)
-const GAP_X = 20, GAP_Y = 16, LABEL_H = 26;
+const LABEL_H = 24;
 
-/** Pack each room's sensors into a disc, then lay the room-discs out in rows
- *  that fill the available width (no central clump). Mutates positions. */
+/** Pack each room's sensors into a disc, then let the room-discs flow into an
+ *  organic, non-overlapping cloud that fills the width. Mutates positions. */
 function layoutRooms(rows: Health[]): { rooms: Room[]; height: number } {
   const groups: Record<string, { label: string; list: Health[]; originals: Set<string> }> = {};
   for (const b of rows) {
@@ -329,24 +329,42 @@ function layoutRooms(rows: Health[]): { rooms: Room[]; height: number } {
              leaves, total: leaves.length, sparse: leaves.length <= 1, tiers };
   }).sort((a, b) => b.r - a.r);
 
-  // shelf-pack rooms into centered rows that fill the width
-  const rowsOf: Room[][] = [];
-  let row: Room[] = [], x = 0;
-  for (const rm of rooms) {
-    if (row.length && x + 2 * rm.r > W) { rowsOf.push(row); row = []; x = 0; }
-    rm.x = x + rm.r; x += 2 * rm.r + GAP_X; row.push(rm);
-  }
-  if (row.length) rowsOf.push(row);
+  // Height ~ fits the total bubble area in a wide band; force relaxation then
+  // spreads them into an organic, non-overlapping cloud.
+  const area = rooms.reduce((s, rm) => s + Math.PI * rm.r * rm.r, 0);
+  const maxR = Math.max(...rooms.map((rm) => rm.r), 1);
+  const H = Math.max(2 * maxR + 30, Math.min(480, Math.round((area / 0.46) / W)));
+  const cx = W / 2, cy = H / 2, PAD = 7;
 
-  let y = GAP_Y;
-  for (const r of rowsOf) {
-    const rowR = Math.max(...r.map((rm) => rm.r));
-    const rowW = r.reduce((s, rm) => s + 2 * rm.r, 0) + GAP_X * (r.length - 1);
-    const off = (W - rowW) / 2;
-    for (const rm of r) { rm.x += off; rm.y = y + rowR; }
-    y += 2 * rowR + LABEL_H + GAP_Y;
+  // deterministic seed: spread across the width on a gentle zig-zag so the
+  // relaxation starts wide (no central clump) and settles stably (no jitter).
+  rooms.forEach((rm, i) => {
+    rm.x = (W * (i + 0.5)) / rooms.length;
+    rm.y = cy + (i % 2 ? -1 : 1) * Math.min(rm.r, H / 4);
+  });
+  for (let it = 0; it < 420; it++) {
+    for (const rm of rooms) {            // very weak x pull (stay spread), compact in y
+      rm.x += (cx - rm.x) * 0.0015;
+      rm.y += (cy - rm.y) * 0.05;
+    }
+    for (let a = 0; a < rooms.length; a++) {
+      for (let b = a + 1; b < rooms.length; b++) {
+        const A = rooms[a], Bb = rooms[b];
+        let dx = Bb.x - A.x, dy = Bb.y - A.y;
+        const d = Math.hypot(dx, dy) || 0.01, min = A.r + Bb.r + PAD;
+        if (d < min) {
+          const push = (min - d) / 2; dx /= d; dy /= d;
+          A.x -= dx * push; A.y -= dy * push;
+          Bb.x += dx * push; Bb.y += dy * push;
+        }
+      }
+    }
+    for (const rm of rooms) {             // keep inside the band
+      rm.x = Math.max(rm.r, Math.min(W - rm.r, rm.x));
+      rm.y = Math.max(rm.r, Math.min(H - rm.r, rm.y));
+    }
   }
-  return { rooms, height: y };
+  return { rooms, height: H + LABEL_H };
 }
 
 /** Sensor coverage bubble chart: rooms laid out across the width, each holding

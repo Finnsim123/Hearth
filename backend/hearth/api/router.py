@@ -299,6 +299,13 @@ def build_api_router(deps: dict) -> APIRouter:
         return await sync_inventory(repo, events,
                                     use_llm=repo.get_connection("llm") is not None)
 
+    @api.get("/methodology")
+    def methodology() -> dict:
+        """Live numbers that personalise the Methodology page (docs/METHODOLOGY.md).
+        Best-effort; every field degrades to null so the page always renders."""
+        from ..domain.methodology import build_methodology
+        return build_methodology(repo, deps.get("tsdb"))
+
     @api.post("/rooms/tidy")
     async def rooms_tidy() -> dict:
         """Merge duplicate rooms: fold case/separator variants deterministically,
