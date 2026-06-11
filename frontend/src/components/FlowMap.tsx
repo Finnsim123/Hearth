@@ -142,18 +142,5 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
     </svg>
   );
 
-  if (compact) {
-    return (
-      <section className="card" style={{ padding: 14, cursor: "pointer", display: "flex",
-                                         flexDirection: "column", gap: 8 }}
-               onClick={() => navigate("/methodology")} title="Open the full data-flow map">
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 15 }}>Live data flow</h3>
-          <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--text-dim)" }}>How it works →</span>
-        </div>
-        {svg}
-      </section>
-    );
-  }
   return svg;
 }

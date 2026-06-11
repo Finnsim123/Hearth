@@ -18,7 +18,7 @@ export type IconName =
   | "chevron-down" | "chevron-right" | "logout"
   // status & meta
   | "warning" | "info" | "question" | "lock" | "key" | "user" | "household"
-  | "bell" | "bell-off" | "sun" | "moon" | "monitor" | "eye" | "drift"
+  | "bell" | "bell-off" | "sun" | "moon" | "monitor" | "eye" | "drift" | "flow"
   // domain roles
   | "presence" | "power" | "light" | "env" | "door" | "alarm" | "focus"
   // activities
@@ -27,6 +27,7 @@ export type IconName =
 const I: Record<IconName, JSX.Element> = {
   dashboard: (<><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>),
   inbox: (<><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/></>),
+  flow: (<><circle cx="4" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="12" r="2"/><path d="M6 12h4M14 12h4"/></>),
   activities: (<><rect x="4" y="4" width="6" height="6" rx="1"/><circle cx="17" cy="7" r="3"/><path d="M7 14l3 6H4z"/></>),
   patterns: (<><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><circle cx="19" cy="19" r="1.6"/></>),
   models: (<><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/></>),

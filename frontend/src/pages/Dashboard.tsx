@@ -5,7 +5,9 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import Avatar from "../components/Avatar";
+import Card from "../components/Card";
 import { Icon, type IconName } from "../icons";
 import { packSiblings, enclose, type C } from "../bubbles";
 import { useIsMobile } from "../useMedia";
@@ -451,15 +453,8 @@ function SensorCoverage() {
   const selected = rooms.find((r) => r.key === sel) || null;
 
   return (
-    <section className="card" style={{ padding: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <Icon name="sensors" size={18} />
-        <h3 style={{ margin: 0, fontSize: 16 }}>Sensor coverage</h3>
-      </div>
-      <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--text-dim)" }}>
-        Each cluster is a room; each dot is a live sensor — bigger dots fire more often,
-        colour is how directly it senses people. Click a room to see its sensors.
-      </p>
+    <Card icon="sensors" title="Sensor coverage"
+          sub="Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Click a room to see its sensors.">
       <svg viewBox={`0 0 ${width} ${height}`} role="img"
            style={{ width: "100%", display: "block" }}>
         {rooms.map((rm) => {
@@ -523,7 +518,7 @@ function SensorCoverage() {
           </span>
         ))}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -567,11 +562,12 @@ export default function Dashboard() {
         </div>
       )}
       <NeedsYou questions={inbox.data ?? []} />
-      <div style={{ display: "grid", gap: 16, alignItems: "start",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))" }}>
-        <FlowMap compact />
-        {!coldStart && <SensorCoverage />}
-      </div>
+      <Card icon="flow" title="Live data flow"
+            action={<Link to="/methodology" style={{ fontSize: 12.5, color: "var(--text-dim)",
+                          textDecoration: "none" }}>How it works →</Link>}>
+        <FlowMap />
+      </Card>
+      {!coldStart && <SensorCoverage />}
       <Pulse j={journey.data} hasTsdb={!preds.data?.note} />
     </div>
   );
