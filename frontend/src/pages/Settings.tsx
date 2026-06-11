@@ -249,6 +249,7 @@ function ConnectionCard({ kind, title, sub, fields }: {
   const [masked, setMasked] = useState<string | null>(null);
   const [state, setState] = useState<SaveState>("idle");
   const [restarting, setRestarting] = useState(false);
+  const [llmStatus, setLlmStatus] = useState<{ ok: boolean; code: number } | null>(null);
   const needsRestart = kind === "ha" || kind === "influx";
   useEffect(() => {
     fetch(`/api/connections/${kind}`).then(j).then((c) => {
@@ -257,6 +258,7 @@ function ConnectionCard({ kind, title, sub, fields }: {
       for (const f of fields) if (f.fromOptions) init[f.key] = c.options?.[f.key] ?? "";
       setConn(init);
       setMasked(c.token_masked ?? null);
+      setLlmStatus(c.status ?? null);
     }).catch(() => {});
   }, [kind]);
   const save = async () => {
@@ -272,8 +274,22 @@ function ConnectionCard({ kind, title, sub, fields }: {
       setState("ok");
     } catch { setState("fail"); }
   };
+  const llmBad = kind === "llm" && llmStatus && !llmStatus.ok;
+  const llmMsg = llmStatus?.code === 402 ? "out of credit"
+    : llmStatus?.code === 429 ? "rate-limited"
+    : "rejected (check the key)";
   return (
     <Card title={title} sub={sub}>
+      {llmBad && (
+        <div style={{ padding: "9px 12px", borderRadius: 8, fontSize: 13,
+                      background: "color-mix(in srgb, var(--danger) 12%, transparent)",
+                      border: "1px solid var(--danger)" }}>
+          Your AI key is <strong>{llmMsg}</strong> — sensor mapping fell back to the basic rules.{" "}
+          {(conn.url ?? "").includes("openrouter")
+            ? <a href="https://openrouter.ai/credits" target="_blank" rel="noopener">Top up OpenRouter →</a>
+            : "Update the key below."}
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
         {fields.map((f) => (
           <Row key={f.key} label={f.label} hint={f.hint}>

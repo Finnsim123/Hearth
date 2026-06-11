@@ -92,8 +92,11 @@ def build_api_router(deps: dict) -> APIRouter:
         if conn is None:
             return {"configured": False}
         from .. import security
-        return {"configured": True, "url": conn["url"], "options": conn["options"],
-                "token_masked": security.mask(conn["token"]) if conn["token"] else None}
+        out = {"configured": True, "url": conn["url"], "options": conn["options"],
+               "token_masked": security.mask(conn["token"]) if conn["token"] else None}
+        if kind == "llm":
+            out["status"] = repo.get_setting("llm.status")
+        return out
 
     # ── setup completion: persist EVERYTHING the wizard collected ──────────
     TAXONOMY_PRESETS = {

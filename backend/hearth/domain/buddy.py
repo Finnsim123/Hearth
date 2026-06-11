@@ -85,6 +85,21 @@ def buddy_state(repo, tsdb) -> dict:
                           "No new readings in a few hours — is Home Assistant still connected?",
                           cta={"label": "Check sensors", "href": "/sensors"})
 
+    # AI assistant key in trouble — silent failures degrade sensor mapping, so
+    # surface it with a link to top up / fix the key.
+    llm_st = _get(repo, "llm.status") or {}
+    if _get(repo, "llm.status") and not llm_st.get("ok", True) and llm_st.get("code") in (401, 402, 403, 429):
+        code = llm_st["code"]
+        if code == 429:
+            title, detail = "AI assistant rate-limited", "Your AI key hit its rate limit — mapping used the basic fallback. It'll recover, or top up for headroom."
+        elif code == 402:
+            title, detail = "AI credits used up", "Top up your AI provider to restore smart sensor mapping (basic fallback is active)."
+        else:
+            title, detail = "AI key was rejected", "Check the AI assistant key in Settings — sensor mapping is on the basic fallback."
+        cta = ({"label": "Open AI provider", "href": _llm_link(repo)} if code in (402, 429)
+               else {"label": "Settings", "href": "/settings"})
+        return _state("llm_error", "alert", title, detail, cta=cta)
+
     # retraining in progress (weekly / first train)
     ts = _get(repo, "training.status") or {}
     if ts.get("running"):
@@ -136,6 +151,17 @@ def buddy_state(repo, tsdb) -> dict:
     return _state("waiting", "work", "Waiting for the first readings",
                   "Connected — I've started watching. If nothing arrives, restart Hearth to apply the new connection.",
                   cta=settings_cta)
+
+
+def _llm_link(repo) -> str:
+    """A useful 'fix it' link for the configured AI provider."""
+    conn = _safe(lambda: repo.get_connection("llm")) or {}
+    url = conn.get("url") or ""
+    if "openrouter" in url:
+        return "https://openrouter.ai/credits"
+    import re
+    m = re.match(r"(https?://[^/]+)", url)
+    return m.group(1) if m else "/settings"
 
 
 def _get(repo, key):

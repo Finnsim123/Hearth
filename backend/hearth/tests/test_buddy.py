@@ -46,3 +46,11 @@ def test_failed_is_error():
 def test_retraining_flag():
     out = buddy_state(_Repo({"training.status": {"running": True}}), None)
     assert out["phase"] == "retraining"
+
+
+def test_llm_credit_error_surfaces_with_link():
+    out = buddy_state(_Repo({"llm.status": {"ok": False, "code": 402}}), None)
+    assert out["phase"] == "llm_error" and out["tone"] == "alert"
+    assert out["cta"] and out["cta"]["href"]
+    # a healthy/absent status must NOT raise the warning
+    assert buddy_state(_Repo({"llm.status": {"ok": True, "code": 200}}), None)["phase"] != "llm_error"

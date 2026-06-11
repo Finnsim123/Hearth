@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime, timezone
 
 import aiohttp
 
@@ -81,6 +82,17 @@ class OpenRouterAdvisor:
     def __init__(self, repo) -> None:
         self.repo = repo
 
+    def _set_status(self, ok: bool, code: int, detail: str | None) -> None:
+        """Record the health of the last LLM call so the UI (ember buddy,
+        Settings) can tell the user when their key is rate-limited / out of
+        credit — otherwise the failure is silent and mapping quietly degrades."""
+        try:
+            self.repo.set_setting("llm.status", {
+                "ok": ok, "code": code, "detail": detail,
+                "at": datetime.now(timezone.utc).isoformat()})
+        except Exception:
+            pass
+
     async def _chat(self, system: str, user: str, max_tokens: int = 4000):
         conn = self.repo.get_connection("llm")
         if conn is None:
@@ -92,12 +104,20 @@ class OpenRouterAdvisor:
         payload = {"model": model, "max_tokens": max_tokens, "temperature": 0,
                    "messages": [{"role": "system", "content": system},
                                 {"role": "user", "content": user}]}
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload,
-                                    headers={"Authorization": f"Bearer {conn['token']}"},
-                                    timeout=aiohttp.ClientTimeout(120)) as r:
-                r.raise_for_status()
-                data = await r.json()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload,
+                                        headers={"Authorization": f"Bearer {conn['token']}"},
+                                        timeout=aiohttp.ClientTimeout(total=120)) as r:
+                    text = await r.text()
+                    if r.status >= 400:
+                        self._set_status(False, r.status, text[:200])
+                        raise RuntimeError(f"LLM HTTP {r.status}: {text[:120]}")
+                    data = json.loads(text)
+        except aiohttp.ClientError as exc:
+            self._set_status(False, 0, str(exc)[:160])
+            raise
+        self._set_status(True, 200, None)
         usage = data.get("usage", {})
         finish = data["choices"][0].get("finish_reason")
         log.info("LLM call: %s in=%s out=%s finish=%s", model,

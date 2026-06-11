@@ -120,7 +120,11 @@ export default function Buddy() {
           {s.cta && (
             <button className="btn btn-secondary"
                     style={{ marginTop: 9, fontSize: 12.5, minHeight: 30, padding: "4px 10px" }}
-                    onClick={() => navigate(s.cta!.href)}>
+                    onClick={() => {
+                      const h = s.cta!.href;
+                      if (/^https?:\/\//.test(h)) window.open(h, "_blank", "noopener");
+                      else navigate(h);
+                    }}>
               {s.cta.label}
             </button>
           )}
