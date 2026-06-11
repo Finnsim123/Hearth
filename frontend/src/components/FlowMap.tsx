@@ -30,6 +30,8 @@ const E: { id: string; d: string; dot: string }[] = [
   { id: "you_model", d: "M820 320 L700 320 L700 138", dot: "#F472B6" },
   { id: "features_discovery", d: "M500 138 L500 273", dot: "#FB923C" },
 ];
+const MAIN_N = ["ha", "raw", "features", "model", "predictions"];
+const MAIN_E = ["ha_raw", "raw_features", "features_model", "model_predictions"];
 const cx = (id: string) => N[id].x + N[id].w / 2;
 const cy = (id: string) => N[id].y + N[id].h / 2;
 const STATUS_STROKE: Record<string, string> = {
@@ -58,15 +60,19 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
 
   if (!f) return null;
 
+  const edges = compact ? E.filter((e) => MAIN_E.includes(e.id)) : E;
+  const nodeIds = Object.keys(N).filter((id) => !compact || MAIN_N.includes(id));
+
   const svg = (
-    <svg viewBox="0 0 980 380" role="img" style={{ width: "100%", height: "auto", display: "block" }}>
+    <svg viewBox={compact ? "20 72 940 84" : "0 0 980 380"} role="img"
+         style={{ width: "100%", height: "auto", display: "block" }}>
       <defs>
         <marker id="fm-ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
           <path d="M0 0 L6 3 L0 6 Z" fill="var(--text-dim)" />
         </marker>
       </defs>
 
-      {E.map((e) => {
+      {edges.map((e) => {
         const ed = f.edges[e.id] || { rate: 0, status: "ok" };
         const dead = ed.rate === 0 || ed.status === "idle";
         const stroke = ed.status === "alert" ? "var(--danger)" : "var(--text-dim)";
@@ -85,7 +91,8 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
         );
       })}
 
-      {Object.entries(N).map(([id, n]) => {
+      {nodeIds.map((id) => {
+        const n = N[id];
         const nd = f.nodes[id];
         if (!nd) return null;
         const ring = STATUS_STROKE[nd.status] || n.color;
@@ -111,8 +118,10 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
         <text x={190} y={100} textAnchor="middle" fontSize={10.5} fill="var(--text-dim)"
               style={{ pointerEvents: "none" }}>{f.edges.ha_raw.label}</text>
       )}
-      <text x={745} y={338} textAnchor="middle" fontSize={10.5} fill="var(--text-dim)"
-            style={{ pointerEvents: "none" }}>your answers</text>
+      {!compact && (
+        <text x={745} y={338} textAnchor="middle" fontSize={10.5} fill="var(--text-dim)"
+              style={{ pointerEvents: "none" }}>your answers</text>
+      )}
 
       {hover && !compact && (() => {
         const n = N[hover]; const nd = f.nodes[hover];
@@ -135,13 +144,14 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     return (
-      <section className="card" style={{ padding: 16, cursor: "pointer" }}
+      <section className="card" style={{ padding: 14, cursor: "pointer", display: "flex",
+                                         flexDirection: "column", gap: 8 }}
                onClick={() => navigate("/methodology")} title="Open the full data-flow map">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 15 }}>Live data flow</h3>
           <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--text-dim)" }}>How it works →</span>
         </div>
-        <div style={{ maxHeight: 200, overflow: "hidden" }}>{svg}</div>
+        {svg}
       </section>
     );
   }

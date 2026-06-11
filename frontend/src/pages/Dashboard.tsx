@@ -498,8 +498,11 @@ export default function Dashboard() {
         </div>
       )}
       <NeedsYou questions={inbox.data ?? []} />
-      <FlowMap compact />
-      {!coldStart && <SensorCoverage />}
+      <div style={{ display: "grid", gap: 16, alignItems: "start",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))" }}>
+        <FlowMap compact />
+        {!coldStart && <SensorCoverage />}
+      </div>
       <Pulse j={journey.data} hasTsdb={!preds.data?.note} />
     </div>
   );
