@@ -775,8 +775,9 @@ export default function Sensors() {
               )}
               {stale.length > 0 && (
                 <><strong>{stale.map((m) => m.name).join(", ")}</strong>{" "}
-                {stale.length === 1 ? "is" : "are"} linked, but no recent data is arriving — check the
-                {" "}<code>person.*</code> entity is logging to InfluxDB (HA InfluxDB integration include list).</>
+                {stale.length === 1 ? "is" : "are"} linked, but Hearth hasn't seen a home/away state yet.
+                It captures this live from Home Assistant the next time {stale.length === 1 ? "they" : "they"}{" "}
+                come or go — if it stays empty, check Home Assistant is still connected (Settings → Integrations).</>
               )}
             </span>
             {unlinked.length > 0 && (

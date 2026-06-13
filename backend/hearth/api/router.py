@@ -739,7 +739,11 @@ def build_api_router(deps: dict) -> APIRouter:
         members = []
         for p in persons:
             mine = [b for b in bindings if b.role.value == "person" and b.person_id == p.id]
-            alive = any(status_by_name.get(b.name) == "alive" for b in mine)
+            # A person who simply hasn't left the house in the window reads as
+            # "constant" (home_frac flat at 1.0) — that's valid presence data, not
+            # a fault. Only true "no_data" means we've never seen their state.
+            # Person state arrives live over the WebSocket, never via any integration.
+            alive = any(status_by_name.get(b.name) in ("alive", "constant") for b in mine)
             members.append({"id": p.id, "name": p.name, "has_person": bool(mine),
                             "person_alive": alive})
         return {"bindings": out, "classes": classes, "hours": hours, "members": members}
