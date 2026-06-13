@@ -21,7 +21,7 @@ from hearth.domain.training.evaluate import (
 )
 from hearth.domain.training.trainer import (
     MIN_CONFIRMED_FOR_VALIDATED, TrainingConfig, load_training_config,
-    promotion_gate, train_person, validation_status,
+    promotion_gate, set_model_family, train_person, validation_status,
 )
 
 
@@ -205,6 +205,24 @@ def test_promotion_gate_margin_is_configurable():
     assert promotion_gate(new, cur, margin=0.0) is False
 
 
+def test_train_with_selected_family(world):
+    """The model family is config-driven: selecting 'logistic' trains and
+    records a logistic model end to end (gap analysis G2/G4)."""
+    tsdb, repo, store = world
+    repo.settings["training.config"] = {"model_family": "logistic"}
+    record = train_person("alice", tsdb, repo, store, weeks=2)
+    assert record is not None and record.algo == "logistic" and record.promoted
+
+
+def test_set_model_family_validation(world):
+    _, repo, _ = world
+    assert set_model_family(repo, "gradient_boosting") == "gradient_boosting"
+    assert repo.settings["training.config"]["model_family"] == "gradient_boosting"
+    assert load_training_config(repo).model_family == "gradient_boosting"
+    with pytest.raises(ValueError):
+        set_model_family(repo, "neural_net")
+
+
 def test_validation_status_threshold():
     assert validation_status(0) == "provisional"
     assert validation_status(MIN_CONFIRMED_FOR_VALIDATED - 1) == "provisional"
@@ -236,6 +254,18 @@ def test_rules_fallback_then_model(world):
     preds2 = predict_person("alice", tsdb, repo, store)
     assert preds2 and all(p.model_version.startswith("alice-v") for p in preds2)
     assert preds2[-1].explanation or True                      # SHAP optional
+
+
+def test_abstain_publishes_unknown(world):
+    """With the abstain threshold cranked above any confidence, every published
+    (smoothed) state becomes 'unknown' while raw predictions stay intact."""
+    tsdb, repo, store = world
+    train_person("alice", tsdb, repo, store, weeks=2)
+    repo.settings["output.policy"] = {"abstain_threshold": 1.01}   # always abstain
+    tsdb.predictions.clear()
+    preds = predict_person("alice", tsdb, repo, store)
+    assert preds and all(p.smoothed == "unknown" for p in preds)
+    assert all(p.predicted != "unknown" for p in preds)            # raw kept honest
 
 
 def test_promotion_gate_blocks_regression():

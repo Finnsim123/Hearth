@@ -43,16 +43,46 @@ def tune_hyperparams(X, y, n_iter: int = 15, cv_splits: int = 3,
     return dict(search.best_params_)
 
 
-class RandomForestEstimator:
-    """Implements domain.ports.Estimator."""
+GBT_DEFAULT_PARAMS: dict = {"n_estimators": 200, "learning_rate": 0.05, "max_depth": 3}
+
+
+def _tree_shap(est, X: pd.DataFrame) -> pd.DataFrame:
+    """Per-row SHAP for the predicted class of a TREE model; empty df if shap is
+    unavailable. Shared by the forest and gradient-boosted estimators."""
+    try:
+        import shap
+    except ImportError:
+        return pd.DataFrame(index=X.index)
+    try:
+        Xa = est._align(X)
+        values = shap.TreeExplainer(est.model).shap_values(Xa)
+        preds = est.model.predict(Xa)
+        cls_idx = {c: i for i, c in enumerate(est.classes_)}
+        rows = []
+        for i, pred in enumerate(preds):
+            k = cls_idx[pred]
+            if isinstance(values, list):                  # old API: list per class
+                row = values[k][i]
+            else:                                         # new API: (n, feat, cls)
+                row = np.asarray(values)[i, :, k]
+            rows.append(row)
+        return pd.DataFrame(rows, index=X.index, columns=est.columns)
+    except Exception as exc:
+        log.warning("SHAP explanation failed: %s", exc)
+        return pd.DataFrame(index=X.index)
+
+
+class _SklearnEstimator:
+    """Shared Estimator-port behaviour over any sklearn classifier with
+    predict_proba (align, isotonic calibration, importances). Subclasses set the
+    model and may override importances()/explain()."""
 
     supports_sample_weight = True
 
-    def __init__(self, **params):
-        self.params = {**DEFAULT_PARAMS, **params}
-        self.model = RandomForestClassifier(
-            **self.params, class_weight="balanced", random_state=42, n_jobs=-1)
+    def __init__(self, model):
+        self.model = model
         self.columns: list[str] = []
+        self.calibrators: dict = {}
 
     @property
     def classes_(self) -> list[str]:
@@ -79,7 +109,7 @@ class RandomForestEstimator:
     def predict_proba(self, X: pd.DataFrame) -> pd.DataFrame:
         probs = self.model.predict_proba(self._align(X))
         df = pd.DataFrame(probs, index=X.index, columns=self.classes_)
-        if getattr(self, "calibrators", None):
+        if self.calibrators:
             for cls, iso in self.calibrators.items():
                 if cls in df.columns:
                     df[cls] = iso.predict(df[cls].to_numpy())
@@ -88,10 +118,9 @@ class RandomForestEstimator:
         return df
 
     def calibrate(self, X_val: pd.DataFrame, y_val: pd.Series) -> bool:
-        """Per-class isotonic regression on a held-out split — forests are
-        systematically mis-calibrated and every downstream threshold (asking,
-        evidence cap, promotion) reads confidence as a probability. Returns True
-        if any class was calibrated."""
+        """Per-class isotonic regression on a held-out split, so every downstream
+        threshold (asking, evidence cap, promotion) reads confidence as a real
+        probability. Returns True if any class was calibrated."""
         from sklearn.isotonic import IsotonicRegression
         raw = self.model.predict_proba(self._align(X_val))
         raw = pd.DataFrame(raw, index=X_val.index, columns=self.classes_)
@@ -100,32 +129,75 @@ class RandomForestEstimator:
             target = (y_val == cls).astype(float)
             if target.nunique() < 2:
                 continue
-            iso = IsotonicRegression(y_min=0.001, y_max=0.999,
-                                     out_of_bounds="clip")
+            iso = IsotonicRegression(y_min=0.001, y_max=0.999, out_of_bounds="clip")
             iso.fit(raw[cls].to_numpy(), target.to_numpy())
             self.calibrators[cls] = iso
         return bool(self.calibrators)
 
     def explain(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Per-row SHAP for the predicted class; empty df if shap unavailable."""
-        try:
-            import shap
-        except ImportError:
-            return pd.DataFrame(index=X.index)
-        try:
-            Xa = self._align(X)
-            values = shap.TreeExplainer(self.model).shap_values(Xa)
-            preds = self.model.predict(Xa)
-            cls_idx = {c: i for i, c in enumerate(self.classes_)}
-            rows = []
-            for i, pred in enumerate(preds):
-                k = cls_idx[pred]
-                if isinstance(values, list):              # old API: list per class
-                    row = values[k][i]
-                else:                                     # new API: (n, feat, cls)
-                    row = np.asarray(values)[i, :, k]
-                rows.append(row)
-            return pd.DataFrame(rows, index=X.index, columns=self.columns)
-        except Exception as exc:
-            log.warning("SHAP explanation failed: %s", exc)
-            return pd.DataFrame(index=X.index)
+        return pd.DataFrame(index=X.index)        # no attribution by default
+
+
+class RandomForestEstimator(_SklearnEstimator):
+    """Implements domain.ports.Estimator. The known-good tabular default."""
+
+    def __init__(self, **params):
+        self.params = {**DEFAULT_PARAMS, **params}
+        super().__init__(RandomForestClassifier(
+            **self.params, class_weight="balanced", random_state=42, n_jobs=-1))
+
+    def explain(self, X: pd.DataFrame) -> pd.DataFrame:
+        return _tree_shap(self, X)
+
+
+class GradientBoostedEstimator(_SklearnEstimator):
+    """Gradient-boosted trees — usually the strongest tabular learner once a home
+    has accumulated labels (model_levers.md G1). Imbalance handled via
+    sample_weight (no class_weight on this sklearn estimator)."""
+
+    def __init__(self, **params):
+        from sklearn.ensemble import GradientBoostingClassifier
+        self.params = {**GBT_DEFAULT_PARAMS, **params}
+        super().__init__(GradientBoostingClassifier(**self.params, random_state=42))
+
+    def explain(self, X: pd.DataFrame) -> pd.DataFrame:
+        return _tree_shap(self, X)
+
+
+class LogisticEstimator(_SklearnEstimator):
+    """Logistic regression — the honest linear baseline (model_levers.md G1/G3).
+    Importance = mean |coefficient| across classes; SHAP not applicable."""
+
+    def __init__(self, **params):
+        from sklearn.linear_model import LogisticRegression
+        self.params = {"max_iter": 1000, "class_weight": "balanced", **params}
+        super().__init__(LogisticRegression(**self.params))
+
+    def importances(self) -> dict[str, float]:
+        coef = getattr(self.model, "coef_", None)
+        if coef is None or not self.columns:
+            return {}
+        mag = np.abs(np.asarray(coef, dtype=float))
+        mag = mag.mean(axis=0) if mag.ndim == 2 else mag
+        return {c: float(v) for c, v in zip(self.columns, mag)}
+
+
+_FAMILIES = {
+    "random_forest": RandomForestEstimator,
+    "gradient_boosting": GradientBoostedEstimator,
+    "logistic": LogisticEstimator,
+}
+# friendly aliases accepted from settings
+_FAMILY_ALIASES = {"rf": "random_forest", "gbt": "gradient_boosting",
+                   "gbm": "gradient_boosting", "gradient_boosted": "gradient_boosting",
+                   "logreg": "logistic", "logistic_regression": "logistic"}
+
+KNOWN_FAMILIES = tuple(_FAMILIES)
+
+
+def make_estimator(family: str | None = "random_forest", **params):
+    """Build an Estimator for the chosen model family (defaults to / falls back
+    on random_forest for an unknown family)."""
+    key = (family or "random_forest").lower()
+    key = _FAMILY_ALIASES.get(key, key)
+    return _FAMILIES.get(key, RandomForestEstimator)(**params)

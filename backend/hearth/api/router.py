@@ -113,6 +113,53 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(400, str(exc))
         return {"ok": True, "mode": mode}
 
+    # ── model family selector (random_forest | gradient_boosting | logistic) ─
+    @api.get("/model-family")
+    def get_model_family() -> dict:
+        from ..domain.training.estimators import KNOWN_FAMILIES
+        from ..domain.training.trainer import load_training_config
+        return {"family": load_training_config(repo).model_family,
+                "families": list(KNOWN_FAMILIES)}
+
+    @api.post("/model-family")
+    def set_model_family_ep(body: dict) -> dict:
+        from ..domain.training.trainer import set_model_family
+        try:
+            fam = set_model_family(repo, str(body.get("family", "")))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "family": fam,
+                "note": "applies on the next training run"}
+
+    # ── output policy: abstain / "unknown" state ──────────────────────────
+    @api.get("/output-policy")
+    def get_output_policy() -> dict:
+        from ..domain.inference.output import load_output_policy
+        pol = load_output_policy(repo)
+        return {"abstain_enabled": pol.abstain_enabled,
+                "abstain_threshold": pol.abstain_threshold}
+
+    @api.post("/output-policy")
+    def set_output_policy(body: dict) -> dict:
+        cur = repo.get_setting("output.policy") or {}
+        if not isinstance(cur, dict):
+            cur = {}
+        if "abstain_enabled" in body:
+            cur["abstain_enabled"] = bool(body["abstain_enabled"])
+        if "abstain_threshold" in body:
+            try:
+                t = float(body["abstain_threshold"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, "abstain_threshold must be a number 0..1")
+            if not 0.0 <= t <= 1.0:
+                raise HTTPException(400, "abstain_threshold must be between 0 and 1")
+            cur["abstain_threshold"] = t
+        repo.set_setting("output.policy", cur)
+        from ..domain.inference.output import load_output_policy
+        pol = load_output_policy(repo)
+        return {"ok": True, "abstain_enabled": pol.abstain_enabled,
+                "abstain_threshold": pol.abstain_threshold}
+
     # ── aggregate-stats consent (privacy lever for the AI assistant) ───────
     @api.get("/stats-consent")
     def get_stats_consent() -> dict:

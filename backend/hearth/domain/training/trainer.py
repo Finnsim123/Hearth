@@ -14,7 +14,7 @@ from ..features.registry import active_feature_set_version
 from ..labeling.merge import merge_labels
 from ..labeling.rules import bootstrap_labels
 from ..schemas import ModelRecord
-from .estimators import RandomForestEstimator, tune_hyperparams
+from .estimators import KNOWN_FAMILIES, make_estimator, tune_hyperparams
 from .evaluate import evaluate_model, wilson_interval
 
 log = logging.getLogger(__name__)
@@ -50,6 +50,7 @@ class TrainingConfig:
     min_confirmed_for_validated: int = MIN_CONFIRMED_FOR_VALIDATED
     promotion_margin: float = 0.02   # confirmed-accuracy CI slack tolerated before
                                      # a new model is rejected as a regression
+    model_family: str = "random_forest"   # random_forest | gradient_boosting | logistic
 
 
 def load_training_config(repo) -> TrainingConfig:
@@ -63,12 +64,33 @@ def load_training_config(repo) -> TrainingConfig:
     if not isinstance(raw, dict) or not raw:
         return TrainingConfig()
     names = {f.name for f in fields(TrainingConfig)}
-    clean = {k: v for k, v in raw.items()
-             if k in names and isinstance(v, (int, float)) and not isinstance(v, bool)}
+    clean = {}
+    for k, v in raw.items():
+        if k not in names:
+            continue
+        if k == "model_family" and isinstance(v, str):
+            clean[k] = v
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            clean[k] = v
     try:
         return replace(TrainingConfig(), **clean)
     except Exception:
         return TrainingConfig()
+
+
+def set_model_family(repo, family: str) -> str:
+    """Validate and persist the model family into the training.config setting.
+    Raises ValueError on an unknown family (API maps to 400)."""
+    fam = (family or "").lower()
+    if fam not in KNOWN_FAMILIES:
+        raise ValueError(f"unknown model family: {family!r} "
+                         f"(expected one of {', '.join(KNOWN_FAMILIES)})")
+    cfg = repo.get_setting("training.config") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["model_family"] = fam
+    repo.set_setting("training.config", cfg)
+    return fam
 
 
 def validation_status(n_confirmed: int,
@@ -158,8 +180,10 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
     keep = y_val.isin(known)
     X_val, y_val, prov_val = X_val[keep], y_val[keep], prov_val[keep]
 
-    params = _hyperparams(repo, f"{person_id}.{node}", fset, X_train, y_train, force, cfg)
-    est = RandomForestEstimator(**params)
+    # tuning grid is RF-specific; other families train on their defaults for now
+    params = (_hyperparams(repo, f"{person_id}.{node}", fset, X_train, y_train, force, cfg)
+              if cfg.model_family == "random_forest" else {})
+    est = make_estimator(cfg.model_family, **params)
     if est.supports_sample_weight:
         age_days = (end - X_train.index).total_seconds() / 86400
         weights = 0.5 ** (age_days / cfg.recency_half_life_days)
@@ -195,7 +219,7 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
     n_prior = len([m for m in repo.models(person_id) if m.node == node])
     version = f"{stem}-v{n_prior + 1}"
     record = ModelRecord(person_id=person_id, version=version, node=node,
-                         algo="random_forest", feature_set=fset, trained_at=end,
+                         algo=cfg.model_family, feature_set=fset, trained_at=end,
                          label_counts=label_counts, metrics=metrics)
     record.path = store.save(est, record)
     record = repo.save_model(record)

@@ -15,6 +15,7 @@ import pandas as pd
 from ..features.registry import active_feature_set_version
 from ..labeling.rules import bootstrap_labels
 from ..schemas import Prediction
+from .output import apply_abstain, load_output_policy
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ def _rules_predict(repo, feats: pd.DataFrame, person_id: str):
 
 def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
     fset = active_feature_set_version(repo)
+    out_pol = load_output_policy(repo)
     now = datetime.now(timezone.utc)
     feats = tsdb.read_features(person_id, fset, now - timedelta(hours=2), now)
     if feats.empty:
@@ -128,6 +130,7 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                          confidence, WEAK_CONFIDENCE_CAP)
                 confidence = WEAK_CONFIDENCE_CAP
         smoothed = _apply_smoothing(history, predicted, confidence)
+        smoothed = apply_abstain(smoothed, confidence, out_pol)
         pred = Prediction(person_id=person_id, window_ts=ts.to_pydatetime(),
                           model_version=version, predicted=predicted,
                           smoothed=smoothed, confidence=confidence,

@@ -113,6 +113,8 @@ def predict_current(person_id: str, tsdb, repo, store) -> Prediction | None:
         confidence, row = float(fine_row.max()), fine_row
         break
     smoothed = smooth(history, predicted, confidence)
+    from .output import apply_abstain, load_output_policy
+    smoothed = apply_abstain(smoothed, confidence, load_output_policy(repo))
     return Prediction(person_id=person_id, window_ts=ts.to_pydatetime(),
                       model_version=record.version, predicted=predicted,
                       smoothed=smoothed, confidence=confidence,
