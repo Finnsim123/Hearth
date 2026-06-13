@@ -79,6 +79,25 @@ def test_setup_warm_starts_from_recorder_without_external_bucket(client):
     assert repo.get_setting("fasttrack.pending") == {"source": "recorder", "days": 10}
 
 
+def test_setup_applies_wizard_triage_selection_and_consent(client):
+    c, repo = client
+    # the wizard's 'Scanning' step already ran triage and stored this
+    repo.set_setting("entity_triage", {"by": "llm", "total": 3, "kept_count": 2,
+        "kept": ["a", "b"], "clusters": [
+            {"label": "Lights", "relevant": True, "why": "", "count": 1, "kept": 1, "entities": ["a"]},
+            {"label": "Server", "relevant": False, "why": "", "count": 1, "kept": 0, "entities": ["b"]},
+            {"label": "Presence", "relevant": True, "why": "", "count": 1, "kept": 1, "entities": ["c"]}]})
+    payload = dict(PAYLOAD, shareStats=True,
+                   triage={"excluded_labels": ["Presence"], "included_labels": ["Server"]})
+    assert c.post("/api/setup/complete", json=payload).status_code == 200
+    # consent persisted; triage pre-approved so seeding won't ask again
+    from hearth.domain.onboarding.inventory import stats_consent
+    assert stats_consent(repo) is True
+    assert repo.get_setting("triage.approved") is True
+    tr = repo.get_setting("entity_triage")
+    assert set(tr["kept"]) == {"a", "b"}   # Lights kept, Server pulled in, Presence dropped
+
+
 def test_setup_refuses_missing_password(client):
     c, repo = client
     bad = dict(PAYLOAD, account={"name": "A", "email": "a@b.c", "password": ""})

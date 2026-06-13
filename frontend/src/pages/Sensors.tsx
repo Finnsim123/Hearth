@@ -756,9 +756,9 @@ export default function Sensors() {
   const [persons, setPersons] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
   const [role, setRole] = useState("all");
-  const [statusF, setStatusF] = useState("all");
+  const [statusF, setStatusF] = useState("alive");     // default: currently-live sensors
   const [roomF, setRoomF] = useState("all");
-  const [sparkHours, setSparkHours] = useState(168);   // 1h / 24h / 7d sparkline zoom
+  const [sparkHours, setSparkHours] = useState(24);    // 1h / 24h / 7d sparkline zoom (default 24h)
   const [cleanMsg, setCleanMsg] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
   const [adding, setAdding] = useState<false | "all" | "people">(false);

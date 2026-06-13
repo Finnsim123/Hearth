@@ -172,6 +172,36 @@ def build_api_router(deps: dict) -> APIRouter:
                 "awaiting": bool(repo.get_setting("triage.awaiting")),
                 "has_llm": repo.get_connection("llm") is not None}
 
+    @api.post("/triage/preview")
+    async def triage_preview(body: dict) -> dict:
+        """Run the coarse triage DURING the wizard (pre-auth), with the AI key the
+        user just entered but hasn't saved yet — so 'Scanning your home' can show
+        the clusters + let them pick before setup completes. Stores entity_triage
+        (survives the setup restart) and returns clusters (membership stripped)."""
+        inventory = body.get("inventory") or []
+        llm = body.get("llm") or {}
+        key = llm.get("key")
+        advisor = None
+        if key:
+            class _AdHocRepo:                       # lend the unsaved key to the advisor
+                def __init__(self, real):
+                    self._real = real
+                    self._llm = {"url": llm.get("url") or "https://openrouter.ai/api/v1",
+                                 "token": key,
+                                 "options": {"model": llm.get("model") or "openai/gpt-4o-mini"}}
+                def get_connection(self, kind):
+                    return self._llm if kind == "llm" else self._real.get_connection(kind)
+                def get_setting(self, k, d=None): return self._real.get_setting(k, d)
+                def set_setting(self, k, v): return self._real.set_setting(k, v)
+                def persons(self): return self._real.persons()
+            from ..adapters.openrouter_llm import OpenRouterAdvisor
+            advisor = OpenRouterAdvisor(_AdHocRepo(repo))
+        from ..domain.onboarding.triage import triage_entities
+        res = await triage_entities(repo, inventory, advisor)
+        clusters = [{k: v for k, v in c.items() if k != "entities"}
+                    for c in res.get("clusters", [])]
+        return {**res, "clusters": clusters, "has_llm": bool(key)}
+
     @api.post("/entity-triage/approve")
     async def approve_entity_triage(body: dict) -> dict:
         """Approve the keep-set (optionally with whole clusters toggled off) and
@@ -425,6 +455,34 @@ def build_api_router(deps: dict) -> APIRouter:
         if body.get("llmKey"):
             repo.set_connection("llm", "https://openrouter.ai/api/v1", body["llmKey"],
                                 {"model": body.get("llmModel") or "openai/gpt-4o-mini"})
+
+        # AI data-sharing consent (metadata-only vs +aggregate stats) is asked on
+        # the AI-assist wizard step now, because it shapes the feature-spec pass.
+        if "shareStats" in body:
+            from ..domain.onboarding.inventory import set_stats_consent
+            try:
+                set_stats_consent(repo, bool(body["shareStats"]))
+            except ValueError:
+                pass
+
+        # The wizard already ran the coarse triage ('Scanning your home') and the
+        # user picked which groups to keep. entity_triage is already stored (it
+        # survives this restart); apply the selection and pre-approve so seeding
+        # skips re-triaging and goes straight to mapping — no second ask.
+        tr = repo.get_setting("entity_triage")
+        if tr:
+            from ..domain.onboarding.triage import keepset_from
+            sel = body.get("triage") or {}
+            kept = keepset_from(tr, set(sel.get("excluded_labels") or []),
+                                set(sel.get("included_labels") or []))
+            kset = set(kept)
+            tr["kept"] = kept
+            tr["kept_count"] = len(kept)
+            for c in tr.get("clusters", []):
+                c["kept"] = sum(1 for e in c.get("entities", []) if e in kset)
+            repo.set_setting("entity_triage", tr)
+            repo.set_setting("triage.approved", True)
+            repo.set_setting("triage.awaiting", False)
 
         if body.get("modelFamily"):
             from ..domain.training.trainer import set_model_family

@@ -78,7 +78,8 @@ def create_app() -> FastAPI:
     from .api.scopes import integration_allowed
     PUBLIC = {"/api/health", "/api/auth/login"}
     SETUP_ONLY = {"/api/setup/complete", "/api/ha/test", "/api/ha/inventory",
-                  "/api/influx/inspect", "/api/tokens", "/api/feature-spec/estimate"}
+                  "/api/influx/inspect", "/api/tokens", "/api/feature-spec/estimate",
+                  "/api/triage/preview"}
 
     @app.middleware("http")
     async def _auth(request, call_next):
