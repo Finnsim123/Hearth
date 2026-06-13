@@ -223,6 +223,19 @@ def test_set_model_family_validation(world):
         set_model_family(repo, "neural_net")
 
 
+def test_manual_override_pins_state(world):
+    """The two-way override pins the published prediction to a chosen activity,
+    marked as a manual override (not a model output)."""
+    tsdb, repo, store = world
+    train_person("alice", tsdb, repo, store, weeks=2)
+    repo.settings["override.alice"] = "movie"
+    tsdb.predictions.clear()
+    preds = predict_person("alice", tsdb, repo, store)
+    assert preds and all(
+        p.predicted == "movie" and p.smoothed == "movie"
+        and p.model_version == "override" and p.confidence == 1.0 for p in preds)
+
+
 def test_validation_status_threshold():
     assert validation_status(0) == "provisional"
     assert validation_status(MIN_CONFIRMED_FOR_VALIDATED - 1) == "provisional"

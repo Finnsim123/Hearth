@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from hearth.adapters.mqtt_publisher import (
     AVAILABILITY_TOPIC, MqttPublisher, activity_state_topic, confidence_state_topic,
-    discovery_configs, state_messages,
+    discovery_configs, override_state_topic, questions_state_topic, state_messages,
 )
 from hearth.domain.schemas import Person, Prediction
 
@@ -17,7 +17,8 @@ def _persons():
 
 
 def test_discovery_configs():
-    cfgs = dict(discovery_configs(_persons(), []))
+    activities = [type("A", (), {"slug": "movie"})(), type("A", (), {"slug": "home"})()]
+    cfgs = dict(discovery_configs(_persons(), activities))
     # one availability binary_sensor + activity & confidence per person
     assert "homeassistant/binary_sensor/hearth/alive/config" in cfgs
     assert "homeassistant/sensor/hearth_alice/activity/config" in cfgs
@@ -29,6 +30,12 @@ def test_discovery_configs():
     assert act["unique_id"] == "hearth_alice_activity"
     conf = cfgs["homeassistant/sensor/hearth_alice/confidence/config"]
     assert conf["unit_of_measurement"] == "%"
+    # two-way controls: a questions switch and an override select with activity options
+    sw = cfgs["homeassistant/switch/hearth_alice/questions/config"]
+    assert sw["command_topic"] == "hearth/alice/questions/set" and sw["payload_off"] == "OFF"
+    sel = cfgs["homeassistant/select/hearth_alice/override/config"]
+    assert sel["command_topic"] == "hearth/alice/override/set"
+    assert sel["options"] == ["auto", "movie", "home"]
 
 
 def test_state_messages():
@@ -60,8 +67,16 @@ class FakeClient:
 
 
 class FakeRepo:
+    def __init__(self):
+        self.s: dict = {}
     def get_connection(self, kind):
         return {"url": "mqtt://broker.local:1883", "options": {}} if kind == "mqtt" else None
+    def get_setting(self, k, d=None):
+        return self.s.get(k, d)
+    def set_setting(self, k, v):
+        self.s[k] = v
+    def activities(self):
+        return [type("A", (), {"slug": "movie"})()]
 
 
 def test_publisher_uses_client_retained(monkeypatch):
@@ -72,7 +87,25 @@ def test_publisher_uses_client_retained(monkeypatch):
     topics = [t for t, _, _ in fake.published]
     assert "homeassistant/sensor/hearth_alice/activity/config" in topics
     assert (AVAILABILITY_TOPIC, "online", True) in fake.published      # retained availability
-    assert all(retain for _, _, retain in fake.published)              # discovery is retained
+    # current control states echoed (defaults: questions on, no override)
+    assert (questions_state_topic("alice"), "ON", True) in fake.published
+    assert (override_state_topic("alice"), "auto", True) in fake.published
+    assert all(retain for _, _, retain in fake.published)              # all retained
+
+
+def test_on_message_applies_control_command():
+    repo = FakeRepo()
+    pub = MqttPublisher(repo)
+    fake = FakeClient()
+    pub._client = fake
+
+    class Msg:
+        topic = "hearth/alice/override/set"
+        payload = b"movie"
+
+    pub._on_message(fake, None, Msg())
+    assert repo.get_setting("override.alice") == "movie"               # command applied
+    assert (override_state_topic("alice"), "movie", True) in fake.published   # state echoed
 
     fake.published.clear()
     pred = Prediction(person_id="alice", window_ts=datetime.now(timezone.utc),

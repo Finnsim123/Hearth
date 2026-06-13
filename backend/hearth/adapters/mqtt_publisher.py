@@ -26,6 +26,8 @@ import json
 import logging
 from urllib.parse import urlparse
 
+from ..domain.controls import AUTO, active_override, apply_command, questions_disabled
+
 log = logging.getLogger(__name__)
 
 DISCOVERY_PREFIX = "homeassistant"     # HA's default MQTT discovery prefix
@@ -46,6 +48,22 @@ def activity_state_topic(person_id: str) -> str:
 
 def confidence_state_topic(person_id: str) -> str:
     return f"{STATE_PREFIX}/{person_id}/confidence"
+
+
+def questions_state_topic(person_id: str) -> str:
+    return f"{STATE_PREFIX}/{person_id}/questions"
+
+
+def questions_command_topic(person_id: str) -> str:
+    return f"{STATE_PREFIX}/{person_id}/questions/set"
+
+
+def override_state_topic(person_id: str) -> str:
+    return f"{STATE_PREFIX}/{person_id}/override"
+
+
+def override_command_topic(person_id: str) -> str:
+    return f"{STATE_PREFIX}/{person_id}/override/set"
 
 
 def discovery_configs(persons, activities=None) -> list[tuple[str, dict]]:
@@ -76,6 +94,23 @@ def discovery_configs(persons, activities=None) -> list[tuple[str, dict]]:
             {"name": "Activity confidence", "unique_id": f"hearth_{pid}_confidence",
              "state_topic": confidence_state_topic(pid),
              "unit_of_measurement": "%", "state_class": "measurement",
+             "availability_topic": AVAILABILITY_TOPIC, "device": dev}))
+        # two-way: a switch to pause training questions for this person
+        out.append((
+            f"{DISCOVERY_PREFIX}/switch/hearth_{pid}/questions/config",
+            {"name": "Activity questions", "unique_id": f"hearth_{pid}_questions",
+             "state_topic": questions_state_topic(pid),
+             "command_topic": questions_command_topic(pid),
+             "payload_on": "ON", "payload_off": "OFF", "icon": "mdi:comment-question",
+             "availability_topic": AVAILABILITY_TOPIC, "device": dev}))
+        # two-way: a select to manually pin the published activity ("auto" = model)
+        options = [AUTO] + [getattr(a, "slug", str(a)) for a in (activities or [])]
+        out.append((
+            f"{DISCOVERY_PREFIX}/select/hearth_{pid}/override/config",
+            {"name": "Override activity", "unique_id": f"hearth_{pid}_override",
+             "state_topic": override_state_topic(pid),
+             "command_topic": override_command_topic(pid),
+             "options": options, "icon": "mdi:gesture-tap-button",
              "availability_topic": AVAILABILITY_TOPIC, "device": dev}))
     return out
 
@@ -145,20 +180,36 @@ class MqttPublisher:
         return self._client
 
     def _on_connect(self, client, *args) -> None:
-        # re-publish discovery + availability on (re)connect, and watch HA's birth
+        # re-publish discovery + availability on (re)connect, watch HA's birth,
+        # and listen for the two-way control commands (questions switch, override)
         try:
             client.subscribe(f"{DISCOVERY_PREFIX}/status")
+            client.subscribe(f"{STATE_PREFIX}/+/questions/set")
+            client.subscribe(f"{STATE_PREFIX}/+/override/set")
             self.announce(*self._last)
         except Exception:
-            log.debug("MQTT on_connect re-announce failed", exc_info=True)
+            log.debug("MQTT on_connect (re)subscribe failed", exc_info=True)
 
     def _on_message(self, client, userdata, msg) -> None:
-        # HA came back online -> resend retained discovery so entities reappear
         try:
-            if msg.topic == f"{DISCOVERY_PREFIX}/status" and msg.payload.decode() == "online":
+            topic = msg.topic
+            payload = msg.payload.decode() if isinstance(msg.payload, bytes) else str(msg.payload)
+            # HA came back online -> resend retained discovery so entities reappear
+            if topic == f"{DISCOVERY_PREFIX}/status" and payload == "online":
                 self.announce(*self._last)
+                return
+            # a control command -> apply in the domain, then echo the new state
+            valid = {a.slug for a in self.repo.activities()}
+            result = apply_command(self.repo, topic, payload, valid)
+            if result is not None:
+                self._publish_control_state(client, *result)
         except Exception:
-            log.debug("MQTT birth-message handling failed", exc_info=True)
+            log.debug("MQTT message handling failed", exc_info=True)
+
+    def _publish_control_state(self, client, control: str, pid: str, state: str) -> None:
+        topic = (questions_state_topic(pid) if control == "questions"
+                 else override_state_topic(pid))
+        client.publish(topic, state, retain=True)
 
     def announce(self, persons, activities) -> None:
         self._last = (persons, activities)
@@ -169,6 +220,13 @@ class MqttPublisher:
             for topic, payload in discovery_configs(persons, activities):
                 client.publish(topic, json.dumps(payload), retain=True)
             client.publish(AVAILABILITY_TOPIC, "online", retain=True)
+            # echo current control states so the switch/select reflect reality
+            for p in persons:
+                client.publish(questions_state_topic(p.id),
+                               "OFF" if questions_disabled(self.repo, p.id) else "ON",
+                               retain=True)
+                client.publish(override_state_topic(p.id),
+                               active_override(self.repo, p.id) or AUTO, retain=True)
         except Exception:
             log.exception("MQTT announce failed")
 

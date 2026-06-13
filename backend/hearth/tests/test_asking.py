@@ -81,6 +81,24 @@ async def test_asking_policy_threshold_is_wired(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_questions_optout_skips_asking(monkeypatch):
+    """The two-way 'questions' switch OFF stops Hearth asking that person."""
+    monkeypatch.setattr(active.random, "random", lambda: 0.99)
+
+    class R(AskRepo):
+        def get_setting(self, k, d=None):
+            if k == "timezone":
+                return "UTC"
+            if k == "questions.optout.alice":
+                return True
+            return d
+
+    repo, notifier = R(), SpyNotifier()
+    assert await active.maybe_ask(_pred(0.4), _person(), repo, notifier) is None
+    assert notifier.asked == []
+
+
+@pytest.mark.asyncio
 async def test_uncertain_prediction_asks_mode_based_buttons(monkeypatch):
     repo, notifier = AskRepo(), SpyNotifier()
     monkeypatch.setattr(active.random, "random", lambda: 0.99)  # no exploration

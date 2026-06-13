@@ -96,6 +96,9 @@ def _utcnow() -> datetime:
 async def maybe_ask(pred: Prediction, person: Person, repo, notifier) -> Question | None:
     now = _utcnow()
     tz = repo.get_setting("timezone", "UTC") or "UTC"
+    from ..controls import questions_disabled
+    if questions_disabled(repo, person.id):           # the two-way "questions" switch is OFF
+        return None
     pol = load_asking_policy(repo)
 
     # margin sampling (active-learning standard): ask when the top two

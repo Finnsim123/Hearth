@@ -141,13 +141,20 @@ After setup, the UI is insight, settings and a feedback loop:
 | **Settings** | Connections, the household, model and AI levers, themes, accounts, and updates. |
 | **Methodology** | A plain-language, personalised walkthrough of how Hearth turns your sensors into "what you're doing". |
 
-### How predictions reach Home Assistant
+### Getting predictions out
 
-The integration creates one device per person with `sensor.hearth_<person>_activity`
-(state = the predicted activity, or `unknown` when Hearth isn't confident enough to
-commit). For instant automations it also fires a `hearth_activity_changed` event the
-moment a state flips, so you can dim the lights *as* the movie starts, with no polling
-lag. Tapping ✓/✗ on a notification feeds the answer straight back into training.
+**Home Assistant (recommended).** The integration creates one device per person
+with `sensor.hearth_<person>_activity` (state = the predicted activity, or `unknown`
+when Hearth isn't confident enough to commit). For instant automations it also fires
+a `hearth_activity_changed` event the moment a state flips, so you can dim the lights
+*as* the movie starts, with no polling lag. Tapping ✓/✗ on a notification feeds the
+answer straight back into training. This path needs no MQTT broker.
+
+**Other hubs, or broker-based setups (MQTT).** Configure an MQTT broker and Hearth
+publishes the same per-person activity and confidence as retained Home-Assistant
+discovery entities, so any hub that speaks HA-style MQTT discovery, Homey, Node-RED,
+openHAB, picks them up automatically. Use this when you're not on Home Assistant or
+prefer broker wiring; if you use the HA integration, leave MQTT off.
 
 ---
 

@@ -37,8 +37,10 @@ def _rules_predict(repo, feats: pd.DataFrame, person_id: str):
 
 
 def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
+    from ..controls import active_override, override_prediction
     fset = active_feature_set_version(repo)
     out_pol = load_output_policy(repo)
+    override = active_override(repo, person_id)
     now = datetime.now(timezone.utc)
     feats = tsdb.read_features(person_id, fset, now - timedelta(hours=2), now)
     if feats.empty:
@@ -137,6 +139,8 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                           probabilities={c: float(v) for c, v in row.items()},
                           explanation=explanation, evidence=evidence,
                           parent=parent, coarse_confidence=coarse_confidence)
+        if override:                       # manual override pins the published state
+            pred = override_prediction(pred, override)
         tsdb.write_prediction(pred)
         history.insert(0, pred)
         out.append(pred)

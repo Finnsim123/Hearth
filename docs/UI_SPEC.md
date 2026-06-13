@@ -41,7 +41,13 @@ passwords are never persisted.
      alongside Hearth. The wizard auto-connects using the generated admin token
      (nothing to enter) and waits briefly while InfluxDB finishes starting. Pick
      this and you're done on this step.
-4. **Connect MQTT** (optional, "use HA's broker" default).
+4. **MQTT** (optional) — the open output channel. Enter a broker host/port (and
+   credentials if any) and Hearth publishes each person's activity and confidence
+   as retained Home-Assistant discovery entities, which any hub that speaks
+   HA-style MQTT discovery picks up (Home Assistant, Homey, Node-RED, openHAB).
+   Use it when you're not on Home Assistant or prefer broker wiring. If you'll use
+   the Hearth HA integration (step 9), skip this — they do the same job and the
+   integration needs no broker.
 5. **Household** — create the family: add any number of members (adults, kids,
    roommates), each with optional `person.*` entity, optional notify service,
    ask budget and quiet hours. Members without a phone (`has_device=false`,

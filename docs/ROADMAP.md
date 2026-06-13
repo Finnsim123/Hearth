@@ -27,8 +27,8 @@ registry + CI-aware promotion gate + rollback, inference with BOOTSTRAP-RULES
 FALLBACK (rules-v0 → day-one ribbon), hysteresis smoothing, ε-greedy asking
 policy with budgets/quiet-hours/cooldowns, dynamic question phrasing, weekly
 training cron + 5-min inference job, models/activities/rules API. 43 tests.
-Remaining: HA integration entity platforms (HA-side code), Models UI page,
-MQTT publisher, live validation on a real home.
+Remaining: HA integration entity platforms (HA-side code) and live validation on
+a real home.
 
 ### original scope (for reference)
 Taxonomy + rule engine (bootstrap labels); trainer + registry + promotion gate;
@@ -110,6 +110,10 @@ Capabilities beyond the three core pillars:
   validate it (never presented as validated on circular bootstrap signal).
 - **Abstain state:** below a confidence threshold the published state is
   `unknown`, so automations don't act on a shaky guess.
+- **MQTT output channel:** predictions published as retained HA-discovery
+  entities for non-HA hubs (Homey, Node-RED, openHAB) and broker-centric setups.
+  One-way today; two-way controls (questions opt-out, manual override over MQTT)
+  remain to build.
 - **Levers as data + UI:** training / asking / output policies and the above are
   editable in Settings; the Sensors page shows pending approvals, the feature
   spec and reliability flags; the Models page shows per-version trend + compare.

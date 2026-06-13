@@ -64,7 +64,8 @@ sessions        id, user_id, token_sha256, created_at, last_seen_at, expires_at
                 -- server-side, revocable; cookie holds the unhashed id
 connections     id, kind(ha|influx|mqtt|llm), url, token_encrypted (Fernet),
                 status, last_ok_at, options_json(llm: model, max_cost_per_call;
-                influx: org, mode bundled|external)
+                influx: org, mode bundled|external;
+                mqtt: username — broker host:port in `url`, password in token_encrypted)
 api_tokens      id, name, token_sha256, scope(integration|readonly), created_at,
                 last_used_at, revoked_at        -- consumed by the HA integration
 persons         id, name, ha_person_entity, notify_service, ask_budget_per_day,

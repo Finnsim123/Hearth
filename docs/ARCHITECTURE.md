@@ -249,11 +249,20 @@ pre-fills the host — the token is the only thing typed. Automations consume
 predictions natively: `trigger: state of sensor.hearth_alice_activity to
 'movie' → dim lights`.
 
-Alternative channels (same `EntityPublisher` port): **MQTT discovery** for
-homes that prefer broker-based wiring or can't install HACS integrations, and
-a degraded REST state-push fallback. The integration is the recommended path
-because it needs no broker, survives restarts via the device registry, and
-gives two-way controls (override/opt-out) a clean home.
+**MQTT discovery** is the alternative channel (same `EntityPublisher` port,
+`adapters/mqtt_publisher.py`). It activates when an MQTT broker is configured:
+Hearth publishes retained HA-discovery configs under `homeassistant/…` plus a
+per-person activity and confidence state stream, with an availability LWT and a
+birth-topic re-announce. This is the open path for **non-Home-Assistant hubs
+that speak HA-style MQTT discovery** (Homey, Node-RED, openHAB) and for
+broker-centric setups that prefer not to install a HACS integration. It is
+one-way today (predictions out); the two-way controls (questions opt-out,
+manual override) live only on the integration for now.
+
+For Home Assistant the integration is the recommended path: it needs no broker,
+survives restarts via the device registry, carries the low-latency event and
+the feedback loop, and gives the two-way controls a clean home. A home using
+the integration should skip MQTT; a non-HA hub uses MQTT instead.
 
 API tokens are minted/revoked in Hearth's UI (hashed at rest, scoped:
 `integration` tokens can read predictions + write overrides, nothing else).
