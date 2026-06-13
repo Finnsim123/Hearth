@@ -140,8 +140,10 @@ class HaWebSocketSource:
                 "domain": eid.split(".")[0],
                 "friendly_name": attrs.get("friendly_name"),
                 "device_class": attrs.get("device_class") or r.get("original_device_class"),
+                "state_class": attrs.get("state_class"),
                 "unit": attrs.get("unit_of_measurement"),
                 "area": area_names.get(r.get("area_id")),
+                "entity_category": r.get("entity_category"),
                 "disabled": bool(r.get("disabled_by")),
                 "state": st.get("state"),
             })

@@ -58,8 +58,10 @@ async def rest_inventory(url: str, token: str) -> list[dict]:
             "domain": eid.split(".")[0],
             "friendly_name": attrs.get("friendly_name"),
             "device_class": attrs.get("device_class"),
+            "state_class": attrs.get("state_class"),
             "unit": attrs.get("unit_of_measurement"),
             "area": None,
+            "entity_category": None,   # registry-only; unavailable from /api/states
             "disabled": False,
             "state": st.get("state"),
         })
