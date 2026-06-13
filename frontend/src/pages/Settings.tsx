@@ -451,6 +451,163 @@ function ModelBehaviour() {
   );
 }
 
+// ── AI & model levers ───────────────────────────────────────────────────────
+
+function ChoiceList({ value, choices, onPick }: {
+  value: string; choices: [string, string, string][]; onPick: (v: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {choices.map(([v, label, desc]) => (
+        <label key={v} style={{ display: "flex", gap: 10, alignItems: "flex-start",
+                                padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                                border: `1px solid ${value === v ? "var(--accent)" : "var(--border)"}` }}>
+          <input type="radio" checked={value === v} onChange={() => onPick(v)} style={{ marginTop: 3 }} />
+          <span>
+            <span style={{ fontWeight: 500, fontSize: 14 }}>{label}</span>
+            <span style={{ display: "block", fontSize: 12.5, color: "var(--text-dim)" }}>{desc}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function savedNote(state: SaveState, retrain = false): string {
+  if (state === "ok") return retrain ? "Saved — applies on the next training run." : "Saved ✓";
+  if (state === "fail") return "Couldn't save — check logs.";
+  return "";
+}
+
+const CONSENT_CHOICES: [string, string, string][] = [
+  ["yes", "Share aggregate stats (recommended)",
+   "The assistant sees per-sensor summaries — how often each changes, its value range, how often it's missing, a few example states. NEVER your raw history or a timeline. Lets it flag broken sensors and pick better features."],
+  ["no", "Metadata only",
+   "The assistant sees only sensor names, types and units (the labels shown in Home Assistant). Most private; it can't detect unreliable sensors and guesses features from names alone."],
+];
+
+function StatsConsent() {
+  const [share, setShare] = useState<string | null>(null);
+  const [state, setState] = useState<SaveState>("idle");
+  useEffect(() => {
+    fetch("/api/stats-consent").then(j)
+      .then((r) => setShare(r.decided ? (r.share_stats ? "yes" : "no") : ""))
+      .catch(() => setShare(""));
+  }, []);
+  const choose = async (v: string) => {
+    setShare(v); setState("saving");
+    try { await post("/api/stats-consent", { share: v === "yes" }).then(j); setState("ok"); }
+    catch { setState("fail"); }
+  };
+  return (
+    <Card title="AI assistant: data sharing"
+          sub="What the optional AI assistant may see when it maps sensors and designs features. Your choice; change it any time.">
+      {share === null ? <p style={{ color: "var(--text-dim)", fontSize: 14 }}>Loading…</p>
+        : <ChoiceList value={share} choices={CONSENT_CHOICES} onPick={choose} />}
+      <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>{savedNote(state)}</p>
+    </Card>
+  );
+}
+
+const FAMILY_LABELS: Record<string, [string, string]> = {
+  random_forest: ["Random forest (default)", "Robust on small data, no tuning needed, interpretable. The recommended starting point."],
+  gradient_boosting: ["Gradient boosted trees", "Usually a few points stronger once you have plenty of labels, but easier to overfit early."],
+  logistic: ["Logistic regression", "A simple linear baseline — fast and very stable; mainly a sanity check."],
+};
+
+function ModelFamily() {
+  const [family, setFamily] = useState<string | null>(null);
+  const [families, setFamilies] = useState<string[]>([]);
+  const [state, setState] = useState<SaveState>("idle");
+  useEffect(() => {
+    fetch("/api/model-family").then(j)
+      .then((r) => { setFamily(r.family); setFamilies(r.families ?? []); }).catch(() => setFamily("random_forest"));
+  }, []);
+  const save = async (f: string) => {
+    setFamily(f); setState("saving");
+    try { await post("/api/model-family", { family: f }).then(j); setState("ok"); }
+    catch { setState("fail"); }
+  };
+  const choices = families.map((f) => [f, FAMILY_LABELS[f]?.[0] ?? f,
+                                       FAMILY_LABELS[f]?.[1] ?? ""] as [string, string, string]);
+  return (
+    <Card title="Model family" sub="The classifier Hearth trains. Random forest is the safe default.">
+      {family === null ? <p style={{ color: "var(--text-dim)", fontSize: 14 }}>Loading…</p>
+        : <ChoiceList value={family} choices={choices} onPick={save} />}
+      <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>{savedNote(state, true)}</p>
+    </Card>
+  );
+}
+
+const POWER_CHOICES: [string, string, string][] = [
+  ["conservative", "Conservative (recommended)",
+   "The AI picks sensor roles and basic combinations only. Smallest, safest feature set."],
+  ["full", "Full",
+   "The AI may also design richer per-sensor transforms (slopes, baselines, sequences). More powerful, slightly more risk of noisy features."],
+];
+
+function FeaturePower() {
+  const [mode, setMode] = useState<string | null>(null);
+  const [state, setState] = useState<SaveState>("idle");
+  useEffect(() => {
+    fetch("/api/feature-power").then(j).then((r) => setMode(r.mode)).catch(() => setMode("conservative"));
+  }, []);
+  const save = async (m: string) => {
+    setMode(m); setState("saving");
+    try { await post("/api/feature-power", { mode: m }).then(j); setState("ok"); }
+    catch { setState("fail"); }
+  };
+  return (
+    <Card title="Feature engineering power"
+          sub="How much freedom the AI assistant has when designing features from your sensors.">
+      {mode === null ? <p style={{ color: "var(--text-dim)", fontSize: 14 }}>Loading…</p>
+        : <ChoiceList value={mode} choices={POWER_CHOICES} onPick={save} />}
+      <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+        {state === "ok" ? "Saved — applies the next time you run an AI analysis." : savedNote(state)}
+      </p>
+    </Card>
+  );
+}
+
+function OutputPolicy() {
+  const [enabled, setEnabled] = useState(true);
+  const [threshold, setThreshold] = useState(0.4);
+  const [state, setState] = useState<SaveState>("idle");
+  useEffect(() => {
+    fetch("/api/output-policy").then(j)
+      .then((r) => { setEnabled(r.abstain_enabled); setThreshold(r.abstain_threshold); }).catch(() => {});
+  }, []);
+  const save = async (patch: { abstain_enabled?: boolean; abstain_threshold?: number }) => {
+    setState("saving");
+    try {
+      const r = await post("/api/output-policy", patch).then(j);
+      setEnabled(r.abstain_enabled); setThreshold(r.abstain_threshold); setState("ok");
+    } catch { setState("fail"); }
+  };
+  return (
+    <Card title="When Hearth commits to a guess"
+          sub="Below a confidence level Hearth publishes “unknown” instead of guessing, so automations don't act on a shaky prediction.">
+      <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14, cursor: "pointer" }}>
+        <input type="checkbox" checked={enabled} style={{ width: 16, height: 16, marginTop: 2 }}
+               onChange={(e) => { setEnabled(e.target.checked); save({ abstain_enabled: e.target.checked }); }} />
+        <span>Emit an “unknown” state when unsure
+          <span style={{ display: "block", fontSize: 12.5, color: "var(--text-dim)" }}>
+            Recommended — a wrong guess can trigger the wrong automation; “unknown” does nothing.
+          </span>
+        </span>
+      </label>
+      <Row label={`Commit threshold — ${Math.round(threshold * 100)}% confidence`}
+           hint="Below this, the published state is “unknown”. Higher = more cautious (more unknowns).">
+        <input type="range" min={0} max={0.9} step={0.05} value={threshold} disabled={!enabled}
+               onChange={(e) => setThreshold(Number(e.target.value))}
+               onMouseUp={(e) => save({ abstain_threshold: Number((e.target as HTMLInputElement).value) })}
+               onTouchEnd={(e) => save({ abstain_threshold: Number((e.target as HTMLInputElement).value) })} />
+      </Row>
+      <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>{savedNote(state)}</p>
+    </Card>
+  );
+}
+
 // ── appearance ──────────────────────────────────────────────────────────────
 
 function Appearance() {
@@ -645,7 +802,11 @@ export default function Settings() {
           { key: "token", label: "API key", hint: "Leave empty to keep the current one." },
         ]} />
       <ApiTokens />
+      <StatsConsent />
+      <FeaturePower />
+      <ModelFamily />
       <ModelBehaviour />
+      <OutputPolicy />
       <Appearance />
       <div id="account"><Account /></div>
       <System />
