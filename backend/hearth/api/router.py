@@ -1159,22 +1159,45 @@ def build_api_router(deps: dict) -> APIRouter:
         from ..domain.discovery.clustering import run_discovery
         days = int((body or {}).get("days", 30))
         cards = await asyncio.to_thread(run_discovery, tsdb, repo, days)
-        # optional: ask the LLM which existing activity each pattern looks like
-        adv = None
+        # optional: ask the LLM for tap-to-accept name candidates per pattern,
+        # fed the same deterministic evidence card the UI shows
         if repo.get_connection("llm"):
             from ..adapters.openrouter_llm import OpenRouterAdvisor
+            from ..domain.discovery.evidence import build_evidence
             adv = OpenRouterAdvisor(repo)
-        if adv is not None:
             acts = repo.activities()
             for c in cards:
                 try:
-                    c.suggested_slug = await adv.suggest_cluster_name(c, acts)
-                    if c.suggested_slug:
+                    ev = build_evidence(c, repo, tsdb)
+                    c.suggestions = await adv.suggest_cluster_names(c, ev, acts)
+                    c.suggested_slug = next(
+                        (s["slug"] for s in c.suggestions if s.get("slug")), None)
+                    if c.suggestions:
                         repo.save_cluster(c)
                 except Exception:
                     pass
         return {"found": len(cards),
                 "persons": sorted({c.person_id for c in cards})}
+
+    @api.post("/clusters/{cluster_id}/suggest")
+    async def suggest_cluster(cluster_id: int) -> dict:
+        """(Re)generate LLM name suggestions for one pattern, on demand — lets a
+        user ask for help on a specific card (e.g. discovery ran before a key
+        was added). No-op without an LLM connection."""
+        card = repo.get_cluster(cluster_id)
+        if card is None:
+            raise HTTPException(404, "no such pattern")
+        if not repo.get_connection("llm"):
+            return {"suggestions": [], "has_llm": False}
+        from ..adapters.openrouter_llm import OpenRouterAdvisor
+        from ..domain.discovery.evidence import build_evidence
+        ev = build_evidence(card, repo, deps.get("tsdb"))
+        card.suggestions = await OpenRouterAdvisor(repo).suggest_cluster_names(
+            card, ev, repo.activities())
+        card.suggested_slug = next(
+            (s["slug"] for s in card.suggestions if s.get("slug")), None)
+        repo.save_cluster(card)
+        return {"suggestions": card.suggestions, "has_llm": True}
 
     @api.post("/clusters/{cluster_id}/name")
     def name_cluster(cluster_id: int, body: dict) -> dict:

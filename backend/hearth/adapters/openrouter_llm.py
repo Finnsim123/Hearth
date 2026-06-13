@@ -222,16 +222,16 @@ class OpenRouterAdvisor:
     # ── coarse triage: cluster the FULL entity list, ids + names only ────────
     async def cluster_entities(self, inventory: list[dict]) -> list[dict]:
         """Stage 0 of the funnel. Sends only entity_id + friendly_name (cheap,
-        low-noise) for EVERY entity, asks the model to cluster them by what they
-        belong to and judge each cluster's relevance to knowing what people are
-        doing at home. The relevant clusters form the shortlist for the
-        expensive metadata pass. Chunked + merged by label; degrades to []."""
+        low-noise) for EVERY entity, asks the model to assign each to a fixed
+        functional CATEGORY and judge relevance. Returns raw per-chunk clusters
+        ({category, relevant, why, entities}); triage.canonicalize merges them
+        into one tidy bucket per category. Degrades to []."""
         items = [e for e in inventory if not e.get("disabled")]
         valid = {e["entity_id"] for e in items}
         lines = [f'{e["entity_id"]} | {e.get("friendly_name") or "-"}' for e in items]
         system = self._prompt("triage_cluster",
                               activities=self._household_activities() or "none set yet")
-        by_label: dict[str, dict] = {}
+        out: list[dict] = []
         for i in range(0, len(lines), 400):                 # ids are cheap; big batches
             chunk = lines[i:i + 400]
             try:
@@ -243,21 +243,18 @@ class OpenRouterAdvisor:
                 continue
             for c in res if isinstance(res, list) else []:
                 try:
-                    label = str(c["label"]).strip()[:48]
                     ents = [e for e in c.get("entities", []) if e in valid]
-                    if not label or not ents:
+                    if not ents:
                         continue
-                    cur = by_label.setdefault(label.lower(),
-                        {"label": label, "relevant": False, "why": "", "entities": []})
-                    cur["relevant"] = cur["relevant"] or bool(c.get("relevant"))
-                    if not cur["why"] and c.get("why"):
-                        cur["why"] = str(c["why"]).strip()[:80]
-                    cur["entities"].extend(ents)
+                    # accept either {category} (new) or {label} (older edits)
+                    out.append({"category": c.get("category") or c.get("label") or "",
+                                "label": str(c.get("label") or c.get("category") or "")[:48],
+                                "relevant": bool(c.get("relevant")),
+                                "why": str(c.get("why") or "").strip()[:80],
+                                "entities": ents})
                 except (KeyError, TypeError):
                     continue
-        for c in by_label.values():
-            c["entities"] = sorted(set(c["entities"]))
-        return list(by_label.values())
+        return out
 
     # ── bindings: the name->role brain ──────────────────────────────────────
     async def propose_bindings(self, inventory: list[dict],
@@ -447,16 +444,51 @@ class OpenRouterAdvisor:
                     continue
         return results
 
-    async def suggest_cluster_name(self, card: ClusterCard,
-                                   activities: list[Activity]) -> str | None:
-        system = self._prompt("name_cluster")
+    async def suggest_cluster_names(self, card: ClusterCard, evidence: dict,
+                                    activities: list[Activity]) -> list[dict]:
+        """2–3 candidate names from the (metadata-only) evidence card. Each:
+        {name, slug|None, rationale, confidence, kind}. kind is derived here so
+        the UI can route a tap: 'existing' (slug matches an activity) vs 'new'.
+        Returns [] on any failure — naming still works by hand."""
+        slugs = {a.slug for a in activities}
+        names = ", ".join(a.name for a in activities) or "none yet"
+        system = self._prompt("name_cluster", ACTIVITIES=names)
+        # send only the human-readable, aggregate evidence — no raw series
+        ev = {
+            "summary": evidence.get("summary"),
+            "when": evidence.get("when"),
+            "where": evidence.get("where"),
+            "weekday_cadence": (evidence.get("cadence") or {}).get("phrase"),
+            "defining_signals": [{"signal": p["label"], "direction": p["dir"]}
+                                 for p in evidence.get("plain", [])],
+            "comes_after": (evidence.get("adjacency") or {}).get("before"),
+            "leads_into": (evidence.get("adjacency") or {}).get("after"),
+            "resembles": (evidence.get("contrast") or {}).get("name"),
+        }
         try:
-            res = await self._chat(system, json.dumps({
-                "signature": card.signature, "hour_histogram": card.hour_histogram}))
-            slug = res.get("slug") if isinstance(res, dict) else None
-            return slug if slug in {a.slug for a in activities} else None
+            res = await self._chat(system, json.dumps(ev), max_tokens=700,
+                                   task="Suggesting a name for a pattern")
         except Exception:
-            return None
+            return []
+        raw = res.get("suggestions") if isinstance(res, dict) else None
+        if not isinstance(raw, list):
+            return []
+        out: list[dict] = []
+        for it in raw[:3]:
+            if not isinstance(it, dict) or not str(it.get("name", "")).strip():
+                continue
+            slug = it.get("slug")
+            slug = slug if isinstance(slug, str) and slug in slugs else None
+            try:
+                conf = max(0.0, min(1.0, float(it.get("confidence", 0.5))))
+            except (TypeError, ValueError):
+                conf = 0.5
+            out.append({"name": str(it["name"]).strip()[:40],
+                        "slug": slug,
+                        "rationale": str(it.get("rationale", "")).strip()[:140],
+                        "confidence": round(conf, 2),
+                        "kind": "existing" if slug else "new"})
+        return out
 
     # ── feature architect: entity catalog -> validated FeatureSpec (Phase 3) ─
     async def propose_feature_spec(self, catalog: list[dict], activities: list,

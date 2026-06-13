@@ -154,6 +154,7 @@ class ClusterRow(Base):
     algo: Mapped[str] = mapped_column(String, default="hdbscan")
     n_windows: Mapped[int] = mapped_column(Integer, default=0)
     signature_json: Mapped[str] = mapped_column(Text, default="[]")
+    suggestions_json: Mapped[str] = mapped_column(Text, default="[]")
     hour_hist_json: Mapped[str] = mapped_column(Text, default="[]")
     examples_json: Mapped[str] = mapped_column(Text, default="[]")
     status: Mapped[str] = mapped_column(String, default="new")
@@ -491,6 +492,7 @@ class AppDb:
                 s.add(r)
             r.person_id, r.algo, r.n_windows = c.person_id, c.algo, c.n_windows
             r.signature_json = json.dumps(c.signature)
+            r.suggestions_json = json.dumps(c.suggestions)
             r.hour_hist_json = json.dumps(c.hour_histogram)
             r.examples_json = json.dumps([t.isoformat() for t in c.example_windows])
             r.status, r.named_activity_slug = c.status, c.named_activity_slug
@@ -503,6 +505,7 @@ class AppDb:
         return ClusterCard(
             id=r.id, person_id=r.person_id or "", run_at=r.run_at, algo=r.algo,
             n_windows=r.n_windows, suggested_slug=r.suggested_slug,
+            suggestions=json.loads(r.suggestions_json or "[]"),
             signature=[tuple(x) for x in json.loads(r.signature_json)],
             hour_histogram=json.loads(r.hour_hist_json),
             example_windows=[datetime.fromisoformat(t) for t in json.loads(r.examples_json)],

@@ -7,11 +7,16 @@ import { useEffect, useState } from "react";
 import { Icon } from "../icons";
 import { cheerBuddy } from "../components/buddyBus";
 
+type Suggestion = {
+  name: string; slug: string | null; rationale: string;
+  confidence: number; kind: "existing" | "new" | "merge";
+};
 type Cluster = {
   id: number; person_id: string; run_at: string | null; algo: string;
   n_windows: number; signature: [string, number][]; hour_histogram: number[];
   example_windows: string[]; status: string;
   named_activity_slug: string | null; suggested_slug: string | null;
+  suggestions: Suggestion[];
 };
 type Activity = { slug: string; name: string };
 type PlainFeat = { raw: string; label: string; room: string | null; dir: "up" | "down" };
@@ -99,19 +104,35 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [ev, setEv] = useState<Evidence | null>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>(c.suggestions ?? []);
+  const [suggesting, setSuggesting] = useState(false);
   useEffect(() => {
     fetch(`/api/clusters/${c.id}/evidence`).then(j).then(setEv).catch(() => {});
   }, [c.id]);
-  const name = async () => {
+  const nameWith = async (body: Record<string, string>, label: string) => {
     setBusy(true); setMsg("");
-    const body = choice === "__new__" ? { name: newName.trim() } : { activity_slug: choice };
     try {
       const r = await post(`/api/clusters/${c.id}/name`, body).then(j);
       setMsg(`Labeled ${r.labeled_windows} windows as “${r.activity}” — next training run learns from them.`);
       cheerBuddy({ title: `“${r.activity}” — that has a name now`, detail: `${r.labeled_windows} windows labeled for the next run.` });
       setTimeout(onChange, 1600);
-    } catch { setMsg("Couldn't name this pattern — check logs."); }
+    } catch { setMsg(`Couldn't save “${label}” — check logs.`); }
     setBusy(false);
+  };
+  const name = () => nameWith(
+    choice === "__new__" ? { name: newName.trim() } : { activity_slug: choice },
+    choice === "__new__" ? newName.trim() : choice);
+  const acceptSuggestion = (s: Suggestion) =>
+    nameWith(s.slug ? { activity_slug: s.slug } : { name: s.name }, s.name);
+  const askForSuggestions = async () => {
+    setSuggesting(true);
+    try {
+      const r = await post(`/api/clusters/${c.id}/suggest`, {}).then(j);
+      setSuggestions(r.suggestions ?? []);
+      if (!r.has_llm) setMsg("Add an AI key in Settings → Connections to get name suggestions.");
+      else if (!(r.suggestions ?? []).length) setMsg("The assistant couldn't pin this one down — name it from what you see.");
+    } catch { setMsg("Couldn't get suggestions — check logs."); }
+    setSuggesting(false);
   };
   const dismiss = async () => {
     setBusy(true);
@@ -129,17 +150,32 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
         <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
           {c.n_windows} windows ≈ {hoursOfLife}h of the last month
         </span>
-        {c.suggested_slug && (
-          <span style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 99,
-                         background: "color-mix(in srgb, var(--accent) 14%, transparent)",
-                         color: "var(--accent)" }}>
-            AI thinks: {c.suggested_slug}
-          </span>
-        )}
       </div>
       {ev && <EvidenceBlock ev={ev} />}
       <SignatureLine plain={ev?.plain} raw={c.signature} />
       <HourHistogram hist={c.hour_histogram} />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {suggestions.length > 0 ? (
+          <>
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>Sound right?</span>
+            {suggestions.map((s, i) => (
+              <button key={i} disabled={busy} onClick={() => acceptSuggestion(s)}
+                      title={`${s.rationale}${s.slug ? "" : " (new activity)"} · ${Math.round(s.confidence * 100)}% sure`}
+                      style={{ fontSize: 13, padding: "5px 12px", borderRadius: 99,
+                               cursor: "pointer", color: "var(--accent)",
+                               background: "color-mix(in srgb, var(--accent) 12%, transparent)",
+                               border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)" }}>
+                {s.name}{s.kind === "new" ? " +" : ""}
+              </button>
+            ))}
+          </>
+        ) : (
+          <button className="btn btn-ghost" disabled={suggesting} onClick={askForSuggestions}
+                  style={{ fontSize: 13, color: "var(--accent)" }}>
+            {suggesting ? "Thinking…" : "✨ Suggest names"}
+          </button>
+        )}
+      </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <select value={choice} onChange={(e) => setChoice(e.target.value)}>
           <option value="">What is this?</option>

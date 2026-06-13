@@ -1,12 +1,13 @@
 /**
  * Welcome — the live hand-off between the wizard and the dashboard.
  *
- * Introduces the buddy (Ember) and then *shows* the pipeline running on this
- * home's real data: scanning entities → (reading with AI, if a key is set) →
- * building features → training → finding patterns. Every number is live,
- * pulled from GET /api/buddy (phase) and GET /api/flow (this instance's counts);
- * nothing here is faked. The entity strip animates over the sensors Hearth
- * actually bound (GET /api/bindings).
+ * Introduces the buddy (Ember) and then *shows* the rest of the pipeline running
+ * on this home's real data. Scanning entities + sorting them into groups already
+ * happened IN THE WIZARD (the bubble-cloud step) before setup completed, so this
+ * screen no longer repeats them — it picks up at reading sensors with AI →
+ * building features → training → finding patterns. Every number is live, pulled
+ * from GET /api/buddy (phase) and GET /api/flow (this instance's counts);
+ * nothing here is faked.
  *
  * Warm start runs for everyone now (flag `fastTrack` in localStorage
  * 'hearth.welcome', with `source`: "bucket" = an external HA→Influx bucket with
@@ -18,7 +19,6 @@
  * loading screen while Hearth restarts); "Go to dashboard" reloads into the app.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import BubbleCloud from "../components/BubbleCloud";
 
 type Buddy = { phase: string; tone: string; title: string; detail: string;
                progress: number | null };
@@ -28,13 +28,7 @@ type LlmActivity = { phase: "sending" | "received" | "error"; task: string;
                      model?: string; sent?: string; items?: number; at?: string;
                      prompt?: string; reply?: string };
 type Feat = { name: string; transform: string };
-type Cluster = { label: string; relevant: boolean; why: string; count: number; kept: number };
-type Triage = { by: string | null; total: number; kept_count: number; clusters: Cluster[];
-                awaiting?: boolean; has_llm?: boolean };
 type Llm = { configured: boolean; model?: string; activity?: LlmActivity | null };
-type Binding = { id: number; name: string; role: string; room: string | null;
-                 person_id: string | null; enabled: boolean };
-type Ent = { entity_id: string; friendly_name: string | null; domain: string | null };
 
 // the full pipeline in order — seed (scan → sort → map) THEN fast-track
 // (import → features → train → discover). One monotonic position so each UI
@@ -117,105 +111,6 @@ function StageRow({ title, detail, status, children }: {
           {status === "later" ? "Starts as your data arrives" : detail}
         </div>
         {children}
-      </div>
-    </div>
-  );
-}
-
-const PersonGlyph = ({ color }: { color: string }) => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color}
-       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <circle cx="12" cy="8" r="3.4" />
-    <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
-  </svg>
-);
-
-/** Household members recognised from their person.* tracker — surfaced by name
- *  ("Found Alex from your household") as the scan reaches them, rather than as
- *  a cryptic binding chip. */
-function PersonFinds({ people, active, done }: {
-  people: { key: number; name: string }[]; active: boolean; done: boolean;
-}) {
-  const [shown, setShown] = useState(0);
-  useEffect(() => {
-    if (done) { setShown(people.length); return; }
-    if (!active || people.length === 0) return;
-    setShown(0);
-    const id = setInterval(() => setShown((n) => Math.min(n + 1, people.length)), 450);
-    return () => clearInterval(id);
-  }, [active, done, people.length]);
-  if (people.length === 0) return null;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-      {people.map((p, i) => {
-        const seen = done || i < shown;
-        return (
-          <div key={p.key} className={seen ? "wlc-row" : ""}
-            style={{ display: seen ? "flex" : "none", alignItems: "center", gap: 8,
-                     fontSize: 13.5, color: "var(--text)" }}>
-            <span style={{ width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
-                           display: "flex", alignItems: "center", justifyContent: "center",
-                           background: "color-mix(in srgb, var(--ok, #34D399) 14%, transparent)",
-                           border: "1.5px solid var(--ok, #34D399)" }}>
-              <PersonGlyph color="var(--ok, #34D399)" />
-            </span>
-            Found <strong style={{ fontWeight: 600 }}>{p.name}</strong> from your household
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/** A live "reading your home" feed — the actual HA entities scroll past one by
- *  one while scanning, so the user recognises their own things and feels the
- *  real connection. Auto-scrolls to keep the newest rows in view; faded top and
- *  bottom. Honest theatre over the genuine entity list. */
-function ScanFeed({ entities, active, done }: {
-  entities: Ent[]; active: boolean; done: boolean;
-}) {
-  const [cursor, setCursor] = useState(0);
-  useEffect(() => {
-    if (done) { setCursor(entities.length); return; }
-    if (!active || entities.length === 0) return;
-    setCursor(0);
-    // one entity every 600ms — slow enough to read your own things scroll past
-    // (75ms was a blur). The scan stage outlasts this, so showing fewer is fine.
-    const id = setInterval(() => setCursor((c) => Math.min(c + 1, entities.length)), 600);
-    return () => clearInterval(id);
-  }, [active, done, entities.length]);
-  if (entities.length === 0) return null;
-  const ROW = 30, VISIBLE = 4;
-  const shown = entities.slice(0, Math.max(cursor, done ? entities.length : 0));
-  const offset = Math.max(0, shown.length - VISIBLE) * ROW;
-  const fade = "linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent)";
-  return (
-    <div style={{ height: ROW * VISIBLE, overflow: "hidden", position: "relative", marginTop: 10,
-                  borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
-                  maskImage: fade, WebkitMaskImage: fade }}>
-      <div style={{ transform: `translateY(-${offset}px)`, transition: "transform .35s ease" }}>
-        {shown.map((e, i) => {
-          const scanning = active && !done && i === shown.length - 1;
-          return (
-            <div key={e.entity_id} style={{ height: ROW, display: "flex", alignItems: "center",
-                                            gap: 9, padding: "0 12px", minWidth: 0 }}>
-              <span className={scanning ? "wlc-scan-on" : ""}
-                style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                         background: scanning ? "var(--accent)" : "var(--ok, #34D399)" }} />
-              <span style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden",
-                             textOverflow: "ellipsis", flexShrink: 1 }}>
-                {e.friendly_name || e.entity_id}
-              </span>
-              {e.friendly_name && (
-                <span style={{ fontSize: 11.5, color: "var(--text-dim)", whiteSpace: "nowrap",
-                               overflow: "hidden", textOverflow: "ellipsis",
-                               fontFamily: "ui-monospace, Menlo, monospace" }}>
-                  {e.entity_id}
-                </span>
-              )}
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -315,45 +210,6 @@ function AITranscript({ act }: { act: LlmActivity }) {
   );
 }
 
-/** The scanning entity strip — chips for the sensors Hearth bound, ticked off
- *  one by one while the scan stage is active, all checked once it's done. */
-function EntityStrip({ bindings, active, done }: {
-  bindings: Binding[]; active: boolean; done: boolean;
-}) {
-  const [cursor, setCursor] = useState(0);
-  useEffect(() => {
-    if (done) { setCursor(bindings.length); return; }
-    if (!active || bindings.length === 0) return;
-    const id = setInterval(() => setCursor((c) => (c + 1) % (bindings.length + 1)), 260);
-    return () => clearInterval(id);
-  }, [active, done, bindings.length]);
-  if (bindings.length === 0) return null;
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-      {bindings.map((b, i) => {
-        const seen = done || i < cursor;
-        const scanning = active && !done && i === cursor;
-        return (
-          <span key={b.id} className={scanning ? "wlc-scan-on" : ""}
-            style={{ fontSize: 11.5, padding: "3px 9px", borderRadius: 99,
-                     display: "inline-flex", alignItems: "center", gap: 5,
-                     border: `1px solid ${seen ? "var(--ok, #34D399)" : scanning ? "var(--accent)" : "var(--border)"}`,
-                     background: seen ? "color-mix(in srgb, var(--ok, #34D399) 12%, transparent)"
-                               : scanning ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "var(--surface)",
-                     color: seen ? "var(--text)" : "var(--text-dim)" }}>
-            {seen && <span style={{ color: "var(--ok, #34D399)", display: "flex" }}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M5 13l4 4L19 7" /></svg></span>}
-            {b.name}
-            <span style={{ opacity: 0.6 }}>· {b.role}</span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function Welcome() {
   const flag = useMemo(() => {
     try { return JSON.parse(localStorage.getItem("hearth.welcome") || "{}"); }
@@ -364,13 +220,9 @@ export default function Welcome() {
 
   const [buddy, setBuddy] = useState<Buddy | null>(null);
   const [flow, setFlow] = useState<Flow | null>(null);
-  const [bindings, setBindings] = useState<Binding[]>([]);
-  const [entities, setEntities] = useState<Ent[]>([]);
   const [features, setFeatures] = useState<Feat[]>([]);
-  const [triage, setTriage] = useState<Triage | null>(null);
   const [llm, setLlm] = useState<Llm | null>(null);
   const [names, setNames] = useState<string[]>(flag.members ?? []);
-  const [personMap, setPersonMap] = useState<Record<string, string>>({});
   const sawSetup = useRef(false);
 
   useEffect(() => {
@@ -384,16 +236,8 @@ export default function Welcome() {
         .catch(() => { if (!stop) setTimeout(attempt, 2500); });
       attempt();
     };
-    loadOnce("/api/bindings", (b) =>
-      setBindings(((b as Binding[]) || []).filter((x) => x.enabled).slice(0, 50)));
-    // the live entity list — what Hearth is actually reading from your home; the
-    // scan feed rolls through these so you recognise your own stuff.
-    loadOnce("/api/ha/entities", (res) =>
-      setEntities(((res as { entities?: Ent[] })?.entities ?? []).map((e) => ({
-        entity_id: e.entity_id, friendly_name: e.friendly_name, domain: e.domain }))));
     loadOnce("/api/persons", (ps) => {
       const list = (ps as { id: string; name: string; notify_system?: boolean }[]) || [];
-      setPersonMap(Object.fromEntries(list.map((p) => [p.id, p.name])));
       // greet only whoever actually receives Hearth's messages (the operator),
       // not every household member — others aren't the one setting this up.
       if (!flag.members) setNames(list.filter((p) => p.notify_system).map((p) => p.name));
@@ -408,14 +252,13 @@ export default function Welcome() {
     const ok = (url: string) => fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     const tick = () => {
       Promise.all([ok("/api/buddy"), ok("/api/flow"), ok("/api/connections/llm"),
-                   ok("/api/feature-spec"), ok("/api/entity-triage")]).then(([b, f, c, fs, tr]) => {
+                   ok("/api/feature-spec")]).then(([b, f, c, fs]) => {
         if (!alive) return;
         if (b?.phase) { setBuddy(b); if (String(b.phase).startsWith("setup:")) sawSetup.current = true; }
         if (f) setFlow(f);
         if (c) setLlm({ configured: !!c.configured, model: c.options?.model, activity: c.activity });
         if (fs?.active && Array.isArray(fs.features))
           setFeatures(fs.features.map((x: Feat) => ({ name: x.name, transform: x.transform })));
-        if (tr?.clusters?.length) setTriage(tr);
         const busy = b && String(b.phase).startsWith("setup:");
         // poll fast while the LLM is mid-call so "sending → received" is visible
         const llmBusy = c && c.activity && c.activity.phase === "sending";
@@ -461,21 +304,8 @@ export default function Welcome() {
   const nPatterns = parseInt(patterns?.value ?? "", 10);
   const youNode = node("you");
 
-  // person.* trackers become "Found <name> from your household"; everything
-  // else shows in the sensor chip strip.
-  const prettify = (s: string) => s.replace(/_loc$/, "").replace(/_/g, " ");
-  const people = bindings.filter((b) => b.role === "person").map((b) => ({
-    key: b.id, name: (b.person_id && personMap[b.person_id]) || prettify(b.name) }));
-  const sensorChips = bindings.filter((b) => b.role !== "person");
-  // stage slices of ORDER:
-  //   0 scan · 1 sort · 2 map(AI) · 3-7 build features · 8-9 train · 10-11 patterns
-  const scanStatus = statusFor(0, 0);
-  const scanActive = scanStatus === "active";
-  const scanDone = scanStatus === "done";
-  // bound-sensor count from the flow map (e.g. "96 sensors"); 0/absent early on
-  const scanCount = parseInt(node("ha")?.value ?? "", 10) || 0;
-  const triageStatus = statusFor(1, 1);
-  const hasTriage = !!(triage && triage.clusters.length);
+  // stage slices of ORDER (scan/sort happened in the wizard; we start at map):
+  //   2 map(AI) · 3-7 build features · 8-9 train · 10-11 patterns
   const aiStatus = statusFor(2, 2);
   const featStatus = laterIfFresh(statusFor(3, 7));
   const featActive = featStatus === "active";
@@ -520,29 +350,6 @@ export default function Welcome() {
       </div>
 
       <div style={{ width: "100%", maxWidth: 560, marginTop: 34 }}>
-        <StageRow title="Scanning your home"
-          detail={scanCount > 0 ? `${scanCount} sensor${scanCount !== 1 ? "s" : ""} found`
-                                : "Reading what you've connected"}
-          status={scanStatus}>
-          <PersonFinds people={people} active={scanActive} done={scanDone} />
-          {scanDone
-            ? <EntityStrip bindings={sensorChips} active={false} done={true} />
-            : <ScanFeed entities={entities} active={scanActive} done={false} />}
-        </StageRow>
-
-        <StageRow title="Sorting your home into groups"
-          detail={hasTriage
-            ? `${triage!.clusters.length} groups${triage!.by === "llm" ? "" : " (by type)"}`
-            : "Grouping what I found, keeping what matters"}
-          status={triageStatus}>
-          {hasTriage && (
-            <div style={{ marginTop: 10 }}>
-              <BubbleCloud clusters={triage!.clusters} total={triage!.total}
-                keptCount={triage!.kept_count} by={triage!.by} />
-            </div>
-          )}
-        </StageRow>
-
         {llm?.configured && (
           <StageRow title="Reading your sensors with AI" detail={aiDetail} status={aiStatus}>
             {act && (actFresh || aiStatus === "active") && <AITranscript act={act} />}

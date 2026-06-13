@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons";
 import { useIsMobile } from "../useMedia";
 import { cheerBuddy } from "../components/buddyBus";
+import BubbleCloud from "../components/BubbleCloud";
 
 type Binding = {
   id: number; entity_id: string; role: string; name: string;
@@ -418,9 +419,11 @@ type Pending = { entity_id: string; suggested_role: string; suggested_name: stri
 /** Entity groups — the coarse triage as an adjustable bubble cloud. Toggle whole
  *  groups in/out and re-run the AI mapping deliberately (the only place that
  *  spends new tokens). Collapsed by default; hidden until a triage exists. */
-type TriageCluster = { label: string; relevant: boolean; why: string; count: number; kept: number };
+type TriageCluster = { label: string; relevant: boolean; why: string; count: number; kept: number;
+                       category?: string; icon?: string };
 type TriageData = { by: string | null; total: number; kept_count: number;
                     clusters: TriageCluster[]; awaiting?: boolean; has_llm?: boolean };
+const triageId = (c: TriageCluster) => c.category ?? c.label;
 
 function TriagePanel({ nonce, onChange }: { nonce: number; onChange: () => void }) {
   const [tr, setTr] = useState<TriageData | null>(null);
@@ -431,12 +434,12 @@ function TriagePanel({ nonce, onChange }: { nonce: number; onChange: () => void 
   const [msg, setMsg] = useState("");
   const load = () => fetch("/api/entity-triage").then(j).then((d: TriageData) => {
     setTr(d);
-    setKept(Object.fromEntries((d.clusters || []).map((c) => [c.label, c.relevant])));
+    setKept(Object.fromEntries((d.clusters || []).map((c) => [triageId(c), c.relevant])));
   }).catch(() => {});
   useEffect(() => { load(); }, [nonce]);
   const clusters = tr?.clusters ?? [];
-  const keptEstimate = clusters.reduce((n, c) => n + (kept[c.label] ? c.count : 0), 0);
-  const dirty = clusters.some((c) => kept[c.label] !== c.relevant);
+  const keptEstimate = clusters.reduce((n, c) => n + (kept[triageId(c)] ? c.count : 0), 0);
+  const dirty = clusters.some((c) => kept[triageId(c)] !== c.relevant);
   useEffect(() => {
     if (!open || !tr?.has_llm) return;
     let live = true;
@@ -448,8 +451,8 @@ function TriagePanel({ nonce, onChange }: { nonce: number; onChange: () => void 
 
   const reanalyse = async () => {
     setBusy(true); setMsg("");
-    const excluded = clusters.filter((c) => c.relevant && !kept[c.label]).map((c) => c.label);
-    const included = clusters.filter((c) => !c.relevant && kept[c.label]).map((c) => c.label);
+    const excluded = clusters.filter((c) => c.relevant && !kept[triageId(c)]).map(triageId);
+    const included = clusters.filter((c) => !c.relevant && kept[triageId(c)]).map(triageId);
     try {
       await postJSON("/api/entity-triage/approve",
                      { excluded_labels: excluded, included_labels: included }).then(j);
@@ -461,7 +464,6 @@ function TriagePanel({ nonce, onChange }: { nonce: number; onChange: () => void 
     setBusy(false);
   };
 
-  const max = Math.max(...clusters.map((c) => c.count), 1);
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
       <button onClick={() => setOpen(!open)}
@@ -482,29 +484,9 @@ function TriagePanel({ nonce, onChange }: { nonce: number; onChange: () => void 
             Hearth clustered your entities and kept the activity-relevant ones. Tap a group to
             keep or skip it, then re-analyse to remap with AI.
           </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-            {clusters.slice(0, 24).map((c) => {
-              const on = !!kept[c.label];
-              const d = Math.round(40 + 46 * Math.sqrt(c.count / max));
-              return (
-                <button key={c.label} disabled={!tr!.has_llm}
-                  onClick={() => setKept((k) => ({ ...k, [c.label]: !k[c.label] }))}
-                  title={`${c.label} · ${c.count} entities${c.why ? ` · ${c.why}` : ""}`}
-                  style={{ width: d, height: d, borderRadius: "50%", flexShrink: 0, padding: 4,
-                           display: "flex", flexDirection: "column", alignItems: "center",
-                           justifyContent: "center", textAlign: "center", lineHeight: 1.15,
-                           cursor: tr!.has_llm ? "pointer" : "default",
-                           border: `1.5px solid ${on ? "var(--accent)" : "var(--border)"}`,
-                           background: on ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--surface)",
-                           color: on ? "var(--text)" : "var(--text-dim)", opacity: on ? 1 : 0.6 }}>
-                  <span style={{ fontSize: Math.max(9, Math.min(11.5, d / 7)), fontWeight: 600,
-                                 overflow: "hidden", textOverflow: "ellipsis", maxWidth: d - 8,
-                                 whiteSpace: "nowrap" }}>{c.label}</span>
-                  <span style={{ fontSize: 10, opacity: 0.7 }}>{c.count}</span>
-                </button>
-              );
-            })}
-          </div>
+          <BubbleCloud clusters={clusters} max={24}
+            kept={kept}
+            onToggle={tr!.has_llm ? (id) => setKept((k) => ({ ...k, [id]: !k[id] })) : undefined} />
           {tr!.has_llm ? (
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <button className="btn btn-primary" disabled={busy || keptEstimate === 0 || (!dirty && !tr!.awaiting)}

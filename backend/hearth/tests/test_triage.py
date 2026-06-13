@@ -54,6 +54,10 @@ async def test_triage_heuristic_fallback_without_llm():
     # role-positive entities kept; blocklisted CPU temp ignored
     assert {"light.kitchen", "person.alice", "binary_sensor.sofa"} <= kept
     assert "sensor.cpu_temp" not in kept
-    # an "ignored" cluster exists and is not relevant
-    ignored = [c for c in res["clusters"] if c["label"] == "ignored"]
-    assert ignored and ignored[0]["relevant"] is False
+    # clusters are canonical categories with stable keys + icons
+    cats = {c["category"] for c in res["clusters"]}
+    assert {"lights", "presence"} <= cats
+    assert all(c.get("icon") for c in res["clusters"])
+    # the blocklisted entity lands in a not-relevant category, never the keep-set
+    not_relevant = [c for c in res["clusters"] if not c["relevant"]]
+    assert any("sensor.cpu_temp" in c["entities"] for c in not_relevant)

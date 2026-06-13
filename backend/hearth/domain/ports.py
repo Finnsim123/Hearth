@@ -174,9 +174,13 @@ class LlmAdvisor(Protocol):
     async def propose_rules(
         self, bindings: list[Binding], activities: list[Activity]
     ) -> list[Rule]: ...
-    async def suggest_cluster_name(
-        self, card: ClusterCard, activities: list[Activity]
-    ) -> str | None: ...
+    async def suggest_cluster_names(
+        self, card: ClusterCard, evidence: dict, activities: list[Activity]
+    ) -> list[dict]:
+        """2–3 candidate names for a discovered pattern from its (metadata-only)
+        evidence card. Each: {name, slug|None, rationale, confidence, kind}.
+        Returns [] on failure — manual naming always remains available."""
+        ...
 
     async def annotate_windows(
         self, window_summaries: list[dict], activities: list[Activity]

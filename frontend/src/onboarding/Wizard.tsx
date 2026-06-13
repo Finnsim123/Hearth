@@ -465,7 +465,7 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
             llm: d.llmKey ? { key: d.llmKey, model: d.llmModel } : null }) }).then((r) => r.json());
         if (!live) return;
         setTriage(tr);
-        setKept(Object.fromEntries(tr.clusters.map((c) => [c.label, c.relevant])));
+        setKept(Object.fromEntries(tr.clusters.map((c) => [c.category ?? c.label, c.relevant])));
         setState("done");
       } catch { if (live) setState("error"); }
     })();
@@ -484,16 +484,18 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
   const persist = (next: Record<string, boolean>) => {
     setKept(next);
     if (!triage) return;
-    const excluded = triage.clusters.filter((c) => c.relevant && !next[c.label]).map((c) => c.label);
-    const included = triage.clusters.filter((c) => !c.relevant && next[c.label]).map((c) => c.label);
-    const keptCount = triage.clusters.reduce((n, c) => n + (next[c.label] ? c.count : 0), 0);
+    const id = (c: TriageCluster) => c.category ?? c.label;
+    const excluded = triage.clusters.filter((c) => c.relevant && !next[id(c)]).map(id);
+    const included = triage.clusters.filter((c) => !c.relevant && next[id(c)]).map(id);
+    const keptCount = triage.clusters.reduce((n, c) => n + (next[id(c)] ? c.count : 0), 0);
     set("triageExcluded", excluded);
     set("triageIncluded", included);
     set("inventoryCount", keptCount);
   };
   useEffect(() => { if (triage) persist(kept); /* eslint-disable-line */ }, [triage]);
 
-  const keptCount = triage ? triage.clusters.reduce((n, c) => n + (kept[c.label] ? c.count : 0), 0) : 0;
+  const keptCount = triage
+    ? triage.clusters.reduce((n, c) => n + (kept[c.category ?? c.label] ? c.count : 0), 0) : 0;
   const busy = state === "scanning" || state === "grouping";
   return (
     <>

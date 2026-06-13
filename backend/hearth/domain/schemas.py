@@ -261,7 +261,10 @@ class ClusterCard(BaseModel):
     run_at: datetime | None = None
     algo: str = "hdbscan"
     n_windows: int = 0
-    suggested_slug: str | None = None  # LLM's guess, shown as a hint only
+    suggested_slug: str | None = None  # top existing-activity guess (back-compat)
+    # LLM name suggestions: [{name, slug?, rationale, confidence, kind}],
+    # kind ∈ {"existing","new","merge"} — rendered as tap-to-accept chips.
+    suggestions: list[dict] = Field(default_factory=list)
     signature: list[tuple[str, float]] = Field(default_factory=list)  # (feature, z)
     hour_histogram: list[int] = Field(default_factory=lambda: [0] * 24)
     example_windows: list[datetime] = Field(default_factory=list)

@@ -25,25 +25,40 @@ PROMPT_DEFS: dict[str, dict] = {
                        "appliance relevance rule lives.",
         "tokens": ["ACTIVITIES"],
         "default": (
-            "You triage a smart home's entities for a human-activity-recognition "
-            "system. From entity ids and friendly names ALONE, group them into "
-            "semantic clusters (e.g. '3D printer', 'living-room lights', "
-            "'networking/servers', 'climate', 'presence/people', 'phone "
-            "diagnostics'). For EACH cluster decide `relevant`: true if it helps "
-            "infer what PEOPLE are doing at home (presence, lights, media, power "
-            "use, doors, climate people feel, phones), false for infrastructure, "
-            "diagnostics, firmware, weather/forecasts, batteries, signal levels. "
-            "Appliances and machines (3D printers, washing machines, dishwashers, "
-            "ovens, servers) and their telemetry usually do NOT reflect a person's "
-            "general day-to-day activity, so DEFAULT such clusters to relevant:false. "
-            "EXCEPTION: if one of this household's activities is clearly about that "
-            "machine, its sensors become a primary signal — mark that cluster "
-            "relevant:true. This household's activities: [[ACTIVITIES]]. (e.g. an "
-            "activity like 'crafting' or 'printing' makes the 3D printer relevant; "
-            "'laundry' makes the washing machine relevant.) "
-            "Names may be in any language — infer meaning. Every entity goes in "
-            "exactly one cluster. Reply ONLY a JSON array: [{\"label\": str, "
-            "\"relevant\": bool, \"why\": str (<=8 words), \"entities\": [entity_id, …]}]."),
+            "You sort a smart home's entities into a FIXED set of functional "
+            "categories for a human-activity-recognition system, from entity ids "
+            "and friendly names ALONE. Assign EVERY entity to exactly ONE category "
+            "by what it physically measures — NOT by brand, integration or device "
+            "name. Do not invent categories; do not split one category into several "
+            "(all motion/occupancy/presence entities share the single 'presence' "
+            "category, all fitness/wearable/step entities share 'phone', etc.).\n"
+            "Categories and whether they are RELEVANT by default (relevant = it "
+            "reflects what PEOPLE are doing at home):\n"
+            "- presence (RELEVANT): motion, occupancy, mmwave, room presence, "
+            "home/away person trackers\n"
+            "- sleep (RELEVANT): bed/mattress/sleep sensors\n"
+            "- lights (RELEVANT): lights and light switches\n"
+            "- media (RELEVANT): TVs, speakers, media players\n"
+            "- doors (RELEVANT): doors, windows, locks, contact sensors\n"
+            "- climate (RELEVANT): temperature, humidity, CO2, air people feel\n"
+            "- power (RELEVANT): smart plugs / energy of things people use\n"
+            "- phone (RELEVANT): a person's phone/wearable — focus, steps, battery, "
+            "fitness, body metrics\n"
+            "- appliance (NOT relevant): 3D printers, washers, dishwashers, ovens, "
+            "and their telemetry — a machine's job, not a person's activity\n"
+            "- network (NOT relevant): wifi, routers, servers, client counts, WLED\n"
+            "- diagnostics (NOT relevant): signal/RSSI, firmware, uptime, sensor "
+            "battery levels, system/HA-internal entities\n"
+            "- weather (NOT relevant): weather and forecasts\n"
+            "- other (NOT relevant): anything that fits nothing above\n"
+            "EXCEPTION: if one of this household's activities is clearly about an "
+            "otherwise-irrelevant category, mark it relevant:true (e.g. an activity "
+            "'crafting' or 'printing' makes 'appliance' relevant; 'laundry' makes "
+            "the washer relevant). This household's activities: [[ACTIVITIES]].\n"
+            "Names may be in any language — infer meaning. Output ONE object per "
+            "category you actually used. Reply ONLY a JSON array: [{\"category\": "
+            "one of the keys above, \"relevant\": bool, \"why\": str (<=8 words), "
+            "\"entities\": [entity_id, …]}]."),
     },
     "map_bindings": {
         "title": "Sensor → role mapping",
@@ -146,10 +161,24 @@ PROMPT_DEFS: dict[str, dict] = {
     },
     "name_cluster": {
         "title": "Name a discovered pattern",
-        "description": "Suggests which activity a discovered behaviour cluster looks like.",
-        "tokens": [],
-        "default": ("Given a cluster signature from home sensor data, suggest "
-                    "which activity it is. Reply ONLY JSON: {\"slug\": str|null}"),
+        "description": "Proposes 2–3 candidate names for a discovered behaviour "
+                       "cluster, from a plain-English evidence card (when/where it "
+                       "happens, defining signals, neighbouring activities).",
+        "tokens": ["ACTIVITIES"],
+        "default": (
+            "You help a household name a recurring behaviour pattern that smart-home "
+            "sensors detected. You are given an evidence card: when and where it "
+            "happens, the defining signals (each up/down vs normal), what activity "
+            "tends to come before/after, and how often it's a weekday. The home's "
+            "existing activities are: [[ACTIVITIES]].\n"
+            "Propose 2–3 short, natural candidate names a person would actually use "
+            "(e.g. 'Relaxing', 'Working from home', 'Afternoon nap'). Prefer an "
+            "EXISTING activity when the pattern plausibly IS one (set its slug). If "
+            "the pattern looks like everyday unlabelled downtime rather than a "
+            "distinct activity, you may say so with low confidence.\n"
+            "Reply ONLY JSON: {\"suggestions\": [{\"name\": str, \"slug\": str|null "
+            "(an existing slug, or null for a new activity), \"rationale\": str (one "
+            "short clause citing the evidence), \"confidence\": 0..1}]}, best first."),
     },
     "feature_architect": {
         "title": "Feature architect (persona)",
