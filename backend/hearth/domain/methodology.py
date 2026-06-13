@@ -88,6 +88,11 @@ def build_methodology(repo, tsdb) -> dict:
     tg = _safe(lambda: repo.get_setting("time_granularity", "coarse"), "coarse") or "coarse"
     out["time_granularity"] = tg
     out["feature_set_version"] = _safe(lambda: active_feature_set_version(repo))
+    # per-window feature columns: each enabled sensor emits its role recipe's
+    # outputs; composites add one apiece. Best-effort headline number.
+    out["feature_count"] = (sum(len(recipes[b.role].suffixes)
+                                for b in enabled if b.role in recipes)
+                            + len(composites)) or None
     out["composite_count"] = len(composites)
     out["composite_names"] = [c.get("name") for c in composites][:12]
     out["rule_count"] = len(_safe(repo.rules, []) or [])

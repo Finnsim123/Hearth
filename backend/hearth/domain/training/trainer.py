@@ -51,6 +51,10 @@ class TrainingConfig:
     promotion_margin: float = 0.02   # confirmed-accuracy CI slack tolerated before
                                      # a new model is rejected as a regression
     model_family: str = "random_forest"   # random_forest | gradient_boosting | logistic
+    train_weeks: int = 8   # how far back each run reads features. 0 = ALL retained
+                           # history (capped by retention.days) — more data, slower
+                           # fit, learns slow/seasonal routines. The model also
+                           # recency-weights, so old windows count less, not zero.
 
 
 def load_training_config(repo) -> TrainingConfig:
@@ -93,6 +97,23 @@ def set_model_family(repo, family: str) -> str:
     return fam
 
 
+def set_train_weeks(repo, weeks: int) -> int:
+    """Persist the training look-back window (weeks; 0 = all retained history).
+    Raises ValueError outside 0..520 (10y) — API maps to 400."""
+    try:
+        w = int(weeks)
+    except (TypeError, ValueError):
+        raise ValueError("weeks must be an integer (0 = all history)")
+    if not (0 <= w <= 520):
+        raise ValueError("weeks must be 0 (all history) or between 1 and 520")
+    cfg = repo.get_setting("training.config") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["train_weeks"] = w
+    repo.set_setting("training.config", cfg)
+    return w
+
+
 def validation_status(n_confirmed: int,
                       threshold: int = MIN_CONFIRMED_FOR_VALIDATED) -> str:
     """Honest cold-start label: 'validated' only once enough human-confirmed
@@ -101,11 +122,20 @@ def validation_status(n_confirmed: int,
 
 
 def train_person(person_id: str, tsdb, repo, store,
-                 weeks: int = 8, force: bool = False) -> ModelRecord | None:
+                 weeks: int | None = None, force: bool = False) -> ModelRecord | None:
     cfg = load_training_config(repo)
+    # caller override wins; otherwise the configured window (Settings → Model).
+    weeks = cfg.train_weeks if weeks is None else weeks
     fset = active_feature_set_version(repo)
     end = datetime.now(timezone.utc)
-    start = end - timedelta(weeks=weeks)
+    if weeks and weeks > 0:
+        start = end - timedelta(weeks=weeks)
+    else:
+        # 0 = train on everything still retained. Bound the read by the retention
+        # window so we never ask Influx for data it has already dropped.
+        ret_days = repo.get_setting("retention.days", 730)
+        ret_days = int(ret_days) if isinstance(ret_days, int) and ret_days > 0 else 3650
+        start = end - timedelta(days=ret_days)
 
     feats = tsdb.read_features(person_id, fset, start, end)
     if len(feats) < cfg.min_train_windows:

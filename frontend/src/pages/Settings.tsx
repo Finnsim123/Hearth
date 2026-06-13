@@ -686,6 +686,47 @@ function DataRetention() {
   );
 }
 
+// ── training look-back window ────────────────────────────────────────────────
+
+const TRAIN_WEEKS_PRESETS: [number, string][] = [
+  [8, "8 weeks (default)"], [26, "6 months"], [52, "1 year"],
+  [104, "2 years"], [0, "All retained history"],
+];
+
+function TrainingWindow() {
+  const [weeks, setWeeks] = useState<number | null>(null);
+  const [state, setState] = useState<SaveState>("idle");
+  useEffect(() => {
+    fetch("/api/training-window").then(j).then((r) => setWeeks(r.weeks)).catch(() => setWeeks(8));
+  }, []);
+  const save = async (value: number) => {
+    setWeeks(value); setState("saving");
+    try { await post("/api/training-window", { weeks: value }).then(j); setState("ok"); }
+    catch { setState("fail"); }
+  };
+  const known = TRAIN_WEEKS_PRESETS.some(([w]) => w === weeks);
+  return (
+    <Card title="How far back training learns"
+          sub="Each training run reads this much feature history. More history lets the model learn slow and seasonal routines and smooths out odd weeks, but training takes longer. Recent windows already count more (recency weighting), so old data refines rather than dominates.">
+      <Row label="Training window"
+           hint="Capped by what's still retained above — you can't train on data InfluxDB has dropped. Applies on the next training run.">
+        <select value={weeks ?? 8} onChange={(e) => save(Number(e.target.value))}
+                disabled={weeks === null} style={{ maxWidth: 260 }}>
+          {!known && weeks !== null && (
+            <option value={weeks}>{weeks === 0 ? "All retained history" : `${weeks} weeks (custom)`}</option>
+          )}
+          {TRAIN_WEEKS_PRESETS.map(([w, label]) => <option key={w} value={w}>{label}</option>)}
+        </select>
+      </Row>
+      <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+        {state === "ok" ? "Saved — applies on the next training run (Train now to apply at once)."
+          : state === "fail" ? "Couldn't save — check logs."
+          : "Longer = more data per run, slower fit."}
+      </p>
+    </Card>
+  );
+}
+
 function OutputPolicy() {
   const [enabled, setEnabled] = useState(true);
   const [threshold, setThreshold] = useState(0.4);
@@ -937,7 +978,7 @@ function ConnectionsSection() {
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
     case "household": return <Household />;
-    case "model": return (<><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /></>);
+    case "model": return (<><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /></>);
     case "integrations": return <ConnectionsSection />;
     case "logs": return <Logs />;
     case "account": return <Account />;

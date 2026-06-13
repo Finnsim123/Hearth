@@ -174,6 +174,22 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"ok": True, "family": fam,
                 "note": "applies on the next training run"}
 
+    # ── training look-back window (how far back each run learns) ───────────
+    @api.get("/training-window")
+    def get_training_window() -> dict:
+        from ..domain.training.trainer import load_training_config
+        return {"weeks": load_training_config(repo).train_weeks}
+
+    @api.post("/training-window")
+    def set_training_window(body: dict) -> dict:
+        from ..domain.training.trainer import set_train_weeks
+        try:
+            weeks = set_train_weeks(repo, body.get("weeks"))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "weeks": weeks,
+                "note": "applies on the next training run; 0 = all retained history"}
+
     # ── entity triage (coarse funnel stage): clusters + relevant shortlist ──
     @api.get("/entity-triage")
     def get_entity_triage() -> dict:
@@ -1019,8 +1035,10 @@ def build_api_router(deps: dict) -> APIRouter:
         person_id = body.get("person_id")
         if not person_id:
             raise HTTPException(400, "missing 'person_id'")
+        # no 'weeks' in body → use the configured training window (Settings → Model)
+        weeks = int(body["weeks"]) if body.get("weeks") is not None else None
         record = train_person(person_id, tsdb, repo, deps["models"],
-                              weeks=int(body.get("weeks", 8)),
+                              weeks=weeks,
                               force=bool(body.get("force", False)))
         if record is None:
             return {"trained": False, "reason": "not enough data or one class only"}
