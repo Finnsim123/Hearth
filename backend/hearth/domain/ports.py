@@ -16,6 +16,7 @@ from .schemas import (
     Binding,
     ClusterCard,
     EntityState,
+    FeatureSpec,
     LabelEvent,
     ModelRecord,
     Prediction,
@@ -124,6 +125,16 @@ class LlmAdvisor(Protocol):
         ...
 
     async def propose_taxonomy(self, inventory: list[dict]) -> list[Activity]: ...
+
+    async def propose_feature_spec(
+        self, catalog: list[dict], activities: list[Activity],
+        mode: str = "conservative",
+    ) -> FeatureSpec:
+        """Feature architect (Phase 3): read the entity catalog (metadata +,
+        with consent, aggregate stats) and emit a VALIDATED FeatureSpec —
+        entity selections with info tiers and reliability, plus executable
+        feature definitions. Supersedes the unimplemented propose_composites."""
+        ...
     async def propose_rules(
         self, bindings: list[Binding], activities: list[Activity]
     ) -> list[Rule]: ...

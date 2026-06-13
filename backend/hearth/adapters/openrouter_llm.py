@@ -363,3 +363,59 @@ class OpenRouterAdvisor:
             return slug if slug in {a.slug for a in activities} else None
         except Exception:
             return None
+
+    # ── feature architect: entity catalog -> validated FeatureSpec (Phase 3) ─
+    async def propose_feature_spec(self, catalog: list[dict], activities: list,
+                                   mode: str = "conservative"):
+        """Orchestrate the three architect passes (selection, per-entity
+        features, composites), then validate. Each pass degrades on failure to
+        what succeeded; the result is always a validated, executable spec."""
+        from ..domain.features.validate import validate_spec
+        from ..domain.onboarding.feature_architect import (
+            SYSTEM_PROMPT, assemble_spec, composite_prompt, feature_prompt,
+            parse_features, parse_selections, selection_prompt)
+        from ..domain.schemas import InfoTier
+
+        try:
+            member_ids = [p.id for p in self.repo.persons()]
+        except Exception:
+            member_ids = []
+
+        selections = []
+        for i in range(0, len(catalog), 150):                 # batch large homes
+            batch = catalog[i:i + 150]
+            try:
+                raw = await self._chat(SYSTEM_PROMPT,
+                                       selection_prompt(batch, activities, member_ids),
+                                       max_tokens=8000)
+                selections.extend(parse_selections(raw, catalog=batch,
+                                                   member_ids=member_ids))
+            except Exception as exc:
+                log.warning("feature_spec selection chunk failed: %s", exc)
+
+        kept = [s for s in selections if s.keep and s.reliability != "unusable"
+                and s.info_tier not in (None, InfoTier.LOW_INFORMATION)]
+
+        features = []
+        if kept:
+            try:
+                features = parse_features(await self._chat(
+                    SYSTEM_PROMPT, feature_prompt(kept, mode)))
+            except Exception as exc:
+                log.warning("feature_spec feature pass failed: %s", exc)
+        if kept and features:
+            try:
+                names = [f.name for f in features]
+                features += parse_features(await self._chat(
+                    SYSTEM_PROMPT, composite_prompt(kept, names, mode)))
+            except Exception as exc:
+                log.warning("feature_spec composite pass failed: %s", exc)
+
+        conn = self.repo.get_connection("llm") or {}
+        model = (conn.get("options") or {}).get("model")
+        spec = assemble_spec(selections, features, llm_model=model)
+        clean, rejected = validate_spec(spec, mode=mode)
+        if rejected:
+            log.info("feature_spec: %d features rejected by validation: %s",
+                     len(rejected), [n for n, _ in rejected][:8])
+        return clean
