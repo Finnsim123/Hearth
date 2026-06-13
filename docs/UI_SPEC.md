@@ -221,6 +221,11 @@ The closing wizard screen sets the expectation: go live your life, we'll ping yo
   since setup, with per-sensor and bulk **Approve / Dismiss**. Approving binds
   them and triggers a scoped AI re-analysis + background retrain; nothing enters
   the model unprompted.
+- **Entity groups** (collapsible): the coarse triage (ARCHITECTURE §3.2) as an
+  adjustable bubble cloud — each cluster sized by entity count, tinted for the
+  ones kept. Toggle whole groups in/out and hit **Re-analyse** (`POST
+  /api/entity-triage/approve`, with a `~$` estimate) to remap with AI — the
+  deliberate, only-spends-on-click counterpart to the setup-time gate.
 - **AI feature design** panel (collapsible): the active feature spec — kept
   entities with their information tier and reliability, and the executable
   features with the rationale behind each. Absent when the default recipes are

@@ -415,6 +415,119 @@ function AddSensor({ members, initialPeople = false, onClose, onAdded }: {
 type Pending = { entity_id: string; suggested_role: string; suggested_name: string;
                  friendly_name: string | null; area: string | null };
 
+/** Entity groups — the coarse triage as an adjustable bubble cloud. Toggle whole
+ *  groups in/out and re-run the AI mapping deliberately (the only place that
+ *  spends new tokens). Collapsed by default; hidden until a triage exists. */
+type TriageCluster = { label: string; relevant: boolean; why: string; count: number; kept: number };
+type TriageData = { by: string | null; total: number; kept_count: number;
+                    clusters: TriageCluster[]; awaiting?: boolean; has_llm?: boolean };
+
+function TriagePanel({ nonce, onChange }: { nonce: number; onChange: () => void }) {
+  const [tr, setTr] = useState<TriageData | null>(null);
+  const [kept, setKept] = useState<Record<string, boolean>>({});
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [cost, setCost] = useState<number | null>(null);
+  const [msg, setMsg] = useState("");
+  const load = () => fetch("/api/entity-triage").then(j).then((d: TriageData) => {
+    setTr(d);
+    setKept(Object.fromEntries((d.clusters || []).map((c) => [c.label, c.relevant])));
+  }).catch(() => {});
+  useEffect(() => { load(); }, [nonce]);
+  const clusters = tr?.clusters ?? [];
+  const keptEstimate = clusters.reduce((n, c) => n + (kept[c.label] ? c.count : 0), 0);
+  const dirty = clusters.some((c) => kept[c.label] !== c.relevant);
+  useEffect(() => {
+    if (!open || !tr?.has_llm) return;
+    let live = true;
+    postJSON("/api/feature-spec/estimate", { entity_count: keptEstimate }).then(j)
+      .then((e) => { if (live) setCost(e.est_usd); }).catch(() => {});
+    return () => { live = false; };
+  }, [open, keptEstimate, tr?.has_llm]);
+  if (!clusters.length) return null;
+
+  const reanalyse = async () => {
+    setBusy(true); setMsg("");
+    const excluded = clusters.filter((c) => c.relevant && !kept[c.label]).map((c) => c.label);
+    const included = clusters.filter((c) => !c.relevant && kept[c.label]).map((c) => c.label);
+    try {
+      await postJSON("/api/entity-triage/approve",
+                     { excluded_labels: excluded, included_labels: included }).then(j);
+      setMsg("Re-analysing — Hearth will remap and retrain in the background.");
+      cheerBuddy({ title: "On it — re-reading your home",
+                   detail: `Analysing ${keptEstimate} entities and retraining.` });
+      onChange();
+    } catch { setMsg("Couldn't start — is the AI key set?"); }
+    setBusy(false);
+  };
+
+  const max = Math.max(...clusters.map((c) => c.count), 1);
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+      <button onClick={() => setOpen(!open)}
+        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none",
+                 background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
+                 color: "var(--text)", padding: "11px 14px", textAlign: "left" }}>
+        <Icon name="patterns" size={17} />
+        <strong style={{ fontSize: 14 }}>Entity groups</strong>
+        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+          keeping {tr!.kept_count} of {tr!.total}{tr!.by === "llm" ? " · chosen by AI" : " · by type"}
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--text-dim)" }}>{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12,
+                      borderTop: "1px solid var(--border)" }}>
+          <p style={{ margin: 0, fontSize: 13, color: "var(--text-dim)" }}>
+            Hearth clustered your entities and kept the activity-relevant ones. Tap a group to
+            keep or skip it, then re-analyse to remap with AI.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+            {clusters.slice(0, 24).map((c) => {
+              const on = !!kept[c.label];
+              const d = Math.round(40 + 46 * Math.sqrt(c.count / max));
+              return (
+                <button key={c.label} disabled={!tr!.has_llm}
+                  onClick={() => setKept((k) => ({ ...k, [c.label]: !k[c.label] }))}
+                  title={`${c.label} · ${c.count} entities${c.why ? ` · ${c.why}` : ""}`}
+                  style={{ width: d, height: d, borderRadius: "50%", flexShrink: 0, padding: 4,
+                           display: "flex", flexDirection: "column", alignItems: "center",
+                           justifyContent: "center", textAlign: "center", lineHeight: 1.15,
+                           cursor: tr!.has_llm ? "pointer" : "default",
+                           border: `1.5px solid ${on ? "var(--accent)" : "var(--border)"}`,
+                           background: on ? "color-mix(in srgb, var(--accent) 16%, transparent)" : "var(--surface)",
+                           color: on ? "var(--text)" : "var(--text-dim)", opacity: on ? 1 : 0.6 }}>
+                  <span style={{ fontSize: Math.max(9, Math.min(11.5, d / 7)), fontWeight: 600,
+                                 overflow: "hidden", textOverflow: "ellipsis", maxWidth: d - 8,
+                                 whiteSpace: "nowrap" }}>{c.label}</span>
+                  <span style={{ fontSize: 10, opacity: 0.7 }}>{c.count}</span>
+                </button>
+              );
+            })}
+          </div>
+          {tr!.has_llm ? (
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <button className="btn btn-primary" disabled={busy || keptEstimate === 0 || (!dirty && !tr!.awaiting)}
+                      onClick={reanalyse}>
+                {busy ? "Starting…"
+                  : `${tr!.awaiting ? "Analyse" : "Re-analyse"} ${keptEstimate} entities${cost != null ? ` · ~$${cost < 0.01 ? "<0.01" : cost.toFixed(2)}` : ""}`}
+              </button>
+              {msg && <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{msg}</span>}
+              {!dirty && !tr!.awaiting && !msg && (
+                <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>Toggle a group to re-analyse.</span>
+              )}
+            </div>
+          ) : (
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+              Groups are by type (no AI key). Add a key in Settings → Integrations to let AI choose.
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Newly-discovered sensors awaiting approval (detect-then-ask). Approving runs
  *  a scoped AI re-analysis + background retrain; nothing enters the model until
  *  the user says so. */
@@ -790,6 +903,7 @@ export default function Sensors() {
         );
       })()}
       <PendingSensors nonce={pendingNonce} onChange={reload} />
+      <TriagePanel nonce={pendingNonce} onChange={reload} />
       <FeatureSpecPanel nonce={pendingNonce} />
       {adding && <AddSensor members={members} initialPeople={adding === "people"}
                             onClose={() => setAdding(false)} onAdded={reload} />}
