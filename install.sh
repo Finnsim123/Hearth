@@ -69,7 +69,11 @@ if [[ -z "$HEALTH" ]]; then
 fi
 
 # ── banner ───────────────────────────────────────────────────────────────────
-IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+# Prefer the source IP of the default route — the genuine LAN address even on
+# hosts with a Docker bridge, VPN (Tailscale) or several NICs, where the first
+# `hostname -I` entry can be the wrong interface. Fall back if `ip` is absent.
+IP="$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)"
+[[ -z "$IP" ]] && IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [[ -z "$IP" ]] && IP="$(hostname -i 2>/dev/null | awk '{print $1}')"
 [[ -z "$IP" ]] && IP="localhost"
 URL="http://${IP}:8420"
