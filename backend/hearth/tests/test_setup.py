@@ -70,6 +70,15 @@ def test_setup_complete_persists_everything(client):
     assert c.get("/api/health").json()["needs_setup"] is False
 
 
+def test_setup_warm_starts_from_recorder_without_external_bucket(client):
+    c, repo = client
+    bundled = dict(PAYLOAD, influx={"mode": "bundled"})
+    r = c.post("/api/setup/complete", json=bundled)
+    assert r.status_code == 200 and r.json()["fasttrack"] is True
+    # no external bucket → warm start from the HA recorder for everyone
+    assert repo.get_setting("fasttrack.pending") == {"source": "recorder", "days": 10}
+
+
 def test_setup_refuses_missing_password(client):
     c, repo = client
     bad = dict(PAYLOAD, account={"name": "A", "email": "a@b.c", "password": ""})

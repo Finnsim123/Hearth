@@ -26,30 +26,45 @@ def _status(repo, stage: str, **extra) -> None:
                      {"stage": stage, "at": datetime.now(timezone.utc).isoformat(), **extra})
 
 
-async def run_fast_track(repo, tsdb, store, notifier=None) -> None:
+async def run_fast_track(repo, tsdb, store, notifier=None, events=None) -> None:
     pending = repo.get_setting("fasttrack.pending")
     if not pending or tsdb is None:
         return
-    source_bucket = pending.get("source_bucket")
-    log.info("fast track: importing from %s", source_bucket)
     end = datetime.now(timezone.utc)
+    # Two warm-start sources: the HA recorder (history API, ~10 days, works for
+    # every home) or a pre-existing external HA→Influx bucket (longer history).
+    recorder = pending.get("source") == "recorder"
+    source_bucket = pending.get("source_bucket")
 
-    # Import the FULL history this home recorded — not a fixed window. Probe the
-    # source bucket's earliest timestamp; optionally cap with import.max_days
-    # (0/unset = no cap → take everything).
-    from ..adapters.influx_import import earliest_source_time, import_history
-    earliest = await asyncio.to_thread(earliest_source_time, tsdb, source_bucket)
-    start = earliest or (end - timedelta(days=FALLBACK_DAYS))
-    cap_days = int(repo.get_setting("import.max_days", 0) or 0)
-    if cap_days:
-        start = max(start, end - timedelta(days=cap_days))
+    from ..adapters.influx_import import (
+        earliest_source_time, import_history, import_recorder_history)
+    if recorder:
+        days = int(pending.get("days", 10))
+        start = end - timedelta(days=days)
+        log.info("fast track: warm start from HA recorder (%d days)", days)
+    else:
+        # Import the FULL history this home recorded — not a fixed window. Probe
+        # the source bucket's earliest timestamp; optionally cap with
+        # import.max_days (0/unset = no cap → take everything).
+        earliest = await asyncio.to_thread(earliest_source_time, tsdb, source_bucket)
+        start = earliest or (end - timedelta(days=FALLBACK_DAYS))
+        cap_days = int(repo.get_setting("import.max_days", 0) or 0)
+        if cap_days:
+            start = max(start, end - timedelta(days=cap_days))
+        log.info("fast track: importing from %s", source_bucket)
     span_days = max(1, (end - start).days)
 
     try:
-        _status(repo, "importing", source_bucket=source_bucket, span_days=span_days)
+        _status(repo, "importing", span_days=span_days,
+                **({} if recorder else {"source_bucket": source_bucket}))
         bindings = [b for b in repo.bindings() if b.enabled]
-        results = await asyncio.to_thread(
-            import_history, tsdb, source_bucket, bindings, start, end)
+        if recorder:
+            if events is None:
+                raise RuntimeError("recorder warm-start needs a Home Assistant connection")
+            results = await import_recorder_history(events, tsdb, bindings, start, end)
+        else:
+            results = await asyncio.to_thread(
+                import_history, tsdb, source_bucket, bindings, start, end)
         imported = sum(results.values())
         _status(repo, "imported", points=imported)
         log.info("fast track: %d points imported", imported)

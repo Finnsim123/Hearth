@@ -379,9 +379,14 @@ def build_api_router(deps: dict) -> APIRouter:
         # milliseconds and the auto-login cookie reliably reaches the browser.
         repo.set_setting("seed.pending", {"members": body.get("members", [])})
 
+        # Warm start: an external bucket (HA→Influx) gives the longest history;
+        # otherwise pull ~10 days from HA's own recorder via the history API, so
+        # EVERY home gets a provisional model on day one — no integration needed.
         if influx.get("mode") == "external" and influx.get("sourceBucket"):
             repo.set_setting("fasttrack.pending",
                              {"source_bucket": influx["sourceBucket"]})
+        else:
+            repo.set_setting("fasttrack.pending", {"source": "recorder", "days": 10})
 
         # sign the new admin in right away (session survives the restart)
         from .. import security
@@ -395,8 +400,8 @@ def build_api_router(deps: dict) -> APIRouter:
         # restart to (re)build adapters with the saved connections
         if os.getenv("HEARTH_NO_RESTART") != "1":
             asyncio.get_event_loop().call_later(1.0, os._exit, 0)
-        return {"ok": True, "restarting": True,
-                "fasttrack": bool(influx.get("mode") == "external" and influx.get("sourceBucket"))}
+        # warm start always runs now (external bucket or HA recorder)
+        return {"ok": True, "restarting": True, "fasttrack": True}
 
     @api.post("/ha/test")
     async def ha_test(body: dict) -> dict:

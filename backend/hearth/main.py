@@ -158,7 +158,7 @@ def create_app() -> FastAPI:
                 if repo.get_setting("fasttrack.pending") and deps.get("tsdb"):
                     from .domain.fasttrack import run_fast_track
                     await run_fast_track(repo, deps["tsdb"], deps["models"],
-                                         deps.get("notifier"))
+                                         deps.get("notifier"), deps.get("events"))
             app.state.setup_task = asyncio.create_task(_seed_then_fasttrack())
         log.info("Hearth up on :%s (tsdb=%s, ha=%s)", settings.port,
                  bool(deps["tsdb"]), bool(deps["events"]))
