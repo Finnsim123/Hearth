@@ -86,6 +86,83 @@ function Mark() {
   );
 }
 
+function HaLogo() {   // Home Assistant — house mark in HA blue
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      <path d="M12 3 2.5 11.2V21h19v-9.8L12 3z" fill="#41BDF5" />
+      <path d="M8 20v-5l2 2 2-3 2 3 2-2v5" fill="none" stroke="#fff"
+            strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function InfluxLogo() {   // InfluxDB — rising data line on a rounded tile
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      <rect x="3" y="3" width="18" height="18" rx="5" fill="#6A35FF" />
+      <path d="M6.5 15.5l3.5-4.5 3 2.2 4.5-6" fill="none" stroke="#fff"
+            strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Official logo if present in /public/logos (see logos/README.md), otherwise
+ *  the built-in mark — so it works out of the box and upgrades to the real
+ *  brand asset once you drop the file in. */
+function LogoImg({ src, alt, fallback }: {
+  src: string; alt: string; fallback: React.ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <>{fallback}</>;
+  return (
+    <img src={src} alt={alt} width={20} height={20}
+         style={{ display: "block", objectFit: "contain" }}
+         onError={() => setFailed(true)} />
+  );
+}
+
+/** Clickable logos for the two systems Hearth connects to (data provider +
+ *  InfluxDB) — open each in a new tab. The bundled InfluxDB's internal URL is
+ *  rewritten to this host's address so the browser can actually reach it. */
+function ConnectionLinks({ onClick }: { onClick: () => void }) {
+  const [ha, setHa] = useState<string | null>(null);
+  const [influx, setInflux] = useState<string | null>(null);
+  useEffect(() => {
+    const json = (r: Response) => (r.ok ? r.json() : Promise.reject());
+    fetch("/api/connections/ha").then(json)
+      .then((c) => { if (c.configured && c.url) setHa(c.url); }).catch(() => {});
+    fetch("/api/connections/influx").then(json).then((c) => {
+      if (!c.configured) return;
+      const bundled = c.options?.mode === "bundled" || (c.url || "").includes("influxdb:8086");
+      setInflux(bundled ? `${window.location.protocol}//${window.location.hostname}:8086`
+                        : c.url || null);
+    }).catch(() => {});
+  }, []);
+  if (!ha && !influx) return null;
+  const tile: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+    borderRadius: 8, textDecoration: "none", color: "var(--text-dim)", fontSize: 13,
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {ha && (
+        <a href={ha} target="_blank" rel="noreferrer" style={tile} onClick={onClick}
+           title={`Open your data provider — ${ha}`}>
+          <LogoImg src="/logos/home-assistant.svg" alt="Home Assistant" fallback={<HaLogo />} />
+          Home Assistant
+        </a>
+      )}
+      {influx && (
+        <a href={influx} target="_blank" rel="noreferrer" style={tile} onClick={onClick}
+           title={`Open InfluxDB — ${influx}`}>
+          <LogoImg src="/logos/influxdb.svg" alt="InfluxDB" fallback={<InfluxLogo />} />
+          InfluxDB
+        </a>
+      )}
+    </div>
+  );
+}
+
 function UpdatingScreen() {
   return (
     <ProgressWait
@@ -224,6 +301,7 @@ export default function App() {
             Update ({update.behind})
           </button>
         )}
+        <ConnectionLinks onClick={closeNav} />
         <NavLink to="/methodology" style={navLinkStyle} onClick={closeNav}>How it works</NavLink>
         <NavLink to="/settings" end style={navLinkStyle} onClick={closeNav}>Settings</NavLink>
         <Link to="/settings#account" style={{ ...navLinkStyle({ isActive: false }) }} onClick={closeNav}>Account</Link>

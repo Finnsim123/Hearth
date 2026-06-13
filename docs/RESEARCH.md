@@ -296,6 +296,42 @@ Two consequences, both now reflected in the design:
    the tail until then.
 
 
+## Other data providers (added June 2026)
+
+**Question:** beyond Home Assistant, could Hearth read from Google Home or Apple
+Home? What's easy, what's hard?
+
+Hearth needs a *continuous, local, multivariate sensor stream* (states + history)
+to engineer features and train. That requirement sorts the platforms cleanly:
+
+- **Open local hubs — easy.** Home Assistant (today), plus Homey, openHAB and
+  Domoticz, expose a local API and/or MQTT with full sensor state and history.
+  Each is a new adapter behind the existing `EventSource` / `TimeSeriesStore`
+  ports plus a wizard selector. This is the realistic near-term expansion.
+- **Apple Home (HomeKit) — hard, indirect.** HomeKit is local and private, but
+  there is no open local HTTP API: access goes through Apple's HomeKit framework
+  inside an iOS/macOS app, and even then there is no historic-data API and (for
+  Matter devices) no subscriptions — you must poll `readAttributes`. So Hearth
+  can't read HomeKit directly from a Linux container.
+  [Apple Home for developers](https://developer.apple.com/apple-home/),
+  [HomeKit docs](https://developer.apple.com/documentation/homekit).
+- **Google Home — hard, indirect.** The 2024+ Home APIs (Android in beta, iOS
+  later) expose device/structure state including a `SensorState` trait, but they
+  are an **app SDK** (Android/iOS, OAuth-permissioned, per-user caps), not a
+  local sensor firehose for a headless service, and local control runs through a
+  Google hub. Not a fit for a self-hosted box reading the whole home.
+  [Google Home APIs](https://developers.googleblog.com/en/home-apis-enabling-all-developers-to-build-for-the-home/),
+  [SensorState trait](https://developers.home.google.com/cloud-to-cloud/traits/sensorstate).
+
+**Position:** don't integrate the closed ecosystems directly. The pragmatic path
+is **bridge then read**: expose Google/Apple/Matter devices into an open hub
+(Home Assistant's HomeKit-Controller / Matter / Google integrations, Homebridge,
+etc.) and point Hearth at that hub. **Matter** is the long-term unifier — a local
+Matter controller could one day be its own `EventSource` adapter. So the roadmap
+item is "more open-hub adapters + a wizard selector", and "works with Google/
+Apple Home" is answered through a bridge, not a native integration.
+
+
 ## World models / JEPA and the Embedder bet (added June 2026)
 
 **Prompt:** Yann LeCun, "World Models: Enabling the next AI revolution"

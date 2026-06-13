@@ -83,6 +83,13 @@ Models page confirmed-accuracy before/after naming.
   experiment on label count + a hold-out accuracy check so it can't regress the
   live model. Until then the appeal path (manual bind + LLM-reasoned override)
   covers the long tail.
+- **Other data providers.** Today the only source is Home Assistant (local
+  WebSocket + history), isolated behind the `EventSource` / `TimeSeriesStore`
+  ports, so adding a hub is a new adapter plus a wizard selector ("which home
+  platform do you use?"). Order by ease: open local hubs first (Homey, openHAB,
+  Domoticz via their local APIs / MQTT), then Matter-controller reads. Closed
+  ecosystems (Google Home, Apple Home) are reached by bridging them THROUGH an
+  open hub rather than read directly — see RESEARCH.md §Other data providers.
 - Change-point segmentation experiment (P4)
 - HEPA-style embedder behind the `Embedder` port (feature-flagged): pretrain on
   the home's unlabeled stream, side-by-side vs RF in the registry,
