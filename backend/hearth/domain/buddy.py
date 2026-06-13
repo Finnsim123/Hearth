@@ -81,6 +81,17 @@ def buddy_state(repo, tsdb) -> dict:
     if _get(repo, "fasttrack.pending") or (stage and stage != "done"):
         return _fasttrack(ft)
 
+    # integrating user-approved new sensors (scoped re-analysis + retrain)
+    intg = _get(repo, "discovery.integrate") or {}
+    istage = intg.get("stage")
+    if istage and istage != "done":
+        copy = {"analyzing": ("Analysing your new sensors",
+                              "Working out what they can tell me"),
+                "retraining": ("Retraining on your new sensors",
+                               "A fresh model is on the way")}
+        title, detail = copy.get(istage, ("Adding your new sensors", "One moment"))
+        return _state(f"integrate:{istage}", "work", title, detail)
+
     persons = [p for p in _safe(repo.persons, []) if getattr(p, "enabled", True)]
     promoted = [m for m in _safe(repo.models, []) if m.promoted]
     bound = len([b for b in _safe(repo.bindings, []) if b.enabled])

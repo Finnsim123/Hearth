@@ -136,10 +136,30 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"pending": repo.get_setting("discovery.pending") or []}
 
     @api.post("/sensors/pending/approve")
-    def approve_pending(body: dict) -> dict:
+    async def approve_pending(body: dict) -> dict:
+        import asyncio
+        from ..domain.onboarding.integrate import integrate
         from ..domain.onboarding.inventory_sync import approve_pending_sensors
-        added = approve_pending_sensors(repo, body.get("entity_ids"))
-        return {"ok": True, "added": added,
+        pending = repo.get_setting("discovery.pending") or []
+        req_ids = body.get("entity_ids")
+        approved_ids = (list(req_ids) if req_ids
+                        else [p["entity_id"] for p in pending if isinstance(p, dict)])
+        added = approve_pending_sensors(repo, req_ids)
+        do_bg = bool(added and body.get("retrain", True))
+        if do_bg:
+            advisor = None
+            try:
+                if repo.get_connection("llm"):
+                    from ..adapters.openrouter_llm import OpenRouterAdvisor
+                    advisor = OpenRouterAdvisor(repo)
+            except Exception:
+                advisor = None
+            # fire-and-forget: scoped re-analysis + retrain; the buddy narrates
+            asyncio.create_task(integrate(
+                repo, approved_ids=approved_ids, advisor=advisor,
+                events=deps.get("events"), tsdb=deps.get("tsdb"),
+                store=deps.get("models")))
+        return {"ok": True, "added": added, "integrating": do_bg,
                 "pending": len(repo.get_setting("discovery.pending") or [])}
 
     @api.post("/sensors/pending/dismiss")
