@@ -640,6 +640,52 @@ function FeaturePower() {
   );
 }
 
+// ── data history retention ───────────────────────────────────────────────────
+
+const RETENTION_PRESETS: [number, string][] = [
+  [180, "6 months"], [365, "1 year"], [730, "2 years (recommended)"],
+  [1825, "5 years"], [0, "Keep forever"],
+];
+
+function DataRetention() {
+  const [days, setDays] = useState<number | null>(null);
+  const [state, setState] = useState<SaveState>("idle");
+  const [note, setNote] = useState<string>("");
+  useEffect(() => {
+    fetch("/api/settings/retention").then(j).then((r) => setDays(r.days)).catch(() => setDays(730));
+  }, []);
+  const save = async (value: number) => {
+    setDays(value); setState("saving"); setNote("");
+    try {
+      const r = await post("/api/settings/retention", { days: value }).then(j);
+      setState("ok"); setNote(r.note ?? "");
+    } catch { setState("fail"); }
+  };
+  // a custom value (not in the preset list) is shown as its own option so the
+  // select still reflects the true setting
+  const known = RETENTION_PRESETS.some(([d]) => d === days);
+  return (
+    <Card title="Data history retention"
+          sub="How long Hearth keeps raw sensor events and the features built from them — the data every training run learns from. Longer history means the model can learn slow, seasonal routines, at the cost of disk space. Predictions and your confirmed labels are always kept.">
+      <Row label="Keep history for"
+           hint="Applies to InfluxDB immediately when connected. Shortening it deletes data older than the window — that can't be undone.">
+        <select value={days ?? 730} onChange={(e) => save(Number(e.target.value))}
+                disabled={days === null} style={{ maxWidth: 260 }}>
+          {!known && days !== null && (
+            <option value={days}>{days === 0 ? "Keep forever" : `${days} days (custom)`}</option>
+          )}
+          {RETENTION_PRESETS.map(([d, label]) => <option key={d} value={d}>{label}</option>)}
+        </select>
+      </Row>
+      <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+        {state === "ok" ? (note || "Saved ✓")
+          : state === "fail" ? "Couldn't save — check logs."
+          : "Raw events and features beyond this age are dropped by InfluxDB."}
+      </p>
+    </Card>
+  );
+}
+
 function OutputPolicy() {
   const [enabled, setEnabled] = useState(true);
   const [threshold, setThreshold] = useState(0.4);

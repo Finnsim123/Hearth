@@ -9,14 +9,14 @@ import { useNavigate } from "react-router-dom";
 import { usePrefersReducedMotion } from "../useMedia";
 
 type NodeData = { label: string; value: string; status: string; href: string; step: string;
-                  source?: string | null };
+                  source?: string | null; desc?: string | null };
 type EdgeData = { rate: number; status: string; label?: string };
 type Flow = { phase: string; tone: string; nodes: Record<string, NodeData>; edges: Record<string, EdgeData> };
 
 // Compact layout (narrow canvas → text stays legible at half-card width).
 const N: Record<string, { x: number; y: number; w: number; h: number; color: string; desc: string }> = {
   ha:          { x: 8,   y: 33,  w: 116, h: 54, color: "#34D399", desc: "Every sensor Hearth listens to." },
-  raw:         { x: 150, y: 33,  w: 116, h: 54, color: "#60A5FA", desc: "Raw events kept in InfluxDB (180-day retention)." },
+  raw:         { x: 150, y: 33,  w: 116, h: 54, color: "#60A5FA", desc: "Raw events kept in InfluxDB." },
   features:    { x: 292, y: 33,  w: 116, h: 54, color: "#60A5FA", desc: "30-minute windows turned into model features." },
   model:       { x: 434, y: 33,  w: 116, h: 54, color: "#F59E0B", desc: "The Random Forest that predicts your activity." },
   predictions: { x: 576, y: 33,  w: 128, h: 54, color: "#34D399", desc: "Live states, pushed onto Home Assistant's bus." },
@@ -131,8 +131,10 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
         const HT = 98;   // fits title + 2-line desc + value (72 clipped the last line)
         const tx = Math.max(6, Math.min(712 - 210, cx(hover) - 105));
         const ty = below ? n.y + n.h + 8 : n.y - (HT + 6);
-        // the source node names its actual platform on hover (Home Assistant today)
-        const desc = nd.source ? `Reading from ${nd.source} — every sensor Hearth listens to.` : n.desc;
+        // the source node names its actual platform on hover (Home Assistant today);
+        // other nodes may ship a live desc from the backend (e.g. raw retention)
+        const desc = nd.source ? `Reading from ${nd.source} — every sensor Hearth listens to.`
+                               : nd.desc || n.desc;
         return (
           <foreignObject x={tx} y={ty} width={210} height={HT} style={{ pointerEvents: "none" }}>
             <div style={{ background: "var(--surface)", border: "1px solid var(--border)",

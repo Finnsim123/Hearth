@@ -27,6 +27,12 @@ log = logging.getLogger(__name__)
 
 RAW_BUCKET, FEAT_BUCKET, ML_BUCKET = "hearth_raw", "hearth_features", "hearth_ml"
 
+# History retention default (days) for the raw + feature buckets. The longer the
+# window, the further back training can reach — bias toward keeping data. This is
+# the DEFAULT only: the live value is the 'retention.days' setting (editable in
+# Settings → Model), applied to existing buckets on boot via set_retention().
+DEFAULT_RETENTION_DAYS = 730   # 2 years (was 180)
+
 
 def _flux_tag(value: str) -> str:
     """Escape a string for safe interpolation into a Flux double-quoted
@@ -147,15 +153,37 @@ class InfluxStore:
                 log.warning("wipe_all: could not drop %s: %s", name, exc)
         self.ensure_buckets()
 
-    def ensure_buckets(self) -> None:
+    def ensure_buckets(self, retention_days: int = DEFAULT_RETENTION_DAYS) -> None:
         api = self.client.buckets_api()
         existing = {b.name for b in api.find_buckets().buckets}
-        retention = {RAW_BUCKET: 180 * 86400, FEAT_BUCKET: 365 * 86400, ML_BUCKET: 0}
+        secs = max(0, int(retention_days)) * 86400
+        # raw + features hold the training corpus and share the retention knob;
+        # ml (predictions/labels) is kept forever — it's tiny and is ground truth.
+        retention = {RAW_BUCKET: secs, FEAT_BUCKET: secs, ML_BUCKET: 0}
         for name, secs in retention.items():
             if name not in existing:
                 rules = [{"type": "expire", "everySeconds": secs}] if secs else []
                 api.create_bucket(bucket_name=name, retention_rules=rules, org=self.org)
                 log.info("Created bucket %s", name)
+
+    def set_retention(self, retention_days: int) -> dict:
+        """Apply a retention window (days; <=0 = keep forever) to the raw +
+        feature history buckets, updating them in place if they already exist.
+        Returns {days, buckets} for the buckets actually changed."""
+        from influxdb_client import BucketRetentionRules
+        secs = max(0, int(retention_days)) * 86400
+        api = self.client.buckets_api()
+        applied: list[str] = []
+        for name in (RAW_BUCKET, FEAT_BUCKET):
+            b = api.find_bucket_by_name(name)
+            if b is None:
+                continue
+            b.retention_rules = ([BucketRetentionRules(type="expire", every_seconds=secs)]
+                                 if secs else [])
+            api.update_bucket(bucket=b)
+            applied.append(name)
+            log.info("Set retention on %s to %d days", name, retention_days)
+        return {"days": retention_days, "buckets": applied}
 
     # ── raw ────────────────────────────────────────────────────────────────
     def write_raw(self, binding: Binding, states: list[EntityState]) -> None:
@@ -186,7 +214,7 @@ class InfluxStore:
             flux = f'''
 from(bucket: "{RAW_BUCKET}")
   |> range(start: {b_start.isoformat()}, stop: {end.isoformat()})
-  |> filter(fn: (r) => r._measurement == "raw_{b.name}" and r._field == "{field}")
+  |> filter(fn: (r) => r._measurement == "raw_{_flux_tag(b.name)}" and r._field == "{field}")
   |> aggregateWindow(every: {freq}, fn: last, createEmpty: false)
   |> keep(columns: ["_time", "_value"])
 '''
@@ -226,7 +254,7 @@ from(bucket: "{RAW_BUCKET}")
 from(bucket: "{FEAT_BUCKET}")
   |> range(start: {start.isoformat()}, stop: {end.isoformat()})
   |> filter(fn: (r) => r._measurement == "features" and r.person == "{_flux_tag(person)}"
-                       and r.feature_set == "{feature_set}")
+                       and r.feature_set == "{_flux_tag(feature_set)}")
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
         df = self.query_api.query_data_frame(flux)

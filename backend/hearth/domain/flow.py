@@ -68,11 +68,22 @@ def flow_state(repo, tsdb) -> dict:
     # (e.g. Homey) later just changes the name the hover reveals.
     source_name = "Home Assistant" if _safe(lambda: repo.get_connection("ha")) else None
 
+    # raw-store hover text reflects the configured retention (Settings → Model)
+    ret_days = _safe(lambda: repo.get_setting("retention.days", 730), 730) or 730
+    if not isinstance(ret_days, int) or ret_days <= 0:
+        ret_txt = "kept forever"
+    elif ret_days >= 365 and ret_days % 365 == 0:
+        yrs = ret_days // 365
+        ret_txt = f"{yrs}-year retention"
+    else:
+        ret_txt = f"{ret_days}-day retention"
+
     nodes = {
         "ha": {"label": "Data source", "source": source_name,
                "value": f"{len(bindings)} sensors",
                "status": "ok" if bindings else "idle", "href": "/sensors", "step": "sources"},
         "raw": {"label": "Raw store", "value": _per_day(events24),
+                "desc": f"Raw events kept in InfluxDB ({ret_txt}).",
                 "status": "alert" if stalled else "ok" if events24 else "idle",
                 "href": "/settings", "step": "normalise"},
         "features": {"label": "Features", "value": f"{n_train:,} windows" if n_train else "building…",

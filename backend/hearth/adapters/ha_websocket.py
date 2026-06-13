@@ -55,15 +55,21 @@ class HaWebSocketSource:
             raise RuntimeError("HA auth failed")
         return ws
 
-    async def _command(self, ws, payload: dict) -> dict:
+    async def _command(self, ws, payload: dict, timeout: float = 30.0) -> dict:
         cid = self._next_id()
         await ws.send_json({**payload, "id": cid})
-        while True:
-            msg = await ws.receive_json()
-            if msg.get("id") == cid and msg.get("type") == "result":
-                if not msg.get("success"):
-                    raise RuntimeError(f"HA command failed: {msg}")
-                return msg.get("result") or {}
+
+        async def _await_result() -> dict:
+            while True:
+                msg = await ws.receive_json()
+                if msg.get("id") == cid and msg.get("type") == "result":
+                    if not msg.get("success"):
+                        raise RuntimeError(f"HA command failed: {msg}")
+                    return msg.get("result") or {}
+
+        # bound the wait — without this a HA that never returns our id hangs the
+        # request (e.g. discover_entities stalls forever).
+        return await asyncio.wait_for(_await_result(), timeout=timeout)
 
     async def subscribe(self, entity_ids: list[str]) -> AsyncIterator[EntityState]:
         """Infinite stream with reconnect/backoff. Caller filters nothing —

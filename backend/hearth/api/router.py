@@ -424,6 +424,9 @@ def build_api_router(deps: dict) -> APIRouter:
         if repo.user_count() > 0:
             raise HTTPException(409, "Setup already completed")
 
+        for required in ("account", "ha", "influx"):
+            if not isinstance(body.get(required), dict):
+                raise HTTPException(400, f"missing '{required}'")
         acct = body["account"]
         if len(acct.get("password") or "") < 10:
             raise HTTPException(400, "Password missing or too short — go back "
@@ -535,7 +538,7 @@ def build_api_router(deps: dict) -> APIRouter:
 
         # restart to (re)build adapters with the saved connections
         if os.getenv("HEARTH_NO_RESTART") != "1":
-            asyncio.get_event_loop().call_later(1.0, os._exit, 0)
+            asyncio.get_running_loop().call_later(1.0, os._exit, 0)
         # warm start always runs now (external bucket or HA recorder)
         return {"ok": True, "restarting": True, "fasttrack": True}
 
@@ -941,13 +944,16 @@ def build_api_router(deps: dict) -> APIRouter:
         from datetime import datetime, timedelta, timezone
 
         from ..adapters.influx_import import earliest_source_time, import_history
+        bucket = body.get("source_bucket")
+        if not bucket:
+            raise HTTPException(400, "missing 'source_bucket'")
         days = int(body.get("days", 60))   # 0 = import the full recorded history
         end = datetime.now(timezone.utc)
         if days <= 0:
-            start = earliest_source_time(tsdb, body["source_bucket"]) or end - timedelta(days=90)
+            start = earliest_source_time(tsdb, bucket) or end - timedelta(days=90)
         else:
             start = end - timedelta(days=days)
-        results = import_history(tsdb, body["source_bucket"], repo.bindings(), start, end)
+        results = import_history(tsdb, bucket, repo.bindings(), start, end)
         return {"imported": results, "span_days": max(1, (end - start).days)}
 
     # ── activities & rules (taxonomy) ──────────────────────────────────────
@@ -995,7 +1001,10 @@ def build_api_router(deps: dict) -> APIRouter:
         if tsdb is None:
             raise HTTPException(409, "Connect InfluxDB first")
         from ..domain.training.trainer import train_person
-        record = train_person(body["person_id"], tsdb, repo, deps["models"],
+        person_id = body.get("person_id")
+        if not person_id:
+            raise HTTPException(400, "missing 'person_id'")
+        record = train_person(person_id, tsdb, repo, deps["models"],
                               weeks=int(body.get("weeks", 8)),
                               force=bool(body.get("force", False)))
         if record is None:
@@ -1011,6 +1020,8 @@ def build_api_router(deps: dict) -> APIRouter:
     @api.post("/models/rollback")
     def rollback_ep(body: dict) -> dict:
         from ..domain.training.trainer import rollback
+        if not body.get("person_id"):
+            raise HTTPException(400, "missing 'person_id'")
         record = rollback(body["person_id"], repo)
         if record is None:
             raise HTTPException(409, "nothing to roll back to")
@@ -1034,11 +1045,19 @@ def build_api_router(deps: dict) -> APIRouter:
 
         from ..domain.labeling.bulk import bulk_label_events
         from ..domain.schemas import Prediction
+        missing = [k for k in ("person_id", "start", "end", "activity") if not body.get(k)]
+        if missing:
+            raise HTTPException(400, f"missing {', '.join(missing)}")
         activity = body["activity"]
+        try:
+            start_dt = datetime.fromisoformat(body["start"])
+            end_dt = datetime.fromisoformat(body["end"])
+        except (ValueError, TypeError):
+            raise HTTPException(400, "start/end must be ISO datetimes")
         events = bulk_label_events(
             body["person_id"],
-            datetime.fromisoformat(body["start"]),
-            datetime.fromisoformat(body["end"]),
+            start_dt,
+            end_dt,
             activity,
             source=body.get("source", "bulk"))
         for ev in events:
@@ -1256,12 +1275,17 @@ def build_api_router(deps: dict) -> APIRouter:
 
     @api.post("/inbox/{question_id}/answer")
     def answer(question_id: int, body: dict) -> dict:
-        q = repo.answer_question(question_id, body["answer"])
+        ans = body.get("answer")
+        if not ans:
+            raise HTTPException(400, "missing 'answer'")
+        q = repo.answer_question(question_id, ans)
+        if q is None:
+            raise HTTPException(404, "unknown question")
         tsdb = deps.get("tsdb")
         if tsdb is not None:
             from ..domain.schemas import LabelEvent, Provenance
             tsdb.write_label(LabelEvent(person_id=q.person_id, window_ts=q.window_ts,
-                                        label=body["answer"], provenance=Provenance.CONFIRMED,
+                                        label=ans, provenance=Provenance.CONFIRMED,
                                         source="inbox"))
         return {"ok": True}
 
@@ -1352,6 +1376,40 @@ def build_api_router(deps: dict) -> APIRouter:
                 repo.set_setting(key, body[key])
         return {"ok": True, "note": "takes effect on the next training run "
                                     "(feature schema changed — retrain to apply)"}
+
+    # ── data history retention (raw + features bucket lifetime) ───────────
+    @api.get("/settings/retention")
+    def get_retention() -> dict:
+        from ..adapters.influx_store import DEFAULT_RETENTION_DAYS
+        days = repo.get_setting("retention.days", DEFAULT_RETENTION_DAYS)
+        if not isinstance(days, int):
+            days = DEFAULT_RETENTION_DAYS
+        return {"days": days, "default": DEFAULT_RETENTION_DAYS}
+
+    @api.post("/settings/retention")
+    def set_retention_ep(body: dict) -> dict:
+        """Set how long raw events + features are kept (the training corpus).
+        days=0 keeps data forever; otherwise 1..3650 (10y). Applied to the live
+        InfluxDB buckets at once when connected, else on the next restart."""
+        raw = body.get("days")
+        try:
+            days = int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "days must be an integer (0 = keep forever)")
+        if days != 0 and not (1 <= days <= 3650):
+            raise HTTPException(400, "days must be 0 (forever) or between 1 and 3650")
+        repo.set_setting("retention.days", days)
+        tsdb = deps.get("tsdb")
+        applied = False
+        if tsdb is not None and hasattr(tsdb, "set_retention"):
+            try:
+                tsdb.set_retention(days)
+                applied = True
+            except Exception:
+                log.exception("retention update failed")
+        return {"ok": True, "days": days, "applied": applied,
+                "note": None if applied else
+                        "saved — applies when InfluxDB is connected (restart to apply now)"}
 
     @api.get("/system/status")
     def status() -> dict:

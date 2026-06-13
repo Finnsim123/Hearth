@@ -391,9 +391,11 @@ class AppDb:
             r = s.get(QuestionRow, question_id)
             return self._question(r) if r is not None else None
 
-    def answer_question(self, question_id: int, answer: str) -> Question:
+    def answer_question(self, question_id: int, answer: str) -> Question | None:
         with Session(self.engine) as s:
             r = s.get(QuestionRow, question_id)
+            if r is None:                    # unknown id -> let the API 404, not 500
+                return None
             r.answer, r.status = answer, "answered"
             s.commit()
             return self._question(r)

@@ -32,7 +32,17 @@ def build_deps() -> dict:
         tsdb = InfluxStore(influx["url"], influx["options"].get("org", "hearth"),
                            influx["token"])
         if tsdb.ping():
-            tsdb.ensure_buckets()
+            # retention is a user setting (Settings → Model); default 2y. Create
+            # missing buckets at that window AND realign existing ones, so an
+            # upgrade from the old 180-day default widens automatically.
+            from .adapters.influx_store import DEFAULT_RETENTION_DAYS
+            days = repo.get_setting("retention.days", DEFAULT_RETENTION_DAYS)
+            days = days if isinstance(days, int) else DEFAULT_RETENTION_DAYS
+            tsdb.ensure_buckets(days)
+            try:
+                tsdb.set_retention(days)
+            except Exception:
+                log.warning("could not apply retention=%sd to existing buckets", days)
             deps["tsdb"] = tsdb
         else:
             log.warning("InfluxDB configured but unreachable — pipeline paused")
