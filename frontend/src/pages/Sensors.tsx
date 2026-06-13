@@ -403,6 +403,80 @@ function AddSensor({ members, initialPeople = false, onClose, onAdded }: {
   );
 }
 
+type Pending = { entity_id: string; suggested_role: string; suggested_name: string;
+                 friendly_name: string | null; area: string | null };
+
+/** Newly-discovered sensors awaiting approval (detect-then-ask). Approving runs
+ *  a scoped AI re-analysis + background retrain; nothing enters the model until
+ *  the user says so. */
+function PendingSensors({ nonce, onChange }: { nonce: number; onChange: () => void }) {
+  const [pending, setPending] = useState<Pending[] | null>(null);
+  const [busy, setBusy] = useState("");
+  const load = () => fetch("/api/sensors/pending").then(j)
+    .then((r) => setPending(r.pending ?? [])).catch(() => setPending([]));
+  useEffect(() => { load(); }, [nonce]);
+  if (!pending || pending.length === 0) return null;
+  const act = async (path: string, ids: string[] | undefined, key: string) => {
+    setBusy(key);
+    try { await postJSON(path, ids ? { entity_ids: ids } : {}).then(j); } catch { /* refresh */ }
+    await load(); onChange(); setBusy("");
+  };
+  const allIds = pending.map((p) => p.entity_id);
+  return (
+    <div style={{ padding: "12px 14px", borderRadius: 10,
+                  background: "color-mix(in srgb, var(--accent) 10%, transparent)",
+                  border: "1px solid var(--accent)", display: "flex",
+                  flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <Icon name="sensors" size={16} />
+        <strong style={{ fontSize: 14 }}>
+          {pending.length} new sensor{pending.length === 1 ? "" : "s"} found
+        </strong>
+        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+          Approving runs a quick AI analysis and retrains in the background — nothing
+          enters the model until you approve.
+        </span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button className="btn btn-primary" disabled={!!busy}
+                  onClick={() => act("/api/sensors/pending/approve", undefined, "all")}>
+            {busy === "all" ? "Approving…" : "Approve all"}
+          </button>
+          <button className="btn btn-ghost" disabled={!!busy}
+                  onClick={() => act("/api/sensors/pending/dismiss", undefined, "dismiss")}>
+            Dismiss all
+          </button>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {pending.map((p) => (
+          <div key={p.entity_id} style={{ display: "flex", alignItems: "center", gap: 8,
+                       padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)",
+                       background: "var(--surface)" }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {p.friendly_name || p.suggested_name}
+                {p.area && <span style={{ fontSize: 12, color: "var(--text-dim)" }}> · {p.area}</span>}
+              </div>
+              <code style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{p.entity_id}</code>
+            </div>
+            <RoleBadge role={p.suggested_role} />
+            <button className="btn btn-ghost" disabled={!!busy}
+                    style={{ minHeight: 28, padding: "2px 9px", fontSize: 12.5 }}
+                    onClick={() => act("/api/sensors/pending/approve", [p.entity_id], p.entity_id)}>
+              {busy === p.entity_id ? "…" : "Approve"}
+            </button>
+            <button className="btn btn-ghost" disabled={!!busy} title="Dismiss"
+                    style={{ minHeight: 28, padding: "2px 8px", color: "var(--text-dim)" }}
+                    onClick={() => act("/api/sensors/pending/dismiss", [p.entity_id], p.entity_id)}>
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Sensors() {
   const [bindings, setBindings] = useState<Binding[] | null>(null);
   const [health, setHealth] = useState<Record<string, Health>>({});
@@ -416,6 +490,7 @@ export default function Sensors() {
   const [cleanMsg, setCleanMsg] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
   const [adding, setAdding] = useState<false | "all" | "people">(false);
+  const [pendingNonce, setPendingNonce] = useState(0);
   const load = () => fetch("/api/bindings").then(j).then(setBindings).catch(() => setBindings([]));
   const loadHealth = (hours: number) =>
     fetch(`/api/bindings/health?hours=${hours}`).then(j).then((h) => {
@@ -475,9 +550,10 @@ export default function Sensors() {
     setCleanMsg("Rescanning Home Assistant…");
     try {
       const r = await fetch("/api/ha/sync", { method: "POST" }).then(j);
-      setCleanMsg(r.added || r.rooms_updated
-        ? `Found ${r.added} new sensor${r.added === 1 ? "" : "s"}, updated ${r.rooms_updated} room${r.rooms_updated === 1 ? "" : "s"}.`
+      setCleanMsg(r.pending || r.rooms_updated
+        ? `${r.pending || 0} new sensor${r.pending === 1 ? "" : "s"} to review, updated ${r.rooms_updated} room${r.rooms_updated === 1 ? "" : "s"}.`
         : "Up to date — no new sensors or room changes.");
+      setPendingNonce((n) => n + 1);
       load();
     } catch { setCleanMsg("Rescan failed — is Home Assistant connected?"); }
   };
@@ -553,6 +629,7 @@ export default function Sensors() {
           </div>
         );
       })()}
+      <PendingSensors nonce={pendingNonce} onChange={reload} />
       {adding && <AddSensor members={members} initialPeople={adding === "people"}
                             onClose={() => setAdding(false)} onAdded={reload} />}
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)", maxWidth: 640 }}>
