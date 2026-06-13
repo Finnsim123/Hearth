@@ -107,6 +107,12 @@ bound (`GET /api/bindings`). Two arcs, chosen by whether history was imported
   advances — scanning your home → reading with AI (only if a key is set) →
   building features → learning your routines → finding patterns — finishing
   with the first model live and CTAs to name patterns / answer questions.
+  During scanning, a **live entity feed** (from `GET /api/ha/entities`) rolls
+  through the real entities Hearth is reading so the user recognises their own
+  things; it settles into the kept-sensor chips and "N sensors found" once the
+  scan completes. `person.*` trackers surface as "Found <name> from your
+  household". The AI row stays active until the LLM is genuinely idle, narrating
+  each call ("Sending… / Receiving… now") only while it is in flight.
 - **Fresh** (no history): scanning completes, the later stages show "starts as
   your data arrives", and the copy explains the few-days wait.
 

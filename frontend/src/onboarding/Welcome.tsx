@@ -26,6 +26,7 @@ type LlmActivity = { phase: "sending" | "received" | "error"; task: string;
 type Llm = { configured: boolean; model?: string; activity?: LlmActivity | null };
 type Binding = { id: number; name: string; role: string; room: string | null;
                  person_id: string | null; enabled: boolean };
+type Ent = { entity_id: string; friendly_name: string | null; domain: string | null };
 
 // the ordered fast-track phases, used to place the current phase on the arc
 const ORDER = [
@@ -155,6 +156,58 @@ function PersonFinds({ people, active, done }: {
   );
 }
 
+/** A live "reading your home" feed — the actual HA entities scroll past one by
+ *  one while scanning, so the user recognises their own things and feels the
+ *  real connection. Auto-scrolls to keep the newest rows in view; faded top and
+ *  bottom. Honest theatre over the genuine entity list. */
+function ScanFeed({ entities, active, done }: {
+  entities: Ent[]; active: boolean; done: boolean;
+}) {
+  const [cursor, setCursor] = useState(0);
+  useEffect(() => {
+    if (done) { setCursor(entities.length); return; }
+    if (!active || entities.length === 0) return;
+    setCursor(0);
+    const id = setInterval(() => setCursor((c) => Math.min(c + 1, entities.length)), 75);
+    return () => clearInterval(id);
+  }, [active, done, entities.length]);
+  if (entities.length === 0) return null;
+  const ROW = 30, VISIBLE = 4;
+  const shown = entities.slice(0, Math.max(cursor, done ? entities.length : 0));
+  const offset = Math.max(0, shown.length - VISIBLE) * ROW;
+  const fade = "linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent)";
+  return (
+    <div style={{ height: ROW * VISIBLE, overflow: "hidden", position: "relative", marginTop: 10,
+                  borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
+                  maskImage: fade, WebkitMaskImage: fade }}>
+      <div style={{ transform: `translateY(-${offset}px)`, transition: "transform .16s linear" }}>
+        {shown.map((e, i) => {
+          const scanning = active && !done && i === shown.length - 1;
+          return (
+            <div key={e.entity_id} style={{ height: ROW, display: "flex", alignItems: "center",
+                                            gap: 9, padding: "0 12px", minWidth: 0 }}>
+              <span className={scanning ? "wlc-scan-on" : ""}
+                style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                         background: scanning ? "var(--accent)" : "var(--ok, #34D399)" }} />
+              <span style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden",
+                             textOverflow: "ellipsis", flexShrink: 1 }}>
+                {e.friendly_name || e.entity_id}
+              </span>
+              {e.friendly_name && (
+                <span style={{ fontSize: 11.5, color: "var(--text-dim)", whiteSpace: "nowrap",
+                               overflow: "hidden", textOverflow: "ellipsis",
+                               fontFamily: "ui-monospace, Menlo, monospace" }}>
+                  {e.entity_id}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** The scanning entity strip — chips for the sensors Hearth bound, ticked off
  *  one by one while the scan stage is active, all checked once it's done. */
 function EntityStrip({ bindings, active, done }: {
@@ -204,6 +257,7 @@ export default function Welcome() {
   const [buddy, setBuddy] = useState<Buddy | null>(null);
   const [flow, setFlow] = useState<Flow | null>(null);
   const [bindings, setBindings] = useState<Binding[]>([]);
+  const [entities, setEntities] = useState<Ent[]>([]);
   const [llm, setLlm] = useState<Llm | null>(null);
   const [names, setNames] = useState<string[]>(flag.members ?? []);
   const [personMap, setPersonMap] = useState<Record<string, string>>({});
@@ -212,6 +266,12 @@ export default function Welcome() {
   useEffect(() => {
     fetch("/api/bindings").then((r) => r.json())
       .then((b: Binding[]) => setBindings((b || []).filter((x) => x.enabled).slice(0, 50)))
+      .catch(() => {});
+    // the live entity list — what Hearth is actually reading from your home; the
+    // scan feed rolls through these so you recognise your own stuff.
+    fetch("/api/ha/entities").then((r) => r.json())
+      .then((res) => setEntities((res?.entities ?? []).map((e: Ent) => ({
+        entity_id: e.entity_id, friendly_name: e.friendly_name, domain: e.domain }))))
       .catch(() => {});
     fetch("/api/persons").then((r) => r.json())
       .then((ps: { id: string; name: string; notify_system?: boolean }[]) => {
@@ -331,7 +391,9 @@ export default function Welcome() {
                                 : "Reading what you've connected"}
           status={scanStatus}>
           <PersonFinds people={people} active={scanActive} done={scanDone} />
-          <EntityStrip bindings={sensorChips} active={scanActive} done={scanDone} />
+          {scanDone
+            ? <EntityStrip bindings={sensorChips} active={false} done={true} />
+            : <ScanFeed entities={entities} active={scanActive} done={false} />}
         </StageRow>
 
         {llm?.configured && (
