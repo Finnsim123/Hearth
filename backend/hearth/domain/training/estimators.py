@@ -58,13 +58,16 @@ def _tree_shap(est, X: pd.DataFrame) -> pd.DataFrame:
         values = shap.TreeExplainer(est.model).shap_values(Xa)
         preds = est.model.predict(Xa)
         cls_idx = {c: i for i, c in enumerate(est.classes_)}
+        arr = None if isinstance(values, list) else np.asarray(values)
         rows = []
         for i, pred in enumerate(preds):
             k = cls_idx[pred]
             if isinstance(values, list):                  # old API: list per class
                 row = values[k][i]
-            else:                                         # new API: (n, feat, cls)
-                row = np.asarray(values)[i, :, k]
+            elif arr.ndim == 3:                           # multiclass: (n, feat, cls)
+                row = arr[i, :, k]
+            else:                                         # binary: (n, feat) = +class
+                row = arr[i] if k == 1 else -arr[i]
             rows.append(row)
         return pd.DataFrame(rows, index=X.index, columns=est.columns)
     except Exception as exc:

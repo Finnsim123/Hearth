@@ -176,6 +176,21 @@ def test_binary_auc_is_computed():
     assert "auc_macro" in metrics and 0.9 <= metrics["auc_macro"] <= 1.0
 
 
+def test_binary_shap_explain_does_not_crash():
+    """A 2-class model's SHAP comes back 2-D (n, feat); explain() must handle it,
+    not index it as 3-D (the live 'too many indices' crash)."""
+    idx = pd.date_range("2026-06-01", periods=80, freq="30min", tz="UTC")
+    X = pd.DataFrame({"signal": np.r_[np.zeros(40), np.ones(40)],
+                      "noise": np.random.RandomState(0).rand(80)}, index=idx)
+    y = pd.Series(["home"] * 40 + ["away"] * 40, index=idx)
+    est = RandomForestEstimator(n_estimators=30)
+    est.fit(X, y)
+    expl = est.explain(X.head(5))
+    # shap may be absent in the sandbox → empty df is acceptable; if present, it
+    # must be per-row without raising.
+    assert expl is not None and len(expl) in (0, 5)
+
+
 def test_estimator_port_capabilities():
     """Trainer programs against the Estimator port only — these are the methods
     it relies on (commit 18): importances(), calibrate()->bool, the

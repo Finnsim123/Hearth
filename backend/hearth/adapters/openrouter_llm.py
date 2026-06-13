@@ -60,7 +60,20 @@ def _extract_json(text: str):
     except json.JSONDecodeError:
         m = re.search(r"[\[{].*[\]}]", text, re.S)
         if m:
-            return json.loads(m.group(0))
+            try:
+                return json.loads(m.group(0))
+            except json.JSONDecodeError:
+                pass
+        # salvage a TRUNCATED top-level array (max_tokens cut it mid-object):
+        # keep everything up to the last complete object and close the array.
+        if "[" in text:
+            arr = text.index("[")
+            last = text.rfind("}")
+            if last > arr:
+                try:
+                    return json.loads(text[arr:last + 1] + "]")
+                except json.JSONDecodeError:
+                    pass
         raise
 
 
@@ -421,7 +434,7 @@ class OpenRouterAdvisor:
         user = (f"Activities: {act_desc}\n\nBindings:\n{binding_desc}\n\n"
                 f"Allowed features:\n{', '.join(sorted(feats))}")
         try:
-            items = await self._chat(system, user,
+            items = await self._chat(system, user, max_tokens=8000,
                                      task="Writing labeling rules",
                                      sent=f"{len(bindings)} sensors")
         except Exception as exc:

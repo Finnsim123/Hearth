@@ -29,6 +29,14 @@ def _advisor(monkeypatch, canned):
     return adv
 
 
+def test_extract_json_salvages_truncated_array():
+    from hearth.adapters.openrouter_llm import _extract_json
+    # a response cut off mid-object (max_tokens) — keep the complete elements
+    truncated = '[{"a": 1}, {"b": 2}, {"c": 3'
+    out = _extract_json(truncated)
+    assert out == [{"a": 1}, {"b": 2}]
+
+
 def test_validate_predicate_whitelist():
     feats = allowed_features(BINDINGS)
     assert "bed_links_occupied" in feats and "alice_loc_home_last" in feats

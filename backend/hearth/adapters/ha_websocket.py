@@ -100,15 +100,25 @@ class HaWebSocketSource:
 
     async def history(self, entity_ids: list[str], start: datetime,
                       end: datetime) -> list[EntityState]:
-        """Gap-fill via REST /api/history/period."""
+        """Gap-fill / warm-start via REST /api/history/period.
+
+        The timestamp is in the URL PATH and carries a `+00:00` offset — left raw,
+        the `+` decodes to a space and HA returns 400. So the path segment is
+        percent-encoded and the rest go through aiohttp's `params` (which encodes
+        `+`, commas, etc.). `minimal_response`/`no_attributes` are presence flags;
+        HA treats `key=` as present.
+        """
+        from urllib.parse import quote
         conn = self._conn()
-        url = (f"{conn['url'].rstrip('/')}/api/history/period/{start.isoformat()}"
-               f"?end_time={end.isoformat()}&filter_entity_id={','.join(entity_ids)}"
-               f"&minimal_response&no_attributes")
+        base = conn["url"].rstrip("/")
+        url = f"{base}/api/history/period/{quote(start.isoformat())}"
+        params = {"end_time": end.isoformat(), "filter_entity_id": ",".join(entity_ids),
+                  "minimal_response": "", "no_attributes": ""}
         headers = {"Authorization": f"Bearer {conn['token']}"}
         out: list[EntityState] = []
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(60)) as r:
+            async with session.get(url, params=params, headers=headers,
+                                    timeout=aiohttp.ClientTimeout(60)) as r:
                 r.raise_for_status()
                 for entity_series in await r.json():
                     eid = entity_series[0].get("entity_id") if entity_series else None
