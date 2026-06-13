@@ -105,13 +105,16 @@ then lights up once the backend is back (polls only accept genuine 200s, so the
 restart 401/503s never read as real state). "Go to my dashboard" is disabled
 until it's up. It polls `GET /api/buddy` for the current phase and `GET /api/flow`
 for live counts, and animates an entity strip over the sensors Hearth actually
-bound (`GET /api/bindings`). Two arcs, chosen by whether history was imported
-(flag in `localStorage['hearth.welcome']`):
+bound (`GET /api/bindings`). **Warm start runs for everyone** (flag `fastTrack`
+in `localStorage['hearth.welcome']`, with `source`: `bucket` = a pre-existing
+external HA→Influx bucket with the longest history, `recorder` = ~10 days from
+HA's own recorder — see §3.1):
 
-- **Fast-track** (imported history): the stepper lights up live as the phase
+- **Warm-start arc** (the default): the stepper lights up live as the phase
   advances — scanning your home → reading with AI (only if a key is set) →
   building features → learning your routines → finding patterns — finishing
-  with the first model live and CTAs to name patterns / answer questions.
+  with the first model live and CTAs to name patterns / answer questions (or, if
+  the recorder was too thin to train, a softer "I've started learning" close).
   During scanning, a **live entity feed** (from `GET /api/ha/entities`) rolls
   through the real entities Hearth is reading so the user recognises their own
   things; it settles into the kept-sensor chips and "N sensors found" once the
@@ -122,8 +125,9 @@ bound (`GET /api/bindings`). Two arcs, chosen by whether history was imported
   in — `llm.activity.prompt`/`reply`) so the step shows real insight. The
   building-features row rolls a **feature feed** of the real feature columns
   being created with each transform (from `GET /api/feature-spec`).
-- **Fresh** (no history): scanning completes, the later stages show "starts as
-  your data arrives", and the copy explains the few-days wait.
+- **Fresh fallback** (`fastTrack` false — only if the recorder is empty/disabled):
+  scanning completes, later stages show "starts as your data arrives", and the
+  copy explains the few-days wait.
 
 A "Go to my dashboard" button is always present (the work continues in the
 background); reaching the screen later still reflects current state. Clearing

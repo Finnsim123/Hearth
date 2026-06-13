@@ -8,12 +8,14 @@
  * nothing here is faked. The entity strip animates over the sensors Hearth
  * actually bound (GET /api/bindings).
  *
- * Two arcs, chosen by whether the wizard imported history (flag in
- * localStorage 'hearth.welcome'):
- *   • fast-track  → the whole pipeline completes in minutes, watched live.
- *   • fresh       → scanning completes, then "recording started, come back".
+ * Warm start runs for everyone now (flag `fastTrack` in localStorage
+ * 'hearth.welcome', with `source`: "bucket" = an external HA→Influx bucket with
+ * the longest history, "recorder" = ~10 days from HA's own recorder). The whole
+ * pipeline completes in minutes and is watched live. The legacy "fresh / wait a
+ * week" arc (`fastTrack` false) remains only as a fallback.
  *
- * Reached via window.location → /welcome after setup; App renders it full-screen.
+ * The wizard renders it inline the instant setup finishes (it doubles as the
+ * loading screen while Hearth restarts); "Go to dashboard" reloads into the app.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -349,6 +351,7 @@ export default function Welcome() {
     catch { return {}; }
   }, []);
   const fastTrack: boolean = !!flag.fastTrack;
+  const source: string = flag.source ?? "recorder";   // "bucket" | "recorder"
 
   const [buddy, setBuddy] = useState<Buddy | null>(null);
   const [flow, setFlow] = useState<Flow | null>(null);
@@ -435,9 +438,11 @@ export default function Welcome() {
   const greeting = names.length
     ? `Hi ${names.slice(0, 3).join(", ").replace(/, ([^,]*)$/, " and $1")} — I'm Ember.`
     : "Hi — I'm Ember.";
-  const sub = fastTrack
-    ? "You brought history, so I'm not waiting a week — watch me work through it now."
-    : "I'll live on every page, quietly narrating what I'm up to. Here's what just happened.";
+  const sub = !fastTrack
+    ? "I'll live on every page, quietly narrating what I'm up to. Here's what just happened."
+    : source === "bucket"
+      ? "You brought history, so I'm not waiting — watch me learn from it now."
+      : "Home Assistant already remembers the last several days — I'm learning from that now, so you don't have to wait a week.";
 
   const patterns = node("discovery");
   const nPatterns = parseInt(patterns?.value ?? "", 10);
@@ -544,9 +549,15 @@ export default function Welcome() {
             I'll send your phone a note when the first patterns are ready, in a few days.
           </p>
         )}
-        {finished && fastTrack && (
+        {finished && fastTrack && hasModel && (
           <p style={{ color: "var(--ok, #34D399)", fontWeight: 600, fontSize: 14.5, margin: 0 }}>
             All set — your first model is live. It starts “provisional” and sharpens as you confirm.
+          </p>
+        )}
+        {finished && fastTrack && !hasModel && (
+          <p style={{ color: "var(--text-dim)", fontSize: 14, textAlign: "center", margin: 0, maxWidth: 460 }}>
+            All set — I've started learning from what Home Assistant remembers. Predictions appear
+            as soon as there's enough signal; I'll keep building in the background.
           </p>
         )}
 

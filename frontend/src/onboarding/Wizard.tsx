@@ -72,10 +72,14 @@ export default function Wizard() {
     // experience now: it shows the buddy intro while Hearth restarts and lights
     // up the pipeline once the backend is back. No separate progress page.
     localStorage.removeItem(STORE);
-    const fastTrack = data.influx.mode === "external" && !!data.influx.sourceBucket;
+    // Warm start always runs now: an external bucket gives the longest history,
+    // otherwise we pull ~10 days from HA's recorder — so the live arc is for
+    // everyone. `source` only tweaks the greeting copy.
+    const hasBucket = data.influx.mode === "external" && !!data.influx.sourceBucket;
     // greet only whoever receives system messages (the operator), not every member
     localStorage.setItem("hearth.welcome", JSON.stringify({
-      fastTrack,
+      fastTrack: true,
+      source: hasBucket ? "bucket" : "recorder",
       members: data.members.filter((m) => m.notifySystem).map((m) => m.name).filter(Boolean) }));
     setApplying("welcome");
     try {

@@ -116,7 +116,7 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
 
       {/* edge throughput label (ingest rate) */}
       {f.edges.ha_raw?.label && (
-        <text x={137} y={52} textAnchor="middle" fontSize={11} fill="var(--text-dim)"
+        <text x={137} y={106} textAnchor="middle" fontSize={11} fill="var(--text-dim)"
               style={{ pointerEvents: "none" }}>{f.edges.ha_raw.label}</text>
       )}
       {!compact && (
