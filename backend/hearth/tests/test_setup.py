@@ -39,6 +39,7 @@ PAYLOAD = {
                  "notifyService": "mobile_app_x", "avatar": "preset:ember"}],
     "llmKey": "",
     "taxonomyPreset": "standard",
+    "modelFamily": "gradient_boosting",
 }
 
 
@@ -55,6 +56,9 @@ def test_setup_complete_persists_everything(client):
     assert persons[0].id == "alex" and persons[0].avatar == "preset:ember"
     slugs = {a.slug for a in repo.activities()}
     assert {"sleeping", "cooking", "movie"} <= slugs
+    # the wizard's advanced model-family choice is persisted
+    from hearth.domain.training.trainer import load_training_config
+    assert load_training_config(repo).model_family == "gradient_boosting"
     # slow seeding is DEFERRED to the post-restart boot (the setup request
     # must answer instantly so the login cookie reaches the browser)
     assert repo.bindings() == []

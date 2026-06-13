@@ -26,6 +26,7 @@ type WizardData = {
   llmKey: string;
   llmModel: string;
   taxonomyPreset: "minimal" | "standard" | "custom";
+  modelFamily: "random_forest" | "gradient_boosting" | "logistic" | "embedding";
 };
 
 const empty: WizardData = {
@@ -37,6 +38,7 @@ const empty: WizardData = {
   llmKey: "",
   llmModel: "openai/gpt-4o-mini",
   taxonomyPreset: "standard",
+  modelFamily: "random_forest",
 };
 
 
@@ -568,6 +570,21 @@ function StepActivities({ d, set, next, back }: StepProps) {
           Rare activities need more examples: something that happens once a day takes roughly a month
           to learn well. The Models page shows exactly when each activity has enough data.
         </Callout>
+        <details style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+          <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--text-dim)" }}>
+            Advanced: learning engine
+          </summary>
+          <Field label="Model family"
+            hint="The algorithm Hearth trains. Random forest is the reliable default and what we recommend. You can change this any time in Settings — switching just retrains.">
+            <select value={d.modelFamily}
+                    onChange={(e) => set("modelFamily", e.target.value as WizardData["modelFamily"])}>
+              <option value="random_forest">Random forest — robust default (recommended)</option>
+              <option value="gradient_boosting">Gradient boosting — sharper, slower to train</option>
+              <option value="logistic">Logistic — simple, fast, very interpretable</option>
+              <option value="embedding">Embedding — experimental, for future encoders</option>
+            </select>
+          </Field>
+        </details>
       </StepShell>
       <FooterNav onBack={back} onNext={next} />
     </>

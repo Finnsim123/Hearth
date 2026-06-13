@@ -326,6 +326,13 @@ def build_api_router(deps: dict) -> APIRouter:
             repo.set_connection("llm", "https://openrouter.ai/api/v1", body["llmKey"],
                                 {"model": body.get("llmModel") or "openai/gpt-4o-mini"})
 
+        if body.get("modelFamily"):
+            from ..domain.training.trainer import set_model_family
+            try:
+                set_model_family(repo, str(body["modelFamily"]))
+            except ValueError:
+                pass  # unknown family from a stale client → keep the default
+
         def _slug(name: str) -> str:
             return _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "member"
 
