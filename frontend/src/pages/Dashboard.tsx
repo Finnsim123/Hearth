@@ -388,7 +388,7 @@ const tierColor = (t: number) => TIER_META[t]?.[1] ?? TIER_META[2][1];
 type Leaf = C & { tier: number; name: string; role: string; per_day: number; recent: boolean };
 type Room = { x: number; y: number; r: number; key: string; label: string;
               leaves: Leaf[]; total: number; sparse: boolean; tiers: Record<number, number>;
-              live: number };
+              live: number; blind?: boolean };
 
 // Merge key for case / separator variants ("Living_room" == "livingroom").
 const roomKey = (room: string | null) =>
@@ -408,7 +408,7 @@ const LABEL_H = 24;
 /** Pack each room's sensors into a disc, then let the room-discs flow into an
  *  organic, non-overlapping cloud that fills the width `W` (svg units; a
  *  narrower W on mobile keeps the bubbles legible once scaled to the screen). */
-function layoutRooms(rows: Health[], W: number): { rooms: Room[]; width: number; height: number } {
+function layoutRooms(rows: Health[], W: number, blind: string[] = []): { rooms: Room[]; width: number; height: number } {
   const groups: Record<string, { label: string; list: Health[]; originals: Set<string> }> = {};
   for (const b of rows) {
     const k = roomKey(b.room);
@@ -431,7 +431,14 @@ function layoutRooms(rows: Health[], W: number): { rooms: Room[]; width: number;
     return { x: 0, y: 0, r: e.r + 7, key, label: prettyRoom([...g.originals]),
              leaves, total: leaves.length, sparse: leaves.length <= 1, tiers,
              live: leaves.filter((l) => l.recent).length };
-  }).sort((a, b) => b.r - a.r);
+  });
+  // blind spots: HA areas with no usable sensor — small dashed ghost discs
+  for (const area of blind) {
+    rooms.push({ x: 0, y: 0, r: 20, key: `blind:${roomKey(area)}`, label: prettyRoom([area]),
+                 leaves: [], total: 0, sparse: true, tiers: { 1: 0, 2: 0, 3: 0 },
+                 live: 0, blind: true });
+  }
+  rooms.sort((a, b) => b.r - a.r);
 
   // A wide 2D cloud, not a row. Seed on a phyllotaxis spiral stretched to fill
   // a wide ellipse (biggest room near the centre), then resolve ONLY collisions.
@@ -477,12 +484,16 @@ function layoutRooms(rows: Health[], W: number): { rooms: Room[]; width: number;
  *  Click a room to list its sensors. Small/all-pink rooms = barely sensed. */
 function SensorCoverage() {
   const [rows, setRows] = useState<Health[] | null>(null);
+  const [known, setKnown] = useState<string[]>([]);
   const [sel, setSel] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const isMobile = useIsMobile();
   useEffect(() => {
     const load = () => fetch("/api/bindings/health").then((r) => r.json())
-      .then((h) => setRows((h.bindings ?? []).filter((b: Health) => b.status === "alive")))
+      .then((h) => {
+        setRows((h.bindings ?? []).filter((b: Health) => b.status === "alive"));
+        setKnown(h.rooms_known ?? []);
+      })
       .catch(() => setRows([]));
     load();
     const id = setInterval(load, 30_000);   // live heartbeat: refresh recent-activity
@@ -490,7 +501,10 @@ function SensorCoverage() {
   }, []);
   if (!rows || rows.length === 0) return null;
 
-  const { rooms } = layoutRooms(rows, isMobile ? 600 : 1040);
+  // HA areas with no usable sensor → blind-spot ghost bubbles
+  const covered = new Set(rows.map((b) => roomKey(b.room)));
+  const blind = known.filter((a) => !covered.has(roomKey(a)));
+  const { rooms } = layoutRooms(rows, isMobile ? 600 : 1040, blind);
   const selected = rooms.find((r) => r.key === sel) || null;
 
   // Fit the viewBox to the actual bubble cloud (incl. labels) so the chart fills
@@ -504,7 +518,7 @@ function SensorCoverage() {
 
   return (
     <Card icon="sensors" title="Sensor coverage"
-          sub="Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Dots pulsing green fired in the last few minutes. Click a room to see its sensors.">
+          sub="Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Dots pulsing green fired in the last few minutes; dashed rooms have no sensor Hearth can use. Click a room to see its sensors.">
       <svg viewBox={`${minX} ${minY} ${vbW} ${vbH}`} role="img"
            style={{ width: "100%", display: "block" }}>
         <style>{`
@@ -514,6 +528,20 @@ function SensorCoverage() {
         {rooms.map((rm) => {
           const active = rm.key === sel || rm.key === hover;
           const dim = (sel || hover) && !active;
+          if (rm.blind) {
+            // a room HA knows about but Hearth has no usable sensor in
+            return (
+              <g key={rm.key} style={{ opacity: dim ? 0.4 : 0.8 }}>
+                <title>{rm.label} — no sensors Hearth can use here. Add one in Home Assistant, then Rescan.</title>
+                <circle cx={rm.x} cy={rm.y} r={rm.r} fill="none"
+                        stroke="var(--text-dim)" strokeWidth={1.2} strokeDasharray="3 3" opacity={0.6} />
+                <text x={rm.x} y={rm.y + 4} textAnchor="middle" fontSize={16}
+                      fill="var(--text-dim)" style={{ pointerEvents: "none" }}>∅</text>
+                <text x={rm.x} y={rm.y + rm.r + 16} textAnchor="middle" fontSize={11.5}
+                      fill="var(--text-dim)" style={{ pointerEvents: "none" }}>{rm.label}</text>
+              </g>
+            );
+          }
           return (
             <g key={rm.key} onClick={() => setSel(sel === rm.key ? null : rm.key)}
                onMouseEnter={() => setHover(rm.key)} onMouseLeave={() => setHover(null)}

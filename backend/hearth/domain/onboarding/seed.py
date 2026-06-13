@@ -38,6 +38,9 @@ async def run_seed(repo, events) -> None:
         _status(repo, "scanning")
         inventory = await events.discover_entities()
         usable = [e for e in inventory if not e.get("disabled")]
+        # remember every HA area so the coverage map can show rooms Hearth has
+        # NO usable sensor in (blind spots), not just the ones it covers.
+        repo.set_setting("ha.areas", sorted({e["area"] for e in usable if e.get("area")}))
 
         advisor = None
         if repo.get_connection("llm"):

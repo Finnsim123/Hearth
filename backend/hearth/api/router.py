@@ -832,7 +832,8 @@ def build_api_router(deps: dict) -> APIRouter:
             alive = any(status_by_name.get(b.name) in ("alive", "constant") for b in mine)
             members.append({"id": p.id, "name": p.name, "has_person": bool(mine),
                             "person_alive": alive})
-        return {"bindings": out, "classes": classes, "hours": hours, "members": members}
+        return {"bindings": out, "classes": classes, "hours": hours, "members": members,
+                "rooms_known": repo.get_setting("ha.areas") or []}
 
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:

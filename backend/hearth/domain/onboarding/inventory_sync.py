@@ -47,6 +47,8 @@ async def sync_inventory(repo, events, use_llm: bool = False) -> dict:
     usable = [e for e in inventory if not e.get("disabled")]
     by_id = {e["entity_id"]: e for e in usable}
     existing = {b.entity_id: b for b in repo.bindings()}
+    # refresh the known-areas list (drives the coverage map's blind-spot bubbles)
+    repo.set_setting("ha.areas", sorted({e["area"] for e in usable if e.get("area")}))
 
     # 1. area/room updates for already-bound entities (safe; compare canonical key)
     rooms_updated = 0
