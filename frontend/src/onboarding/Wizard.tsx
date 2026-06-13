@@ -85,8 +85,10 @@ export default function Wizard() {
           // Hand off to the live Welcome screen (introduces the buddy and shows
           // the pipeline running on real data). Stash the arc + names for it.
           const fastTrack = data.influx.mode === "external" && !!data.influx.sourceBucket;
+          // greet only whoever receives system messages (the operator), not every member
           localStorage.setItem("hearth.welcome", JSON.stringify({
-            fastTrack, members: data.members.map((m) => m.name).filter(Boolean) }));
+            fastTrack,
+            members: data.members.filter((m) => m.notifySystem).map((m) => m.name).filter(Boolean) }));
           window.location.href = "/welcome";
           return;
         }

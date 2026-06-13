@@ -22,7 +22,7 @@ type Buddy = { phase: string; tone: string; title: string; detail: string;
 type FlowNode = { label: string; value: string; status: string };
 type Flow = { phase: string; nodes: Record<string, FlowNode> };
 type LlmActivity = { phase: "sending" | "received" | "error"; task: string;
-                     model?: string; sent?: string; items?: number };
+                     model?: string; sent?: string; items?: number; at?: string };
 type Llm = { configured: boolean; model?: string; activity?: LlmActivity | null };
 type Binding = { id: number; name: string; role: string; room: string | null;
                  person_id: string | null; enabled: boolean };
@@ -214,10 +214,12 @@ export default function Welcome() {
       .then((b: Binding[]) => setBindings((b || []).filter((x) => x.enabled).slice(0, 50)))
       .catch(() => {});
     fetch("/api/persons").then((r) => r.json())
-      .then((ps: { id: string; name: string }[]) => {
+      .then((ps: { id: string; name: string; notify_system?: boolean }[]) => {
         const list = ps || [];
         setPersonMap(Object.fromEntries(list.map((p) => [p.id, p.name])));
-        if (!flag.members) setNames(list.map((p) => p.name));
+        // greet only whoever actually receives Hearth's messages (the operator),
+        // not every household member — others aren't the one setting this up.
+        if (!flag.members) setNames(list.filter((p) => p.notify_system).map((p) => p.name));
       }).catch(() => {});
   }, []);
 
@@ -266,8 +268,8 @@ export default function Welcome() {
     ? `Hi ${names.slice(0, 3).join(", ").replace(/, ([^,]*)$/, " and $1")} — I'm Ember.`
     : "Hi — I'm Ember.";
   const sub = fastTrack
-    ? "Your friendly ember. You brought history, so I'm not waiting a week — watch me work through it now."
-    : "Your friendly ember. I'll live on every page, quietly narrating what I'm up to. Here's what just happened.";
+    ? "You brought history, so I'm not waiting a week — watch me work through it now."
+    : "I'll live on every page, quietly narrating what I'm up to. Here's what just happened.";
 
   const patterns = node("discovery");
   const nPatterns = parseInt(patterns?.value ?? "", 10);
@@ -282,20 +284,29 @@ export default function Welcome() {
   const scanStatus: StageStatus = inSetup ? statusFor(0, 2) : "done";
   const scanActive = scanStatus === "active";
   const scanDone = scanStatus === "done";
+  // bound-sensor count from the flow map (e.g. "96 sensors"); 0/absent early on
+  const scanCount = parseInt(node("ha")?.value ?? "", 10) || 0;
 
-  // live narration of the AI calls: "sending off ... now" → "received ... now"
+  // live narration of the AI calls: "sending ... now" → "receiving ... now",
+  // but only while the call is actually fresh (so a finished call doesn't keep
+  // claiming it's happening "now").
   const act = llm?.activity;
   const model = llm?.model && llm.model !== "auto" ? llm.model : "the LLM";
+  const actFresh = !!act?.at && Date.now() - Date.parse(act.at) < 12000;
   const aiDetail = (() => {
-    if (act?.phase === "sending")
+    if (act && actFresh && act.phase === "sending")
       return `Sending to ${model} now — ${act.task.toLowerCase()}${act.sent ? ` (${act.sent})` : ""}`;
-    if (act?.phase === "received")
+    if (act && actFresh && act.phase === "received")
       return `Receiving ${act.task.toLowerCase()} now${act.items != null ? ` — ${act.items} back` : ""}`;
     if (act?.phase === "error")
       return "AI call hit a snag — continuing with the built-in fallback";
-    if (inSetup && pos >= 3) return "Done — your AI suggestions are in";
-    return `${model} is naming roles and proposing features`;
+    if (inSetup && pos >= 3) return "Your AI suggestions are in";
+    return `${model} is reading your sensors`;
   })();
+  // AI is "done" only once it's genuinely idle (no fresh call) AND the pipeline
+  // has moved past scanning — and always by the time training starts.
+  const aiStatus: StageStatus = !inSetup ? "done"
+    : (pos >= 5 || (pos >= 3 && !actFresh)) ? "done" : "active";
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
@@ -316,16 +327,15 @@ export default function Welcome() {
 
       <div style={{ width: "100%", maxWidth: 560, marginTop: 34 }}>
         <StageRow title="Scanning your home"
-          detail={node("ha")?.value ? `${node("ha")!.value} found` : "Reading what you've connected"}
+          detail={scanCount > 0 ? `${scanCount} sensor${scanCount !== 1 ? "s" : ""} found`
+                                : "Reading what you've connected"}
           status={scanStatus}>
           <PersonFinds people={people} active={scanActive} done={scanDone} />
           <EntityStrip bindings={sensorChips} active={scanActive} done={scanDone} />
         </StageRow>
 
         {llm?.configured && (
-          <StageRow title="Reading your sensors with AI"
-            detail={aiDetail}
-            status={inSetup ? (pos >= 3 ? "done" : "active") : "done"} />
+          <StageRow title="Reading your sensors with AI" detail={aiDetail} status={aiStatus} />
         )}
 
         <StageRow title="Building features"
