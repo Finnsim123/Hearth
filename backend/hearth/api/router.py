@@ -98,6 +98,21 @@ def build_api_router(deps: dict) -> APIRouter:
             out["status"] = repo.get_setting("llm.status")
         return out
 
+    # ── feature power mode (conservative vs full whitelist) ────────────────
+    @api.get("/feature-power")
+    def get_feature_power() -> dict:
+        from ..domain.features.transforms import WHITELIST_MODES, active_mode
+        return {"mode": active_mode(repo), "modes": list(WHITELIST_MODES)}
+
+    @api.post("/feature-power")
+    def set_feature_power(body: dict) -> dict:
+        from ..domain.features.transforms import set_feature_power_mode
+        try:
+            mode = set_feature_power_mode(repo, str(body.get("mode", "")))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "mode": mode}
+
     # ── setup completion: persist EVERYTHING the wizard collected ──────────
     TAXONOMY_PRESETS = {
         "minimal": [("sleeping", "Sleeping", "sleeping"), ("away", "Away", "out of the house"),

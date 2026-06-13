@@ -133,12 +133,22 @@ def whitelist_ids(mode: str = DEFAULT_MODE) -> set[str]:
 
 def active_mode(repo) -> str:
     """Feature power mode from the 'feature.power_mode' setting (gap analysis
-    C7; the setting itself is wired in a later commit). Defaults to conservative."""
+    C7). Defaults to conservative; an invalid stored value degrades to it too."""
     try:
         m = repo.get_setting("feature.power_mode", DEFAULT_MODE)
     except Exception:
         m = DEFAULT_MODE
     return m if m in WHITELIST_MODES else DEFAULT_MODE
+
+
+def set_feature_power_mode(repo, mode: str) -> str:
+    """Validate and persist the feature power mode. Raises ValueError on an
+    unknown mode (the API layer maps that to a 400). Returns the stored mode."""
+    if mode not in WHITELIST_MODES:
+        raise ValueError(f"unknown feature power mode: {mode!r} "
+                         f"(expected one of {', '.join(WHITELIST_MODES)})")
+    repo.set_setting("feature.power_mode", mode)
+    return mode
 
 
 def _type_ok(value, token: str) -> bool:

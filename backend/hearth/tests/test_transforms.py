@@ -1,6 +1,8 @@
 """Transform whitelist registry — the safety boundary's metadata (Step 3 §d)."""
 from __future__ import annotations
 
+import pytest
+
 from hearth.domain.features import transforms as T
 from hearth.domain.schemas import InfoTier
 
@@ -57,3 +59,25 @@ def test_check_params():
     assert T.check_params(onehot, {"states": ["playing", "paused"]})
     assert not T.check_params(onehot, {"states": [1, 2]})
     assert not T.check_params(onehot, {"states": "playing"})
+
+
+class _Repo:
+    def __init__(self):
+        self.s: dict = {}
+    def get_setting(self, k, d=None):
+        return self.s.get(k, d)
+    def set_setting(self, k, v):
+        self.s[k] = v
+
+
+def test_feature_power_mode_setting():
+    r = _Repo()
+    assert T.active_mode(r) == "conservative"               # default with nothing set
+    assert T.set_feature_power_mode(r, "full") == "full"
+    assert r.s["feature.power_mode"] == "full"
+    assert T.active_mode(r) == "full"
+    with pytest.raises(ValueError):
+        T.set_feature_power_mode(r, "bogus")                # invalid rejected, not stored
+    assert r.s["feature.power_mode"] == "full"
+    r.s["feature.power_mode"] = "garbage"                   # a corrupt value
+    assert T.active_mode(r) == "conservative"               # degrades safely on read
