@@ -214,8 +214,10 @@ git pull && docker compose up -d --build
   always use `http://localhost:8420`.
 - **No predictions yet.** A fresh home needs a few days of data (or import history via
   an existing InfluxDB bucket). The dashboard shows the cold-start progress.
-- **A sensor shows "no data".** Make sure Home Assistant is writing it to InfluxDB and
-  it isn't disabled in HA. The Sensors page flags stuck or silent sensors.
+- **A sensor shows "no data".** Hearth reads state changes live from Home Assistant
+  over its WebSocket API — no HA→InfluxDB integration needed. "No data" means HA isn't
+  sending changes for it (entity disabled in HA, or it simply hasn't changed yet). The
+  Sensors page flags stuck or silent sensors.
 - **It can't predict "away".** Link each person to their `person.*` home/away entity
   on the Sensors page (Auto-link with AI, or by hand).
 

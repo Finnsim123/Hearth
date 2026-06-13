@@ -96,13 +96,18 @@ flowchart TB
 The prototype required users to hand-edit HA's `influxdb:` include list and
 restart HA for every new sensor — the single biggest setup failure mode. Hearth
 instead subscribes to HA's **WebSocket API** (`state_changed` events) for exactly
-the entities the user selected in the UI, and writes them to `har_raw` itself.
+the entities the user selected in the UI, and writes them to `hearth_raw` itself.
 
 - Zero HA configuration. Adding a sensor = one click in the Hearth UI.
 - Reconnect with exponential backoff; on reconnect, gap-fill via HA's REST
   history API (`/api/history/period`) so cron-less ingest survives restarts.
-- Optional **backfill importer** reads an existing HA→InfluxDB bucket (the
-  har-homelab case: 185k+ points since April) so current users keep their history.
+- **The HA → InfluxDB integration is not required.** Live data comes over the
+  WebSocket; recent history comes from HA's own recorder via the history API.
+  Hearth never depends on the user's `influxdb:` include list.
+- Optional **backfill importer**: if a home already pushes to an external
+  InfluxDB bucket (the HA → InfluxDB integration), Hearth can import that
+  longer history for a stronger cold start — but it is strictly an extra, not a
+  prerequisite.
 
 ### 3.2 Entity bindings — how Hearth generalizes across homes
 
@@ -132,11 +137,11 @@ windows** (stride 5 min at inference, stride 30 min for training matrices — de
 inference, non-leaky training):
 
 ```
-har_raw ──► prepare (resample 1-min, role-aware ffill limits)
+hearth_raw ──► prepare (resample 1-min, role-aware ffill limits)
         ──► extract (per-binding recipe → features)
         ──► compose (cross-binding features: lights_off+bed, media+sofa, lags)
         ──► impute  (semantic sentinels: -1 = "sensor absent", 0 = "event absent")
-        ──► write to har_features (tagged feature_set=vN, person=…)
+        ──► write to hearth_features (tagged feature_set=vN, person=…)
 ```
 
 Features are **persisted to InfluxDB** — requirement #1 — which buys: training
