@@ -81,6 +81,15 @@ _BLOCKLIST = re.compile(
     r"occupied_pressure|unoccupied_pressure|calibrate|opstartgedrag|"
     r"power_on_level|power_on_behavior|niveau_bij_opstarten|wake_word|"
     r"start_up_color|tts_volume|print_bed|nozzle|heatbreak|cooling_fan|"
+    # 3D printers (Bambu/OctoPrint/Klipper/…): nozzle/bed/chamber temps, fans,
+    # filament, layers, print status — high-variance telemetry that says nothing
+    # about a HUMAN's activity but bloats the feature set and gets split on. Block
+    # by integration + model tokens AND the unambiguous printer telemetry words.
+    r"bambu|octoprint|moonraker|klipper|prusa|creality|anycubic|voron|sovol|"
+    r"flashforge|elegoo|a1mini|a1_mini|x1c|x1_carbon|p1s\b|p1p\b|"
+    r"hotend|heatbed|hotbed|extruder|filament|gcode|chamber_temp|nozzle_temp|"
+    r"print_status|print_error|print_speed|print_weight|print_time|"
+    r"current_layer|total_layer|layer_num|remaining_time|"
     # controller/radio board diagnostics — a Zigbee coordinator's own chip
     # temperature is about the dongle, never the room (cpu/core_ already above).
     r"zigbee|coordinator|slzb|zbdongle|conbee|_chip_|chip_temp|mcu|soc_temp|"

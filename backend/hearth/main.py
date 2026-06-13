@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
@@ -76,7 +77,50 @@ def create_app() -> FastAPI:
     deps = build_deps()
     deps["log_buffer"] = log_buffer
 
-    app = FastAPI(title="Hearth", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # idempotent: existing installs get activity parents without re-seeding
+        try:
+            from .domain.labeling.taxonomy import ensure_hierarchy
+            ensure_hierarchy(deps["repo"])
+        except Exception:
+            pass
+        scheduler = build_scheduler(deps)
+        scheduler.start()
+        # publish MQTT discovery once on boot (idempotent, retained) so entities
+        # exist before the first prediction; no-op without a broker.
+        if deps.get("publisher"):
+            try:
+                deps["publisher"].announce(deps["repo"].persons(), deps["repo"].activities())
+            except Exception:
+                log.exception("MQTT announce on startup failed")
+        if deps.get("ingest_coro"):
+            app.state.ingest_task = asyncio.create_task(deps["ingest_coro"]())
+        if deps.get("realtime_coro"):
+            app.state.realtime_task = asyncio.create_task(deps["realtime_coro"]())
+        repo = deps["repo"]
+        if repo.get_setting("seed.pending") or repo.get_setting("fasttrack.pending"):
+            async def _seed_then_fasttrack() -> None:
+                if repo.get_setting("seed.pending") and deps.get("events"):
+                    from .domain.onboarding.seed import run_seed
+                    await run_seed(repo, deps["events"])
+                # don't warm-start while the triage is awaiting approval — the
+                # pipeline must wait at the AI step until the user says go.
+                if (repo.get_setting("fasttrack.pending") and deps.get("tsdb")
+                        and not repo.get_setting("triage.awaiting")):
+                    from .domain.fasttrack import run_fast_track
+                    await run_fast_track(repo, deps["tsdb"], deps["models"],
+                                         deps.get("notifier"), deps.get("events"))
+            app.state.setup_task = asyncio.create_task(_seed_then_fasttrack())
+        log.info("Hearth up on :%s (tsdb=%s, ha=%s)", settings.port,
+                 bool(deps["tsdb"]), bool(deps["events"]))
+        yield
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            pass
+
+    app = FastAPI(title="Hearth", version="0.1.0", lifespan=lifespan)
     app.state.deps = deps
     app.include_router(build_api_router(deps), prefix="/api")
 
@@ -144,47 +188,6 @@ def create_app() -> FastAPI:
                 except (ValueError, OSError):
                     pass
             return FileResponse(static_root / "index.html")
-
-    @app.on_event("startup")
-    async def _ensure_hierarchy() -> None:
-        # idempotent: existing installs get activity parents without re-seeding
-        try:
-            from .domain.labeling.taxonomy import ensure_hierarchy
-            ensure_hierarchy(deps["repo"])
-        except Exception:
-            pass
-
-    @app.on_event("startup")
-    async def _start() -> None:
-        scheduler = build_scheduler(deps)
-        scheduler.start()
-        # publish MQTT discovery once on boot (idempotent, retained) so entities
-        # exist before the first prediction; no-op without a broker.
-        if deps.get("publisher"):
-            try:
-                deps["publisher"].announce(deps["repo"].persons(), deps["repo"].activities())
-            except Exception:
-                log.exception("MQTT announce on startup failed")
-        if deps.get("ingest_coro"):
-            app.state.ingest_task = asyncio.create_task(deps["ingest_coro"]())
-        if deps.get("realtime_coro"):
-            app.state.realtime_task = asyncio.create_task(deps["realtime_coro"]())
-        repo = deps["repo"]
-        if repo.get_setting("seed.pending") or repo.get_setting("fasttrack.pending"):
-            async def _seed_then_fasttrack() -> None:
-                if repo.get_setting("seed.pending") and deps.get("events"):
-                    from .domain.onboarding.seed import run_seed
-                    await run_seed(repo, deps["events"])
-                # don't warm-start while the triage is awaiting approval — the
-                # pipeline must wait at the AI step until the user says go.
-                if (repo.get_setting("fasttrack.pending") and deps.get("tsdb")
-                        and not repo.get_setting("triage.awaiting")):
-                    from .domain.fasttrack import run_fast_track
-                    await run_fast_track(repo, deps["tsdb"], deps["models"],
-                                         deps.get("notifier"), deps.get("events"))
-            app.state.setup_task = asyncio.create_task(_seed_then_fasttrack())
-        log.info("Hearth up on :%s (tsdb=%s, ha=%s)", settings.port,
-                 bool(deps["tsdb"]), bool(deps["events"]))
 
     return app
 

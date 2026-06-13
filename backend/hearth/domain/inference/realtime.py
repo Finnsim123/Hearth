@@ -86,7 +86,10 @@ def predict_current(person_id: str, tsdb, repo, store) -> Prediction | None:
     feats = current_window_features(tsdb, repo, person_id)
     if feats.empty:
         return None
-    ts = feats.index[-1]
+    # Align to the 5-min prediction grid so realtime writes land on the same
+    # window stamps as the scheduled grid lane (last-write-wins) instead of
+    # scattering irregular points through the ribbon history.
+    ts = feats.index[-1].floor("5min")
     est = store.load(record)
     row = est.predict_proba(feats).iloc[-1]
 

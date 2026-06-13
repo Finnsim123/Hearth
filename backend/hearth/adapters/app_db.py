@@ -13,7 +13,7 @@ from pathlib import Path
 
 import joblib
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, select,
+    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, func, select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -411,10 +411,9 @@ class AppDb:
 
     def questions_since(self, person: str, since: datetime) -> int:
         with Session(self.engine) as s:
-            rows = s.scalars(select(QuestionRow).where(
+            return int(s.scalar(select(func.count()).select_from(QuestionRow).where(
                 QuestionRow.person_id == person,
-                QuestionRow.created_at >= since)).all()
-            return len(rows)
+                QuestionRow.created_at >= since)) or 0)
 
     def last_question(self, person: str) -> Question | None:
         with Session(self.engine) as s:
@@ -568,7 +567,7 @@ class AppDb:
 
     def user_count(self) -> int:
         with Session(self.engine) as s:
-            return len(s.scalars(select(UserRow)).all())
+            return int(s.scalar(select(func.count()).select_from(UserRow)) or 0)
 
     @staticmethod
     def _norm_email(email: str) -> str:

@@ -31,7 +31,7 @@ jobs:
       - run: npm install
         working-directory: frontend
       - name: typecheck   # catches undefined imports/identifiers (the black-screen class)
-        run: npx tsc -b --noEmit || npx tsc --noEmit
+        run: npx tsc --noEmit   # plain check; -b build-mode ignores --noEmit and the || masked failures
         working-directory: frontend
       - name: build
         run: npm run build
