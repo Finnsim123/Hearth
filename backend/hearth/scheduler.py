@@ -30,16 +30,50 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="UTC")
     repo, tsdb, events = deps.get("repo"), deps.get("tsdb"), deps.get("events")
 
-    if tsdb is not None:
-        scheduler.add_job(build_latest_windows, "interval",
-                          seconds=settings.window_builder_interval,
-                          args=[tsdb, repo], id="window_builder",
-                          max_instances=1, coalesce=True)
+    def _influx_down(exc: Exception) -> bool:
+        """Does this look like InfluxDB being unreachable / timing out (vs a real
+        bug)? Match on the connectivity vocabulary urllib3/influxdb raise."""
+        s = f"{type(exc).__name__} {exc}".lower()
+        return any(k in s for k in (
+            "timed out", "timeout", "connection", "max retries",
+            "newconnectionerror", "protocolerror", "8086"))
+
+    def _guard_influx(exc: Exception, what: str) -> None:
+        """Surface a database-unreachable hiccup on the buddy (the user asked for
+        these to be visible), or log a genuine bug normally."""
+        from .domain.health import record_issue
+        if _influx_down(exc):
+            record_issue(repo, "influx_unreachable", "I can't reach your database",
+                         "InfluxDB isn't responding — features and predictions are "
+                         "paused until it's back. Check it's running and reachable.",
+                         cta={"label": "Logs", "href": "/settings#logs"})
+        else:
+            log.exception("%s failed", what)
 
     if tsdb is not None:
-        scheduler.add_job(predict_latest, "interval", minutes=5,
-                          args=[tsdb, repo, deps.get("models"),
-                                deps.get("publisher"), deps.get("notifier")],
+        def _window_builder() -> None:
+            from .domain.health import clear_issue
+            try:
+                build_latest_windows(tsdb, repo)
+                clear_issue(repo, "influx_unreachable")
+            except Exception as exc:                       # noqa: BLE001
+                _guard_influx(exc, "window builder")
+
+        scheduler.add_job(_window_builder, "interval",
+                          seconds=settings.window_builder_interval,
+                          id="window_builder", max_instances=1, coalesce=True)
+
+    if tsdb is not None:
+        async def _inference() -> None:
+            from .domain.health import clear_issue
+            try:
+                await predict_latest(tsdb, repo, deps.get("models"),
+                                     deps.get("publisher"), deps.get("notifier"))
+                clear_issue(repo, "influx_unreachable")
+            except Exception as exc:                       # noqa: BLE001
+                _guard_influx(exc, "inference")
+
+        scheduler.add_job(_inference, "interval", minutes=5,
                           id="inference", max_instances=1, coalesce=True)
 
         def _set_training(running: bool) -> None:

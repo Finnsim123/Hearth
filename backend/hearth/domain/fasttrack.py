@@ -144,3 +144,12 @@ async def run_fast_track(repo, tsdb, store, notifier=None, events=None) -> None:
     except Exception as exc:
         log.exception("fast track failed")
         _status(repo, "failed", error=str(exc))
+        # surface a database-unreachable failure on the buddy, like the live jobs do
+        s = f"{type(exc).__name__} {exc}".lower()
+        if any(k in s for k in ("timed out", "timeout", "connection", "max retries",
+                                "newconnectionerror", "protocolerror", "8086")):
+            from .health import record_issue
+            record_issue(repo, "influx_unreachable", "I can't reach your database",
+                         "InfluxDB timed out while I was learning from your history — "
+                         "I'll pick up where I left off once it's reachable.",
+                         cta={"label": "Logs", "href": "/settings#logs"})

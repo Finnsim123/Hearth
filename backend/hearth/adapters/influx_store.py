@@ -129,7 +129,9 @@ class InfluxStore:
 
     def __init__(self, url: str, org: str, token: str) -> None:
         self.org = org
-        self.client = InfluxDBClient(url=url, token=token, org=org, timeout=30_000)
+        # 60 s: big homes (1000+ entities) make heavy feature reads that can run
+        # past the old 30 s default and time out mid-query. Generous but bounded.
+        self.client = InfluxDBClient(url=url, token=token, org=org, timeout=60_000)
         self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
         self.query_api = self.client.query_api()
 
