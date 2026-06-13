@@ -77,7 +77,7 @@ def build_methodology(repo, tsdb) -> dict:
                           if pruned else None)
 
     # ── F–I. windows, features, time ──────────────────────────────────────
-    from .features.registry import all_recipes, feature_set_version
+    from .features.registry import active_feature_set_version, all_recipes
     recipes = _safe(all_recipes, {}) or {}
     out["window_minutes"] = 30
     out["role_windows"] = {role.value: r.window_min for role, r in recipes.items()}
@@ -87,7 +87,7 @@ def build_methodology(repo, tsdb) -> dict:
     composites = _safe(lambda: repo.get_setting("composites", []), []) or []
     tg = _safe(lambda: repo.get_setting("time_granularity", "coarse"), "coarse") or "coarse"
     out["time_granularity"] = tg
-    out["feature_set_version"] = _safe(lambda: feature_set_version(composites, tg))
+    out["feature_set_version"] = _safe(lambda: active_feature_set_version(repo))
     out["composite_count"] = len(composites)
     out["composite_names"] = [c.get("name") for c in composites][:12]
     out["rule_count"] = len(_safe(repo.rules, []) or [])

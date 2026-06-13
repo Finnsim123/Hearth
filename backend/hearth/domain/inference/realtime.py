@@ -23,7 +23,7 @@ import pandas as pd
 
 from ..features.pipeline import (WINDOW, bindings_for_person, compute_features,
                                   max_window_min, prepare)
-from ..features.registry import feature_set_version
+from ..features.spec_builder import load_active_spec
 from ..schemas import Prediction
 from .smoothing import smooth, transition_filter
 
@@ -67,12 +67,13 @@ def current_window_features(tsdb, repo, person_id: str):
     lag_features = repo.get_setting("lag_features", []) or []
     tz = repo.get_setting("timezone", "UTC") or "UTC"
     tg = repo.get_setting("time_granularity", "coarse") or "coarse"
+    spec = load_active_spec(repo)
     end = datetime.now(timezone.utc)
     start = end - WINDOW
     preroll = max(120, max_window_min(bindings))   # cover the slowest role's lookback
     raw = tsdb.read_raw(bindings, start - timedelta(minutes=preroll), end)
     prepared = prepare(raw, bindings) if not raw.empty else raw
-    return compute_features(prepared, bindings, [start], tz, composites, lag_features, tg)
+    return compute_features(prepared, bindings, [start], tz, composites, lag_features, tg, spec)
 
 
 def predict_current(person_id: str, tsdb, repo, store) -> Prediction | None:

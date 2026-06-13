@@ -162,6 +162,31 @@ _COMPOSITE_EXEC = {
 IMPLEMENTED = set(_ENTITY_EXEC) | set(_COMPOSITE_EXEC)
 
 
+def load_active_spec(repo) -> FeatureSpec | None:
+    """The active, VALIDATED feature spec from the 'feature_spec' setting, or
+    None if absent/empty/invalid. Validation here means only safe, executable
+    features ever reach the builder, regardless of how the setting was written.
+    The whitelist mode comes from the 'feature.power_mode' setting."""
+    try:
+        raw = repo.get_setting("feature_spec")
+    except Exception:
+        return None
+    if not isinstance(raw, dict) or not raw.get("features"):
+        return None
+    try:
+        spec = FeatureSpec.model_validate(raw)
+    except Exception:
+        log.warning("feature_spec setting failed to parse — ignoring")
+        return None
+    from .transforms import active_mode
+    from .validate import validate_spec
+    clean, rejected = validate_spec(spec, mode=active_mode(repo))
+    if rejected:
+        log.warning("feature_spec: %d features rejected by validation: %s",
+                    len(rejected), [n for n, _ in rejected][:8])
+    return clean if clean.features else None
+
+
 def build_features_from_spec(
     prepared: pd.DataFrame, spec: FeatureSpec, grid: list[datetime], *,
     entity_to_col: dict[str, str], window: timedelta = DEFAULT_WINDOW,

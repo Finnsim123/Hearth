@@ -52,9 +52,13 @@ PIPELINE_VERSION = "2"  # bump when extract_windows adds/changes columns
 
 
 def feature_set_version(extra: list[dict] | None = None,
-                        time_granularity: str = "coarse") -> str:
-    """Deterministic hash of recipes (+ composites + time granularity).
-    Changing the time encoding forces a clean retrain (old/new never mix)."""
+                        time_granularity: str = "coarse",
+                        spec=None) -> str:
+    """Deterministic hash of recipes (+ composites + time granularity + the
+    active feature spec, if any). Changing any of them forces a clean retrain
+    (old/new never mix, ADR-7). `spec` is a FeatureSpec or None; when None the
+    hash is IDENTICAL to the pre-spec behaviour, so installs without a spec are
+    unaffected."""
     h = hashlib.sha256()
     h.update(PIPELINE_VERSION.encode())
     h.update(f"time:{time_granularity}".encode())
@@ -66,7 +70,28 @@ def feature_set_version(extra: list[dict] | None = None,
         h.update(inspect.getsource(r.fn).encode())
     for comp in (extra or []):
         h.update(str(sorted(comp.items())).encode())
+    feats = getattr(spec, "features", None)
+    if feats:
+        for f in feats:
+            fp = (f.name, f.transform, tuple(f.inputs),
+                  tuple(sorted((f.params or {}).items(), key=lambda kv: kv[0])),
+                  f.window_min)
+            h.update(repr(fp).encode())
     return "v" + h.hexdigest()[:10]
+
+
+def active_feature_set_version(repo, spec=None) -> str:
+    """The feature_set_version for THIS instance: recipes + composites + time
+    granularity + the active, validated feature spec. Single source of truth so
+    every read/write of hearth_features agrees (no train/serve skew). Pass
+    `spec` to avoid re-loading it; otherwise it is loaded and validated here.
+    With no feature_spec setting this equals the historical version."""
+    composites = repo.get_setting("composites", []) or []
+    tg = repo.get_setting("time_granularity", "coarse") or "coarse"
+    if spec is None:
+        from .spec_builder import load_active_spec
+        spec = load_active_spec(repo)
+    return feature_set_version(composites, tg, spec)
 
 
 # ── default recipe set (ffill limits ported from the prototype) ────────────

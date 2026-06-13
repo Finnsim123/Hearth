@@ -66,10 +66,9 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
             """Cold-start accelerator: a fresh no-history install shouldn't wait
             until Sunday for its first model. As soon as a person has enough
             feature windows, train + promote — then this becomes a no-op."""
-            from .domain.features.registry import feature_set_version
+            from .domain.features.registry import active_feature_set_version
             from .domain.training.trainer import MIN_TRAIN_WINDOWS
-            fset = feature_set_version(repo.get_setting("composites", []) or [],
-                                       repo.get_setting("time_granularity", "coarse") or "coarse")
+            fset = active_feature_set_version(repo)
             now = datetime.now(timezone.utc)
             for person in repo.persons():
                 if not person.enabled:

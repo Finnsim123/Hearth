@@ -15,7 +15,8 @@ import pandas as pd
 
 from ..schemas import Binding, Role
 from .composites import apply_composites
-from .registry import all_recipes, feature_set_version, recipe_for
+from .registry import active_feature_set_version, all_recipes, recipe_for
+from .spec_builder import load_active_spec
 
 log = logging.getLogger(__name__)
 
@@ -227,11 +228,26 @@ def bindings_for_person(all_bindings: list[Binding], person_id: str) -> list[Bin
 def compute_features(prepared: pd.DataFrame, bindings: list[Binding],
                      grid: list[datetime], tz: str,
                      composites: list[dict], lag_features: list[str],
-                     time_granularity: str = "coarse") -> pd.DataFrame:
-    """The pure pipeline: extract -> composites -> lags -> impute."""
+                     time_granularity: str = "coarse", spec=None) -> pd.DataFrame:
+    """The pure pipeline: extract -> composites -> lags -> (spec features) ->
+    impute. `spec` is the active FeatureSpec or None; when None the output is
+    exactly the historical recipe pipeline (no regression). Spec columns are
+    added alongside recipe columns (never overwriting them) and imputed to 0."""
     df = extract_windows(prepared, bindings, grid, tz, time_granularity)
     df = apply_composites(df, composites)
     df = add_lags(df, lag_features)
+    if spec is not None and getattr(spec, "features", None):
+        from .spec_builder import build_features_from_spec
+        e2c = {b.entity_id: b.name for b in bindings}
+        spec_df, skipped = build_features_from_spec(
+            prepared, spec, grid, entity_to_col=e2c, window=WINDOW)
+        if skipped:
+            log.warning("spec features skipped (no executor): %s",
+                        [n for n, _ in skipped])
+        # positional add (same grid order); recipe columns win any name clash
+        for col in spec_df.columns:
+            if col not in df.columns:
+                df[col] = spec_df[col].to_numpy()
     return impute(df, bindings)
 
 
@@ -245,14 +261,15 @@ def build_windows(tsdb, repo, person_id: str, start: datetime, end: datetime,
     lag_features = repo.get_setting("lag_features", []) or []
     tz = repo.get_setting("timezone", "UTC") or "UTC"
     tg = repo.get_setting("time_granularity", "coarse") or "coarse"
+    spec = load_active_spec(repo)
     preroll = max(120, max_window_min(bindings))   # cover the slowest role's lookback
     raw = tsdb.read_raw(bindings, start - timedelta(minutes=preroll), end)
     prepared = prepare(raw, bindings) if not raw.empty else raw
     grid = window_grid(start, end, stride_min)
     if not grid:
         return pd.DataFrame()
-    feats = compute_features(prepared, bindings, grid, tz, composites, lag_features, tg)
-    tsdb.write_features(person_id, feature_set_version(composites, tg), feats)
+    feats = compute_features(prepared, bindings, grid, tz, composites, lag_features, tg, spec)
+    tsdb.write_features(person_id, active_feature_set_version(repo, spec), feats)
     return feats
 
 
@@ -260,8 +277,7 @@ def build_latest_windows(tsdb, repo) -> None:
     """Scheduler entrypoint: build any complete-but-unwritten windows for every
     enabled person, then heartbeat."""
     now = datetime.now(timezone.utc)
-    composites = repo.get_setting("composites", []) or []
-    fset = feature_set_version(composites, repo.get_setting("time_granularity", "coarse") or "coarse")
+    fset = active_feature_set_version(repo)
     for person in repo.persons():
         if not person.enabled:
             continue

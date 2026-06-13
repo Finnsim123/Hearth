@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
 
-from ..features.registry import feature_set_version
+from ..features.registry import active_feature_set_version
 from ..labeling.merge import merge_labels
 from ..labeling.rules import bootstrap_labels
 from ..schemas import ModelRecord
@@ -81,8 +81,7 @@ def validation_status(n_confirmed: int,
 def train_person(person_id: str, tsdb, repo, store,
                  weeks: int = 8, force: bool = False) -> ModelRecord | None:
     cfg = load_training_config(repo)
-    composites = repo.get_setting("composites", []) or []
-    fset = feature_set_version(composites, repo.get_setting("time_granularity", "coarse") or "coarse")
+    fset = active_feature_set_version(repo)
     end = datetime.now(timezone.utc)
     start = end - timedelta(weeks=weeks)
 

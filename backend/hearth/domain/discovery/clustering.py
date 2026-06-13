@@ -65,10 +65,9 @@ def discover_person(person_id: str, tsdb, repo, days: int = 30) -> list[ClusterC
     """Cluster one person's recent unexplained windows into pattern candidates."""
     from sklearn.cluster import HDBSCAN
 
-    from ..features.registry import feature_set_version
+    from ..features.registry import active_feature_set_version
 
-    fset = feature_set_version(repo.get_setting("composites", []) or [],
-                               repo.get_setting("time_granularity", "coarse") or "coarse")
+    fset = active_feature_set_version(repo)
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
     feats = tsdb.read_features(person_id, fset, start, end)

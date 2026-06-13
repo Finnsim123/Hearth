@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from ..features.registry import feature_set_version
+from ..features.registry import active_feature_set_version
 from ..labeling.rules import bootstrap_labels
 from ..schemas import Prediction
 
@@ -36,8 +36,7 @@ def _rules_predict(repo, feats: pd.DataFrame, person_id: str):
 
 
 def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
-    composites = repo.get_setting("composites", []) or []
-    fset = feature_set_version(composites, repo.get_setting("time_granularity", "coarse") or "coarse")
+    fset = active_feature_set_version(repo)
     now = datetime.now(timezone.utc)
     feats = tsdb.read_features(person_id, fset, now - timedelta(hours=2), now)
     if feats.empty:

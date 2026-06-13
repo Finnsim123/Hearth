@@ -103,6 +103,56 @@ def test_feature_set_version_changes_with_composites():
     assert feature_set_version([]).startswith("v")
 
 
+class _DictRepo:
+    def __init__(self, settings):
+        self.s = settings
+    def get_setting(self, k, d=None):
+        return self.s.get(k, d)
+
+
+def test_active_feature_set_version_no_spec_matches_pure():
+    """No feature_spec setting -> version is byte-identical to the pre-spec hash,
+    so existing installs are NOT forced to retrain (commit 9 non-regression)."""
+    from hearth.domain.features.registry import (
+        active_feature_set_version, feature_set_version)
+    assert active_feature_set_version(_DictRepo({})) == feature_set_version([], "coarse")
+
+
+def test_active_feature_set_version_changes_with_spec():
+    from hearth.domain.features.registry import active_feature_set_version
+    bare = _DictRepo({})
+    spec_setting = {
+        "selections": [{"entity_id": "binary_sensor.couch_zone", "keep": True,
+                        "role": "presence", "info_tier": "T1"}],
+        "features": [{"name": "couch_spec_occ", "transform": "occupancy_fraction",
+                      "inputs": ["binary_sensor.couch_zone"], "info_tier": "T1"}],
+    }
+    withspec = _DictRepo({"feature_spec": spec_setting})
+    assert active_feature_set_version(withspec) != active_feature_set_version(bare)
+
+
+def test_compute_features_with_spec_adds_columns(raw, bindings):
+    """A spec adds its columns alongside the recipe columns without disturbing
+    them (the spec path is purely additive)."""
+    from hearth.domain.schemas import (
+        EntitySelection, FeatureDef, FeatureSpec, InfoTier, Role)
+    spec = FeatureSpec(
+        selections=[EntitySelection(entity_id="binary_sensor.couch_zone", keep=True,
+                                    role=Role.PRESENCE,
+                                    info_tier=InfoTier.DISCRETE_EVENT_GATE)],
+        features=[FeatureDef(name="couch_spec_occ", transform="occupancy_fraction",
+                             inputs=["binary_sensor.couch_zone"],
+                             info_tier=InfoTier.DISCRETE_EVENT_GATE)])
+    base = compute_features(prepare(raw, bindings), bindings, _grid(raw), "UTC", [], [])
+    withspec = compute_features(prepare(raw, bindings), bindings, _grid(raw), "UTC",
+                                [], [], "coarse", spec)
+    assert "couch_spec_occ" not in base.columns
+    assert "couch_spec_occ" in withspec.columns
+    assert "couch_frac" in withspec.columns
+    assert withspec["couch_frac"].equals(base["couch_frac"])   # recipe untouched
+    assert not withspec.isna().any().any()
+
+
 def test_role_aware_window_lookback():
     """A slow role (steps, 180-min window) looks back hours; a fast role
     (presence, 15-min) only looks at recent minutes — both ending at the same
