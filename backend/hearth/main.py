@@ -42,6 +42,12 @@ def build_deps() -> dict:
         from .adapters.ha_websocket import HaWebSocketSource
         deps["events"] = HaWebSocketSource(repo)
         deps["notifier"] = HaRestNotifier(repo)
+    # Optional MQTT output (ADR-5): publishes predictions as HA-discovery entities
+    # for broker-centric or non-HA hubs. The HA integration is the primary path;
+    # this only activates when an MQTT broker is configured.
+    if repo.get_connection("mqtt"):
+        from .adapters.mqtt_publisher import MqttPublisher
+        deps["publisher"] = MqttPublisher(repo)
     return deps
 
 
@@ -124,6 +130,13 @@ def create_app() -> FastAPI:
     async def _start() -> None:
         scheduler = build_scheduler(deps)
         scheduler.start()
+        # publish MQTT discovery once on boot (idempotent, retained) so entities
+        # exist before the first prediction; no-op without a broker.
+        if deps.get("publisher"):
+            try:
+                deps["publisher"].announce(deps["repo"].persons(), deps["repo"].activities())
+            except Exception:
+                log.exception("MQTT announce on startup failed")
         if deps.get("ingest_coro"):
             app.state.ingest_task = asyncio.create_task(deps["ingest_coro"]())
         if deps.get("realtime_coro"):
