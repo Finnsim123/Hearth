@@ -163,3 +163,7 @@ async def run_seed(repo, events) -> None:
     except Exception as exc:
         log.exception("setup seeding failed")
         _status(repo, "failed", error=str(exc))
+        from ..health import record_issue
+        record_issue(repo, "seed_failed", "Setup hit a snag",
+                     "I couldn't finish reading your home — check the logs and re-run setup.",
+                     cta={"label": "Logs", "href": "/settings#logs"})

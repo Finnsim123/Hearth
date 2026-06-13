@@ -67,6 +67,9 @@ def test_llm_credit_error_surfaces_with_link():
     assert out["cta"] and out["cta"]["href"]
     # a healthy/absent status must NOT raise the warning
     assert buddy_state(_Repo({"llm.status": {"ok": True, "code": 200}}), None)["phase"] != "llm_error"
+    # a connectivity failure (code 0 / 5xx) surfaces as "can't reach the AI"
+    out = buddy_state(_Repo({"llm.status": {"ok": False, "code": 0}}), None)
+    assert out["phase"] == "llm_error" and "reach" in out["title"].lower()
 
 
 def test_onboarding_seed_phases_are_sequential_setup_phases():

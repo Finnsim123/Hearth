@@ -61,17 +61,31 @@ async def run_ingest(events: EventSource, tsdb: TimeSeriesStore, repo: AppRepo,
     lock = asyncio.Lock()
 
     async def flusher() -> None:
+        from .health import clear_issue, record_issue
         while True:
             await asyncio.sleep(FLUSH_SECONDS)
             async with lock:
-                batch, buffer_clear = dict(buffer), buffer.clear()
+                batch = dict(buffer)
+                buffer.clear()
+            if not batch:
+                continue
+            ok = True
             for eid, states in batch.items():
                 try:
                     tsdb.write_raw(by_entity[eid], states)
                 except Exception:
+                    ok = False
                     log.exception("raw write failed for %s", eid)
-            if batch:
-                tsdb.write_heartbeat("ingest")
+            if ok:
+                clear_issue(repo, "influx_write")            # saving fine again
+                try:
+                    tsdb.write_heartbeat("ingest")
+                except Exception:
+                    pass
+            else:
+                record_issue(repo, "influx_write", "I can't save sensor data",
+                             "Writing to the database is failing — check InfluxDB is running.",
+                             cta={"label": "Settings", "href": "/settings"})
 
     flush_task = asyncio.create_task(flusher())
     try:

@@ -47,17 +47,27 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
                              {"running": running, "at": datetime.now(timezone.utc).isoformat()})
 
         def _train_all() -> None:
+            from .domain.health import clear_issue, record_issue
             _set_training(True)
+            tried = ok = 0
             try:
                 for person in repo.persons():
                     if not person.enabled:
                         continue
+                    tried += 1
                     try:
                         train_person(person.id, tsdb, repo, deps.get("models"))
+                        ok += 1
                     except Exception:
                         log.exception("weekly training failed for %s", person.id)
             finally:
                 _set_training(False)
+            if tried and ok == 0:       # every model failed → surface it
+                record_issue(repo, "training_failed", "I couldn't train a model",
+                             "The latest training run failed for everyone — check the logs.",
+                             cta={"label": "Logs", "href": "/settings#logs"})
+            elif ok:
+                clear_issue(repo, "training_failed")
 
         scheduler.add_job(_train_all, "cron", day_of_week="sun", hour=3,
                           id="weekly_training", max_instances=1)

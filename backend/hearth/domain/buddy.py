@@ -158,20 +158,25 @@ def buddy_state(repo, tsdb) -> dict:
                           "No new readings in a few hours — is Home Assistant still connected?",
                           cta={"label": "Check sensors", "href": "/sensors"})
 
-    # AI assistant key in trouble — silent failures degrade sensor mapping, so
-    # surface it with a link to top up / fix the key.
+    # AI assistant in trouble — silent failures degrade sensor mapping, so
+    # surface it with a link to top up / fix the key, or flag a connectivity fault.
     llm_st = _get(repo, "llm.status") or {}
-    if _get(repo, "llm.status") and not llm_st.get("ok", True) and llm_st.get("code") in (401, 402, 403, 429):
-        code = llm_st["code"]
+    if llm_st and not llm_st.get("ok", True):
+        code = llm_st.get("code")
         if code == 429:
             title, detail = "AI assistant rate-limited", "Your AI key hit its rate limit — mapping used the basic fallback. It'll recover, or top up for headroom."
         elif code == 402:
             title, detail = "AI credits used up", "Top up your AI provider to restore smart sensor mapping (basic fallback is active)."
-        else:
+        elif code in (401, 403):
             title, detail = "AI key was rejected", "Check the AI assistant key in Settings — sensor mapping is on the basic fallback."
-        cta = ({"label": "Open AI provider", "href": _llm_link(repo)} if code in (402, 429)
-               else {"label": "Settings", "href": "/settings"})
-        return _state("llm_error", "alert", title, detail, cta=cta)
+        elif code == 0 or (isinstance(code, int) and code >= 500):
+            title, detail = "I can't reach the AI service", "The AI endpoint isn't responding — mapping is on the basic fallback. Check the URL/network, or try again later."
+        else:
+            title, detail = None, None
+        if title:
+            cta = ({"label": "Open AI provider", "href": _llm_link(repo)} if code in (402, 429)
+                   else {"label": "Settings", "href": "/settings"})
+            return _state("llm_error", "alert", title, detail, cta=cta)
 
     # retraining in progress (weekly / first train)
     ts = _get(repo, "training.status") or {}
