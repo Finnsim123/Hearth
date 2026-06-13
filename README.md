@@ -25,7 +25,15 @@ HA sensors ──► Hearth pipeline ──► features ──► model ──�
   chilling…) in the UI. Hearth's clustering proposes patterns it found in your
   data — you name them, Hearth learns them.
 - **Glass-box ML.** The UI shows accuracy, per-class AUC/F1, confusion matrices,
-  SHAP explanations for every prediction, and drift over time.
+  SHAP explanations for every prediction, model-version trends, and what each
+  prediction rests on — and a model stays marked *provisional* until enough of
+  your own confirmations have validated it.
+- **AI sets up the model, you keep control.** Point an optional LLM key at your
+  home and it reads your sensors *once* — selects what's worth using, classifies
+  each signal, designs the features (with reasons you can read), drafts rules,
+  and flags sensors that look broken. New sensors are never pulled in silently:
+  Hearth asks before analysing or retraining. After the first model trains,
+  predictions are 100% local and the key is dead weight.
 - **Shippable stack.** One `docker compose up` brings up the Hearth backend +
   web UI, optionally bundled InfluxDB, Grafana and Mosquitto.
 - **Calm by design.** Warm ember on cool slate, one accent that always means
@@ -35,15 +43,21 @@ HA sensors ──► Hearth pipeline ──► features ──► model ──�
 ## Status
 
 🔥 **Working product, running live.** All three pillars are implemented and
-shipping: data pipeline (HA WebSocket ingest + history import + role-based
-feature engine), models (hierarchical state→activity classifiers with honest
-metrics, calibration, learned transition smoothing), and the feedback loop
-(notification questions via the HA integration, Inbox, ribbon corrections,
-weekly retrains with promotion gates). Plus: pattern discovery (HDBSCAN
-cards you name), evidence tiers (predictions disclose what they rest on),
-in-app updates, and CI. Remaining work lives in
-[`docs/ROADMAP.md`](docs/ROADMAP.md) (Phase 5: hardening + packaging, and
-the research bets).
+shipping: data pipeline (HA WebSocket ingest + history import + a feature engine
+that runs role recipes *and* an executable, validated feature spec), models
+(hierarchical state→activity classifiers with honest metrics, calibration,
+learned transition smoothing), and the feedback loop (notification questions via
+the HA integration, Inbox, ribbon corrections, weekly retrains with promotion
+gates). Plus: an **AI feature architect** (optional, BYO key) that selects
+entities, assigns information tiers, designs features and flags unreliable
+sensors, with a one-time cost estimate and an explicit data-sharing choice;
+**detect-then-ask** approval for newly discovered sensors; a **selectable model
+family** (random forest, gradient-boosted, logistic); an **abstain “unknown”
+state** so automations never act on a shaky guess; a model-feedback loop that
+proposes features to separate the classes a model confuses; pattern discovery
+(HDBSCAN cards you name), evidence tiers, in-app updates, and CI. Remaining work
+lives in [`docs/ROADMAP.md`](docs/ROADMAP.md) (hardening + packaging, and the
+research bets).
 
 ## Quickstart
 
@@ -109,15 +123,6 @@ hearth/
 ├── brand/           Ember logo, wordmark, usage rules
 └── grafana/         Optional pre-provisioned dashboards
 ```
-
-## Relation to `har-homelab`
-
-Hearth is the generalized successor of a working single-home prototype
-(`har-homelab`): Random Forest on 30-min windows, active-learning notifications,
-weekly retrain. The prototype's lessons — iOS notification limits, bootstrap-label
-circularity, sentinel imputation, slow-sensor lookback — are baked into the design
-(see `docs/RESEARCH.md` §Lessons). Its feature extractors will be ported as the
-first device-class recipes.
 
 ## License
 
