@@ -163,6 +163,19 @@ def test_train_promote_and_beat_rules(world):
     assert "evidence_profile" in record.metrics
 
 
+def test_binary_auc_is_computed():
+    """Two-class models (e.g. home/away) get an AUC, not '—' (binary path)."""
+    from hearth.domain.training.evaluate import evaluate_model
+    idx = pd.date_range("2026-06-01", periods=80, freq="30min", tz="UTC")
+    X = pd.DataFrame({"signal": np.r_[np.zeros(40), np.ones(40)]}, index=idx)
+    y = pd.Series(["home"] * 40 + ["away"] * 40, index=idx)
+    est = RandomForestEstimator(n_estimators=30)
+    est.fit(X, y)
+    prov = pd.Series([Provenance.CONFIRMED.value] * len(y), index=idx)
+    metrics = evaluate_model(est, X, y, prov)
+    assert "auc_macro" in metrics and 0.9 <= metrics["auc_macro"] <= 1.0
+
+
 def test_estimator_port_capabilities():
     """Trainer programs against the Estimator port only — these are the methods
     it relies on (commit 18): importances(), calibrate()->bool, the

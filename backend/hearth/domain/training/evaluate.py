@@ -72,7 +72,13 @@ def evaluate_model(
                         for c, p, r, f, s in zip(classes, prec, rec, f1, support)}
     try:
         present = [c for c in est.classes_ if c in classes]
-        if len(present) > 1:
+        if len(present) == 2:
+            # binary: roc_auc_score wants a 1-D score for the positive class,
+            # not the (n, 2) probs + multi_class path (which raises on 2 classes).
+            pos = present[1]
+            out["auc_macro"] = round(float(roc_auc_score(
+                (y_val == pos).astype(int), probs[pos])), 4)
+        elif len(present) > 2:
             out["auc_macro"] = round(float(roc_auc_score(
                 y_val, probs[present], multi_class="ovr",
                 average="macro", labels=present)), 4)
