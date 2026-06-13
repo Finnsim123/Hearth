@@ -286,9 +286,9 @@ scarce.
 Two consequences, both now reflected in the design:
 1. **Relaxed network presence** — a member's phone device_tracker (role person)
    and router/network occupancy proxies (connected-device count, throughput;
-   role custom) are no longer blanket-excluded; the heuristic recognizes device
-   counts and the LLM prompt is told to include phone trackers / occupancy
-   signals while still skipping generic per-device trackers.
+   role custom) are admitted as features; the heuristic recognizes device counts
+   and the LLM prompt includes phone trackers / occupancy signals while skipping
+   generic per-device trackers.
 2. **Data-driven admission (roadmap)** — once ≥~300 confirmed labels exist, the
    gate should stop being authoritative: periodically re-admit borderline
    entities, retrain, keep by importance behind a hold-out check. Evidence

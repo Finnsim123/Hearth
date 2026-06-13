@@ -94,7 +94,7 @@ value: 0.3}, {feat: "stove_fumes_any", op: "==", value: 1}]}` — renderable and
 editable in the UI, evaluable in pandas, no eval().
 
 `models.algo` is one of `random_forest | gradient_boosting | logistic |
-embedding`. New `settings` keys added by the AI layer: `feature_spec` (the active
+embedding`. `settings` keys used by the AI layer: `feature_spec` (the active
 executable feature spec), `feature.power_mode` (conservative|full),
 `llm.share_stats` (yes|no consent), `training.config` / `asking.policy` /
 `output.policy` (the behaviour knobs, defaults = the historical constants),

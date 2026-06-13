@@ -218,7 +218,7 @@ curriculum as labels accumulate.
 - **Training knobs are data:** model family, validation window, recency
   half-life, promotion margin and tuning policy live in one `training.config`
   setting; asking and output (abstain) thresholds in `asking.policy` /
-  `output.policy`. Defaults equal the historical constants.
+  `output.policy`. Each has a sensible built-in default.
 
 ## 5. Output + feedback loop (pillar 3)
 
@@ -374,10 +374,10 @@ discriminative statistics), gated by the promotion gate.
 never auto-added: nothing is bound, analysed or retrained until the user approves,
 so plugging in a test sensor never silently spends tokens or changes the model.
 
-**No-key path is whole.** Without an LLM, the heuristic floor covers role mapping
-and the role recipes drive features, taxonomy comes from presets, and a
-deterministic reliability pass still flags suspect/unusable sensors — only the
-custom feature spec, information tiers and LLM weak labels go dark.
+**No-key path.** Without an LLM, the heuristic floor maps entities to roles, the
+role recipes drive features, taxonomy comes from presets, and a deterministic
+reliability pass flags suspect/unusable sensors. The custom feature spec,
+information tiers and LLM weak labels are the only parts that require a key.
 
 ### LLM as weak annotator (the label-side payoff)
 
@@ -480,6 +480,6 @@ OOM a tight box — steady-state swapping means undersized.
 | 10 | React SPA served by backend | Streamlit: weak for a product-grade comprehensive UI. Grafana-only: can't do wizards/inbox/taxonomy CRUD. |
 | 11 | HA custom integration (HACS) as primary output channel | Host+token config flow, push via Hearth's WS, two-way controls, no broker dependency — Frigate-proven. MQTT/REST remain as alternates behind the same port. |
 | 12 | Optional LLM advisor for onboarding (BYO OpenRouter/OpenAI-compatible key) | Semantic mapping of entity names is the costliest user step; LLM proposes (JSON, schema-validated), human approves. Heuristics remain the no-key path. Metadata only, never raw history. |
-| 13 | InfluxDB is optional in the stack: compose `influxdb` profile (bundled) vs connect-existing in the wizard | Many homelabs already run InfluxDB for HA; forcing a second instance wastes RAM and splits data. Hearth boots DB-less; the wizard forks "have one" (URL/org/token, buckets created in place) vs "set it up for me" (detects/instructs the profile). |
+| 13 | A bundled InfluxDB ships and runs with the stack; the wizard chooses whether Hearth uses it or an existing instance | Many homelabs already run InfluxDB for HA. Hearth boots DB-less and tolerates the database not being ready; the wizard forks "connect my own" (URL/org/token, buckets created in place) vs "use the bundled one" (auto-connects with the generated token). Bring your own and the bundled instance sits idle. |
 | 15 | Bootstrap rules optimize PRECISION; the gate on bindings is appealable, not absolute | The asymmetry: a wrong bootstrap label poisons hundreds of training windows; a missing one costs nothing (one human correction outranks every rule, and the model learns combinations no rule wrote — e.g. morning movies). So rules stay conservative. Binding constraints split in two: stateless domains (button/scene/script — nothing to window) are hard physics; the role↔domain map is a DEFAULT that the LLM (with a recorded reason) or the user can override for any state-carrying domain (e.g. `input_boolean.in_bed`). LLM model is user-selectable (wizard + Settings) — smarter mapping is a knob, not a fork. |
 | 14 | Accounts + centralized secrets: first-boot admin account, argon2id passwords, server-side sessions, scoped API tokens; ALL crypto in `hearth/security.py` | Shippable product needs auth out of the box (git clone → UI → create account). One module owning every secret operation makes "where do secrets live?" a one-page answer (docs/SECURITY.md) and scattered-crypto a reviewable defect. |

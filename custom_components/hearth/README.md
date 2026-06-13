@@ -36,8 +36,8 @@ Connects HA to your local Hearth instance and closes the loop, no YAML, no autom
 
   Event data: `person`, `person_name`, `state` (coarse, stable — home/away/
   sleeping), `activity` (fine if a child model is live — e.g. eating), `confidence`.
-  The `sensor.hearth_<person>_activity` entity is still there for state-based
-  triggers and dashboards; the event is the low-latency path.
+  The `sensor.hearth_<person>_activity` entity carries the state for dashboards
+  and state-based triggers; the event is the low-latency path.
 
 - **Feedback forwarding**: when someone taps ✓/✗ on a Hearth training question,
   the integration catches the `mobile_app_notification_action` event and POSTs it

@@ -86,13 +86,13 @@ Models page confirmed-accuracy before/after naming.
 - Change-point segmentation experiment (P4)
 - HEPA-style embedder behind the `Embedder` port (feature-flagged): pretrain on
   the home's unlabeled stream, side-by-side vs RF in the registry,
-  embedding-space clustering. The port and an `EmbeddingEstimator` seam now
-  exist (identity passthrough, selectable as the `embedding` family); the
+  embedding-space clustering. The `Embedder` port and an `EmbeddingEstimator`
+  seam exist (identity passthrough, selectable as the `embedding` family); the
   self-supervised encoder itself (`adapters/hepa_embedder.py`) is the remaining
   work — the JEPA / world-model bet (RESEARCH.md §World models).
 
 ## AI feature layer + ML depth — ✅ implemented (June 2026)
-Beyond the original three pillars, shipped:
+Capabilities beyond the three core pillars:
 - **Feature architect (optional LLM):** entity selection, information tiers, an
   executable feature spec from a safe transform whitelist, cross-entity
   composites, and reliability flagging — with a pre-run cost estimate and an

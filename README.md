@@ -66,9 +66,9 @@ git clone https://github.com/Finnsim123/Hearth && cd Hearth
 bash install.sh
 ```
 
-Hearth comes with InfluxDB built in, so there's nothing to decide up front — the
-setup wizard lets you use the bundled InfluxDB (one click, zero config) or point
-Hearth at an existing instance. Bring your own and the bundled one just stays idle.
+Hearth includes InfluxDB. The setup wizard lets you use the bundled one (one
+click, no configuration) or connect an existing instance; connect your own and
+the bundled InfluxDB simply sits idle.
 
 The installer generates secrets, builds the stack, waits for it to come up,
 and prints exactly where to go:

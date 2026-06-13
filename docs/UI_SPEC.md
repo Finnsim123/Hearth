@@ -37,11 +37,10 @@ passwords are never persisted.
      import (auto-suggests the busiest bucket, shows measurements · points/24h
      · history-since per bucket, "no import" opt-out). Hearth's own three
      buckets are created automatically — never asked for.
-   - "Set it up for me" → uses the InfluxDB bundled with the stack, which is
-     **always running** (the installer starts it; no `--with-influxdb` flag, no
-     command to run). The wizard auto-connects using the generated admin token
-     (nothing to enter) and polls briefly in case InfluxDB is still starting on
-     first boot. Pick this and you're done on this step.
+   - "Set it up for me" → uses the InfluxDB bundled with the stack, which runs
+     alongside Hearth. The wizard auto-connects using the generated admin token
+     (nothing to enter) and waits briefly while InfluxDB finishes starting. Pick
+     this and you're done on this step.
 4. **Connect MQTT** (optional, "use HA's broker" default).
 5. **Household** — create the family: add any number of members (adults, kids,
    roommates), each with optional `person.*` entity, optional notify service,
@@ -64,7 +63,7 @@ passwords are never persisted.
    metadata only), and an **estimated one-time cost** is shown before any run.
    "Skip — use built-in heuristics" is equally prominent. Key stored encrypted,
    reusable later for re-analysis and cluster-naming hints, removable in Settings.
-   Once the first model is trained the LLM is no longer needed for predictions.
+   Predictions run fully locally; the LLM is used only for setup and re-analysis.
 7. **Sensors** — table of HA entities with *suggested* role/room/person
    (heuristics, or LLM proposals with a reason per row — badge shows which);
    user confirms/edits; unbound entities are simply ignored. One-click
