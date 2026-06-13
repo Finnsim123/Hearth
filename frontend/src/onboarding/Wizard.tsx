@@ -472,8 +472,10 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
             </button>
             <Callout>
               This inventory — names, device classes and aggregate stats, never raw history — is all
-              Hearth's suggestions are based on. It's also exactly what the optional AI assistant in
-              the next step would see. Download it if you want to check first.
+              Hearth's suggestions are based on. After setup, Hearth first sorts these into groups
+              (from names alone) and keeps only the ones relevant to activity — you'll watch it happen.
+              It's also exactly what the optional AI assistant in the next step would see. Download it
+              if you want to check first.
             </Callout>
           </>
         )}

@@ -114,7 +114,9 @@ external HA→Influx bucket with the longest history, `recorder` = ~10 days from
 HA's own recorder — see §3.1):
 
 - **Warm-start arc** (the default): the stepper lights up live as the phase
-  advances — scanning your home → reading with AI (only if a key is set) →
+  advances — scanning your home → **sorting into groups** (a bubble cloud of the
+  triage clusters from `GET /api/entity-triage`, accent-tinted for the ones kept,
+  with "keeping N of M entities") → reading with AI (only if a key is set) →
   building features → learning your routines → finding patterns — finishing
   with the first model live and CTAs to name patterns / answer questions (or, if
   the recorder was too thin to train, a softer "I've started learning" close).

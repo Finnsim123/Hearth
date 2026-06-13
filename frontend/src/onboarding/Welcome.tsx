@@ -264,6 +264,47 @@ function FeatureFeed({ features, active, done }: {
   );
 }
 
+/** Bubble cloud of the coarse triage: each cluster a bubble sized by how many
+ *  entities it holds, tinted by whether it's relevant to activity prediction —
+ *  so the user sees "lots of lights, a 3D printer, some server stuff" and which
+ *  of it Hearth is keeping. Real data from GET /api/entity-triage. */
+function BubbleCloud({ triage }: { triage: Triage }) {
+  const clusters = triage.clusters.slice(0, 14);
+  if (!clusters.length) return null;
+  const max = Math.max(...clusters.map((c) => c.count), 1);
+  const size = (n: number) => Math.round(46 + 52 * Math.sqrt(n / max));   // 46–98px
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center",
+                    justifyContent: "center" }}>
+        {clusters.map((c) => {
+          const d = size(c.count);
+          const on = c.relevant;
+          return (
+            <div key={c.label} title={`${c.label} · ${c.count} entities${c.why ? ` · ${c.why}` : ""}`}
+              style={{ width: d, height: d, borderRadius: "50%", flexShrink: 0,
+                       display: "flex", flexDirection: "column", alignItems: "center",
+                       justifyContent: "center", textAlign: "center", padding: 4, lineHeight: 1.15,
+                       border: `1.5px solid ${on ? "var(--accent)" : "var(--border)"}`,
+                       background: on ? "color-mix(in srgb, var(--accent) 16%, transparent)"
+                                      : "var(--surface)",
+                       color: on ? "var(--text)" : "var(--text-dim)" }}>
+              <span style={{ fontSize: Math.max(9, Math.min(12, d / 7)), fontWeight: 600,
+                             overflow: "hidden", textOverflow: "ellipsis",
+                             maxWidth: d - 8, whiteSpace: "nowrap" }}>{c.label}</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>{c.count}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--text-dim)", textAlign: "center", marginTop: 8 }}>
+        Keeping <strong style={{ color: "var(--accent)" }}>{triage.kept_count}</strong> of {triage.total}{" "}
+        entities for your model{triage.by === "llm" ? " — chosen by AI" : ""}.
+      </div>
+    </div>
+  );
+}
+
 /** A tiny live transcript of the AI exchange — what Hearth just asked and the
  *  reply typing back in — so the LLM step shows real insight, not just a label. */
 function AITranscript({ act }: { act: LlmActivity }) {
@@ -360,6 +401,7 @@ export default function Welcome() {
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [entities, setEntities] = useState<Ent[]>([]);
   const [features, setFeatures] = useState<Feat[]>([]);
+  const [triage, setTriage] = useState<Triage | null>(null);
   const [llm, setLlm] = useState<Llm | null>(null);
   const [names, setNames] = useState<string[]>(flag.members ?? []);
   const [personMap, setPersonMap] = useState<Record<string, string>>({});
@@ -400,13 +442,14 @@ export default function Welcome() {
     const ok = (url: string) => fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     const tick = () => {
       Promise.all([ok("/api/buddy"), ok("/api/flow"), ok("/api/connections/llm"),
-                   ok("/api/feature-spec")]).then(([b, f, c, fs]) => {
+                   ok("/api/feature-spec"), ok("/api/entity-triage")]).then(([b, f, c, fs, tr]) => {
         if (!alive) return;
         if (b?.phase) { setBuddy(b); if (String(b.phase).startsWith("setup:")) sawSetup.current = true; }
         if (f) setFlow(f);
         if (c) setLlm({ configured: !!c.configured, model: c.options?.model, activity: c.activity });
         if (fs?.active && Array.isArray(fs.features))
           setFeatures(fs.features.map((x: Feat) => ({ name: x.name, transform: x.transform })));
+        if (tr?.clusters?.length) setTriage(tr);
         const busy = b && String(b.phase).startsWith("setup:");
         // poll fast while the LLM is mid-call so "sending → received" is visible
         const llmBusy = c && c.activity && c.activity.phase === "sending";
@@ -464,6 +507,9 @@ export default function Welcome() {
   const featStatus = laterIfFresh(statusFor(3, 4));
   const featActive = featStatus === "active";
   const featDone = featStatus === "done";
+  const hasTriage = !!(triage && triage.clusters.length);
+  const triageStatus: StageStatus = inSetup ? (pos >= 3 ? "done" : "active")
+                                            : (started ? "done" : "pending");
 
   // live narration of the AI calls: "sending ... now" → "receiving ... now",
   // but only while the call is actually fresh (so a finished call doesn't keep
@@ -517,6 +563,14 @@ export default function Welcome() {
           {scanDone
             ? <EntityStrip bindings={sensorChips} active={false} done={true} />
             : <ScanFeed entities={entities} active={scanActive} done={false} />}
+        </StageRow>
+
+        <StageRow title="Sorting your home into groups"
+          detail={hasTriage
+            ? `${triage!.clusters.length} groups found${triage!.by === "llm" ? "" : " (by type)"}`
+            : "Grouping what I found, keeping what matters"}
+          status={triageStatus}>
+          {hasTriage && <BubbleCloud triage={triage!} />}
         </StageRow>
 
         {llm?.configured && (
