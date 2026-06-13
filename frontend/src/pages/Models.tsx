@@ -14,6 +14,7 @@ type Metrics = {
   accuracy_bootstrap?: number | null;
   accuracy_train?: number;
   auc_macro?: number;
+  n_confirmed?: number;
   n_train?: number;
   feature_count?: number;
   per_class?: Record<string, PerClass>;
@@ -21,6 +22,7 @@ type Metrics = {
   feature_importances?: Record<string, number>;
   evidence_profile?: Record<string, number>;
   hyperparams?: Record<string, unknown>;
+  validation_status?: "validated" | "provisional";
 };
 type Model = {
   id: number; person_id: string; version: string; algo: string;
@@ -38,6 +40,32 @@ function MetricChip({ label, value, hint }: { label: string; value: string; hint
       <div style={{ fontSize: 18, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{value}</div>
       <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{label}</div>
     </div>
+  );
+}
+
+function StatusBadge({ status, nConfirmed }: { status?: string; nConfirmed: number }) {
+  // Honest cold-start signal: a model is only "validated" once enough human-
+  // confirmed labels back its accuracy. A fresh / fast-track model is promoted
+  // on bootstrap AGREEMENT (agreement with the rules that made its own labels),
+  // so it serves predictions but is not yet validated.
+  if (status !== "provisional" && status !== "validated") return null;
+  const provisional = status === "provisional";
+  return (
+    <span
+      title={provisional
+        ? `Provisional: only ${nConfirmed} human-confirmed labels (need 30). Its accuracy so far leans on rule-generated labels, which can be wrong. Confirm a few predictions to validate it.`
+        : `Validated on ${nConfirmed} human-confirmed labels.`}
+      style={{
+        fontSize: 11.5, padding: "2px 8px", borderRadius: 99, fontWeight: 600,
+        display: "inline-flex", alignItems: "center", gap: 4,
+        background: provisional
+          ? "color-mix(in srgb, var(--danger) 14%, transparent)"
+          : "color-mix(in srgb, var(--ok, #34D399) 16%, transparent)",
+        color: provisional ? "var(--danger)" : "var(--ok, #34D399)",
+      }}>
+      <Icon name={provisional ? "warning" : "check"} size={12} />
+      {provisional ? "Provisional" : "Validated"}
+    </span>
   );
 }
 
@@ -158,6 +186,7 @@ function ModelCard({ m, onAction }: { m: Model; onAction: () => void }) {
                          background: "color-mix(in srgb, var(--accent) 18%, transparent)",
                          color: "var(--accent)", fontWeight: 600 }}>LIVE</span>
         )}
+        <StatusBadge status={mt.validation_status} nConfirmed={mt.n_confirmed ?? 0} />
         <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
           {m.trained_at ? new Date(m.trained_at).toLocaleString() : ""} · {m.algo}
         </span>

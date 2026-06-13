@@ -7,5 +7,6 @@ data/
 *.pkl
 node_modules/
 frontend/dist/
+*.tsbuildinfo
 .DS_Store
 .hearth-shared/

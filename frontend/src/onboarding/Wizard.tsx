@@ -649,8 +649,8 @@ function StepDone({ d }: { d: WizardData }) {
   const items: [string, string][] = fastTrack
     ? [
         ["Right now", `Hearth is importing your history from “${d.influx.sourceBucket}” and building features — minutes, not days.`],
-        ["Within the hour", "A first model trains on your imported data. Predictions and the activity ribbon go live today — watch the dashboard."],
-        ["Today", "Hearth may already start asking “was this right?” — early answers sharpen the model fastest."],
+        ["Within the hour", "A first model trains on your imported data. Predictions and the activity ribbon go live today — watch the dashboard. It starts marked “provisional”."],
+        ["Today", "Hearth may already start asking “was this right?” — early answers sharpen the model fastest, and once enough are confirmed the model becomes “validated” on the Models page."],
         ["Ongoing", "Live recording keeps improving on the imported foundation; retraining runs weekly."],
       ]
     : [
