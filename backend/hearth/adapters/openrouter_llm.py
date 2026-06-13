@@ -44,6 +44,12 @@ def _slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:60]
 
 
+def _preview(text: str, limit: int = 280) -> str:
+    """A short, safe snippet of a prompt or reply for the live Welcome transcript."""
+    t = (text or "").strip()
+    return t if len(t) <= limit else t[:limit] + "…"
+
+
 def _extract_json(text: str):
     """Parse model output: tolerate code fences and leading prose."""
     text = text.strip()
@@ -144,7 +150,7 @@ class OpenRouterAdvisor:
         # user's explicit model wins; else the per-task fallback (model arg) or default
         model = choose_model((conn.get("options") or {}).get("model"),
                              model or DEFAULT_MODEL)
-        self._set_activity("sending", task, model=model, sent=sent)
+        self._set_activity("sending", task, model=model, sent=sent, prompt=_preview(user))
         url = f"{conn['url'].rstrip('/')}/chat/completions"
         payload = {"model": model, "max_tokens": max_tokens, "temperature": 0,
                    "messages": [{"role": "system", "content": system},
@@ -172,10 +178,11 @@ class OpenRouterAdvisor:
         self._add_usage(model, usage.get("prompt_tokens"), usage.get("completion_tokens"))
         if finish == "length":
             log.warning("LLM response TRUNCATED at max_tokens — items may be lost")
-        parsed = _extract_json(data["choices"][0]["message"]["content"])
+        content = data["choices"][0]["message"]["content"]
+        parsed = _extract_json(content)
         items = len(parsed) if isinstance(parsed, (list, dict)) else None
         self._set_activity("received", task, model=model, items=items,
-                           out_tokens=usage.get("completion_tokens"))
+                           out_tokens=usage.get("completion_tokens"), reply=_preview(content))
         return parsed
 
     # ── bindings: the name->role brain ──────────────────────────────────────

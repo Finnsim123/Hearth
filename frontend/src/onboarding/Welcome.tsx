@@ -22,7 +22,9 @@ type Buddy = { phase: string; tone: string; title: string; detail: string;
 type FlowNode = { label: string; value: string; status: string };
 type Flow = { phase: string; nodes: Record<string, FlowNode> };
 type LlmActivity = { phase: "sending" | "received" | "error"; task: string;
-                     model?: string; sent?: string; items?: number; at?: string };
+                     model?: string; sent?: string; items?: number; at?: string;
+                     prompt?: string; reply?: string };
+type Feat = { name: string; transform: string };
 type Llm = { configured: boolean; model?: string; activity?: LlmActivity | null };
 type Binding = { id: number; name: string; role: string; room: string | null;
                  person_id: string | null; enabled: boolean };
@@ -208,6 +210,100 @@ function ScanFeed({ entities, active, done }: {
   );
 }
 
+/** Live "building features" feed — the real feature columns Hearth is creating
+ *  scroll past with the transform each uses, so you see what it's computing from
+ *  your sensors (e.g. sofa_occupancy_fraction · rolling_mean). */
+function FeatureFeed({ features, active, done }: {
+  features: Feat[]; active: boolean; done: boolean;
+}) {
+  const [cursor, setCursor] = useState(0);
+  useEffect(() => {
+    if (done) { setCursor(features.length); return; }
+    if (!active || features.length === 0) return;
+    setCursor(0);
+    const id = setInterval(() => setCursor((c) => Math.min(c + 1, features.length)), 90);
+    return () => clearInterval(id);
+  }, [active, done, features.length]);
+  if (features.length === 0) return null;
+  const ROW = 30, VISIBLE = 4;
+  const shown = features.slice(0, Math.max(cursor, done ? features.length : 0));
+  const offset = Math.max(0, shown.length - VISIBLE) * ROW;
+  const fade = "linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent)";
+  return (
+    <div style={{ height: ROW * VISIBLE, overflow: "hidden", position: "relative", marginTop: 10,
+                  borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
+                  maskImage: fade, WebkitMaskImage: fade }}>
+      <div style={{ transform: `translateY(-${offset}px)`, transition: "transform .16s linear" }}>
+        {shown.map((f, i) => {
+          const building = active && !done && i === shown.length - 1;
+          return (
+            <div key={f.name} style={{ height: ROW, display: "flex", alignItems: "center",
+                                       gap: 9, padding: "0 12px", minWidth: 0 }}>
+              <span className={building ? "wlc-scan-on" : ""}
+                style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                         background: building ? "var(--accent)" : "var(--ok, #34D399)" }} />
+              <span style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden",
+                             textOverflow: "ellipsis", flexShrink: 1,
+                             fontFamily: "ui-monospace, Menlo, monospace" }}>
+                {f.name}
+              </span>
+              {f.transform && (
+                <span style={{ fontSize: 11.5, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
+                  · {f.transform}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** A tiny live transcript of the AI exchange — what Hearth just asked and the
+ *  reply typing back in — so the LLM step shows real insight, not just a label. */
+function AITranscript({ act }: { act: LlmActivity }) {
+  const [typed, setTyped] = useState(0);
+  const reply = act.phase === "received" ? (act.reply ?? "") : "";
+  useEffect(() => {
+    setTyped(0);
+    if (!reply) return;
+    const id = setInterval(() => setTyped((n) => {
+      if (n >= reply.length) { clearInterval(id); return n; }
+      return Math.min(n + 3, reply.length);
+    }), 18);
+    return () => clearInterval(id);
+  }, [reply, act.at]);
+  if (!act.prompt && !reply) return null;
+  const box: React.CSSProperties = {
+    fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11.5, lineHeight: 1.5,
+    whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text-dim)",
+    display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
+  };
+  return (
+    <div style={{ marginTop: 10, borderRadius: 10, border: "1px solid var(--border)",
+                  background: "var(--surface)", padding: "9px 11px",
+                  display: "flex", flexDirection: "column", gap: 6 }}>
+      {act.prompt && (
+        <div style={box}>
+          <span style={{ color: "var(--accent)" }}>↑ </span>{act.prompt}
+        </div>
+      )}
+      {act.phase !== "sending" && reply && (
+        <div style={{ ...box, color: "var(--text)" }}>
+          <span style={{ color: "var(--ok, #34D399)" }}>↓ </span>
+          {reply.slice(0, typed)}{typed < reply.length ? "▌" : ""}
+        </div>
+      )}
+      {act.phase === "sending" && (
+        <div style={{ ...box }}>
+          <span style={{ color: "var(--ok, #34D399)" }}>↓ </span>waiting for the reply…
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The scanning entity strip — chips for the sensors Hearth bound, ticked off
  *  one by one while the scan stage is active, all checked once it's done. */
 function EntityStrip({ bindings, active, done }: {
@@ -258,6 +354,7 @@ export default function Welcome() {
   const [flow, setFlow] = useState<Flow | null>(null);
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [entities, setEntities] = useState<Ent[]>([]);
+  const [features, setFeatures] = useState<Feat[]>([]);
   const [llm, setLlm] = useState<Llm | null>(null);
   const [names, setNames] = useState<string[]>(flag.members ?? []);
   const [personMap, setPersonMap] = useState<Record<string, string>>({});
@@ -290,11 +387,14 @@ export default function Welcome() {
         fetch("/api/buddy").then((r) => r.json()).catch(() => null),
         fetch("/api/flow").then((r) => r.json()).catch(() => null),
         fetch("/api/connections/llm").then((r) => r.json()).catch(() => null),
-      ]).then(([b, f, c]) => {
+        fetch("/api/feature-spec").then((r) => r.json()).catch(() => null),
+      ]).then(([b, f, c, fs]) => {
         if (!alive) return;
         if (b) { setBuddy(b); if (String(b.phase).startsWith("setup:")) sawSetup.current = true; }
         if (f) setFlow(f);
         if (c) setLlm({ configured: !!c.configured, model: c.options?.model, activity: c.activity });
+        if (fs?.active && Array.isArray(fs.features))
+          setFeatures(fs.features.map((x: Feat) => ({ name: x.name, transform: x.transform })));
         const busy = b && String(b.phase).startsWith("setup:");
         // poll fast while the LLM is mid-call so "sending → received" is visible
         const llmBusy = c && c.activity && c.activity.phase === "sending";
@@ -346,6 +446,9 @@ export default function Welcome() {
   const scanDone = scanStatus === "done";
   // bound-sensor count from the flow map (e.g. "96 sensors"); 0/absent early on
   const scanCount = parseInt(node("ha")?.value ?? "", 10) || 0;
+  const featStatus = laterIfFresh(statusFor(3, 4));
+  const featActive = featStatus === "active";
+  const featDone = featStatus === "done";
 
   // live narration of the AI calls: "sending ... now" → "receiving ... now",
   // but only while the call is actually fresh (so a finished call doesn't keep
@@ -397,12 +500,18 @@ export default function Welcome() {
         </StageRow>
 
         {llm?.configured && (
-          <StageRow title="Reading your sensors with AI" detail={aiDetail} status={aiStatus} />
+          <StageRow title="Reading your sensors with AI" detail={aiDetail} status={aiStatus}>
+            {act && (actFresh || aiStatus === "active") && <AITranscript act={act} />}
+          </StageRow>
         )}
 
         <StageRow title="Building features"
           detail={node("features")?.value ? `${node("features")!.value}` : "Turning raw readings into signals"}
-          status={laterIfFresh(statusFor(3, 4))} />
+          status={featStatus}>
+          {(featActive || featDone) && (
+            <FeatureFeed features={features} active={featActive} done={featDone} />
+          )}
+        </StageRow>
 
         <StageRow title="Learning your routines"
           detail={node("model")?.value ? `Model ${node("model")!.value}` : "Training a model for each of you"}

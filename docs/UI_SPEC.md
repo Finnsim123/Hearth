@@ -112,7 +112,11 @@ bound (`GET /api/bindings`). Two arcs, chosen by whether history was imported
   things; it settles into the kept-sensor chips and "N sensors found" once the
   scan completes. `person.*` trackers surface as "Found <name> from your
   household". The AI row stays active until the LLM is genuinely idle, narrating
-  each call ("Sending… / Receiving… now") only while it is in flight.
+  each call ("Sending… / Receiving… now") only while it is in flight, with a
+  small **live transcript** (a snippet of the prompt and the reply typing back
+  in — `llm.activity.prompt`/`reply`) so the step shows real insight. The
+  building-features row rolls a **feature feed** of the real feature columns
+  being created with each transform (from `GET /api/feature-spec`).
 - **Fresh** (no history): scanning completes, the later stages show "starts as
   your data arrives", and the copy explains the few-days wait.
 

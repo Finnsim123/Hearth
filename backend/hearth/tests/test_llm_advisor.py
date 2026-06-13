@@ -115,7 +115,9 @@ async def test_chat_emits_sending_then_received_activity(monkeypatch):
     assert out == [1, 2, 3]
     assert [e["phase"] for e in events] == ["sending", "received"]
     assert events[0]["sent"] == "3 entities"
+    assert events[0]["prompt"] == "usr"        # prompt preview for the transcript
     assert events[1]["items"] == 3
+    assert events[1]["reply"] == "[1, 2, 3]"   # reply preview for the transcript
 
 
 @pytest.mark.asyncio
