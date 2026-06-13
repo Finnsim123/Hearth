@@ -125,6 +125,16 @@ h3 { font-size: 20px; font-weight: 600; }
 }
 .btn-primary { background: var(--accent); color: var(--on-accent); }
 .btn-primary:hover { background: var(--accent-strong); }
+/* a disabled button reads as inactive (e.g. Continue while the scan is still
+   running): muted, no hover lift, not-allowed cursor. */
+.btn:disabled, .btn[disabled] {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border-color: var(--border);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.btn:disabled:hover, .btn[disabled]:hover { background: var(--surface-2); }
 .btn-secondary { background: var(--surface-2); color: var(--text); border-color: var(--border); }
 .btn-ghost { background: none; color: var(--text-dim); }
 .btn-ghost:hover { color: var(--text); }

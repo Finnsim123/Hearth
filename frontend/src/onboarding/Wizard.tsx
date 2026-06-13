@@ -499,7 +499,7 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
     <>
       <StepShell step={7} total={TOTAL} title="Scanning your home"
         explainer={d.llmKey
-          ? "Hearth reads every entity and, with your AI key, groups them and judges which matter for activity. This can take a moment — you can watch."
+          ? "Hearth reads every entity and, with your AI key, groups them and judges which matter for activity. This can take a moment."
           : "Hearth reads every entity and groups them by type, keeping the ones useful for activity. Takes a few seconds."}>
         {busy && (
           <Callout icon="refresh">

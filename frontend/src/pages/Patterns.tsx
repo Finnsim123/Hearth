@@ -14,23 +14,57 @@ type Cluster = {
   named_activity_slug: string | null; suggested_slug: string | null;
 };
 type Activity = { slug: string; name: string };
+type PlainFeat = { raw: string; label: string; room: string | null; dir: "up" | "down" };
+type Evidence = {
+  plain: PlainFeat[];
+  when: { span: string; peak_hour: number; daypart: string } | null;
+  where: string[];
+  cadence: { weekday_frac: number; phrase: string } | null;
+  adjacency: { before?: string; after?: string } | null;
+  contrast: { slug: string; name: string; shared: number } | null;
+  summary: string;
+};
 
 const j = (r: Response) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); };
 const post = (url: string, body: unknown) =>
   fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-/** "sofa_presence_frac ↑ · media_playing ↑ · kitchen ↓" */
-function SignatureLine({ sig }: { sig: [string, number][] }) {
+/** Plain-English signal chips — "Bed empty ↓ · Bedroom warmer ↑". Raw feature
+ * name is kept as a tooltip for the curious. Falls back to raw codes pre-load. */
+function SignatureLine({ plain, raw }: { plain?: PlainFeat[]; raw: [string, number][] }) {
+  const chips = plain
+    ? plain.map((p) => ({ key: p.raw, text: p.label, up: p.dir === "up", title: p.raw }))
+    : raw.map(([f, z]) => ({ key: f, text: f, up: z > 0, title: `z-score ${z}` }));
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-      {sig.map(([feat, z]) => (
-        <span key={feat} title={`z-score ${z}`}
-              style={{ fontSize: 12, padding: "3px 9px", borderRadius: 99,
-                       background: "var(--surface-2)", border: "1px solid var(--border)",
-                       fontVariantNumeric: "tabular-nums" }}>
-          <code>{feat}</code> {z > 0 ? "↑" : "↓"}{Math.abs(z) >= 2 ? (z > 0 ? "↑" : "↓") : ""}
+      {chips.map((c) => (
+        <span key={c.key} title={c.title}
+              style={{ fontSize: 12.5, padding: "3px 10px", borderRadius: 99,
+                       background: "var(--surface-2)", border: "1px solid var(--border)" }}>
+          {c.text}{" "}
+          <span style={{ color: c.up ? "var(--accent)" : "var(--text-dim)", fontWeight: 600 }}>
+            {c.up ? "↑" : "↓"}
+          </span>
         </span>
       ))}
+    </div>
+  );
+}
+
+/** The deterministic "what is this" context: when, where, what's around it. */
+function EvidenceBlock({ ev }: { ev: Evidence }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {ev.summary && (
+        <p style={{ margin: 0, fontSize: 13.5, color: "var(--text)" }}>{ev.summary}</p>
+      )}
+      {(ev.adjacency?.before || ev.adjacency?.after || ev.contrast) && (
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+          {ev.adjacency?.before && <>Usually after <strong>{ev.adjacency.before}</strong>. </>}
+          {ev.adjacency?.after && <>Tends to lead into <strong>{ev.adjacency.after}</strong>. </>}
+          {ev.contrast && <>Looks a lot like <strong>{ev.contrast.name}</strong> — maybe the same thing.</>}
+        </p>
+      )}
     </div>
   );
 }
@@ -64,6 +98,10 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [ev, setEv] = useState<Evidence | null>(null);
+  useEffect(() => {
+    fetch(`/api/clusters/${c.id}/evidence`).then(j).then(setEv).catch(() => {});
+  }, [c.id]);
   const name = async () => {
     setBusy(true); setMsg("");
     const body = choice === "__new__" ? { name: newName.trim() } : { activity_slug: choice };
@@ -99,7 +137,8 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
           </span>
         )}
       </div>
-      <SignatureLine sig={c.signature} />
+      {ev && <EvidenceBlock ev={ev} />}
+      <SignatureLine plain={ev?.plain} raw={c.signature} />
       <HourHistogram hist={c.hour_histogram} />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <select value={choice} onChange={(e) => setChoice(e.target.value)}>
