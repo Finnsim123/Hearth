@@ -19,7 +19,9 @@ from hearth.domain.training.estimators import RandomForestEstimator
 from hearth.domain.training.evaluate import (
     evaluate_model, population_stability_index, wilson_interval,
 )
-from hearth.domain.training.trainer import promotion_gate, train_person
+from hearth.domain.training.trainer import (
+    MIN_CONFIRMED_FOR_VALIDATED, promotion_gate, train_person, validation_status,
+)
 
 
 # ── fakes ──────────────────────────────────────────────────────────────────
@@ -155,6 +157,24 @@ def test_train_promote_and_beat_rules(world):
     assert record.metrics["accuracy_bootstrap"] > 0.9          # learnable world
     assert record.metrics["n_train"] > 300
     assert "per_class" in record.metrics and "confusion" in record.metrics
+
+
+def test_validation_status_threshold():
+    assert validation_status(0) == "provisional"
+    assert validation_status(MIN_CONFIRMED_FOR_VALIDATED - 1) == "provisional"
+    assert validation_status(MIN_CONFIRMED_FOR_VALIDATED) == "validated"
+    assert validation_status(MIN_CONFIRMED_FOR_VALIDATED + 100) == "validated"
+
+
+def test_cold_start_model_is_provisional(world):
+    """Fresh home: no confirmed labels, so the first (promoted) model must be
+    labelled provisional, not validated — it was gated on circular bootstrap
+    agreement (audit §3)."""
+    tsdb, repo, store = world
+    record = train_person("alice", tsdb, repo, store, weeks=2)
+    assert record is not None and record.promoted
+    assert record.metrics["n_confirmed"] == 0
+    assert record.metrics["validation_status"] == "provisional"
 
 
 def test_rules_fallback_then_model(world):

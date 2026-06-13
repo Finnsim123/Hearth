@@ -24,6 +24,21 @@ RECENCY_HALF_LIFE_DAYS = 21  # last week counts ~2x vs a month ago (thesillyhome
                              # recency-weighting idea — drift mitigation without forgetting)
 TUNE_MIN_WINDOWS = 500     # below this, tuning fits noise — use defaults
 TUNE_EVERY_DAYS = 30       # re-tune monthly, not every weekly retrain
+MIN_CONFIRMED_FOR_VALIDATED = 30  # below this a model is "provisional", not
+                                  # "validated": at cold start / fast track there
+                                  # are 0 confirmed labels, so the model is
+                                  # promoted on bootstrap AGREEMENT (agreement with
+                                  # the rules that generated its own labels —
+                                  # circular). It must still serve day-one
+                                  # predictions, but it must NOT be presented as
+                                  # validated until enough human-confirmed labels
+                                  # exist to measure it non-circularly (audit §3).
+
+
+def validation_status(n_confirmed: int) -> str:
+    """Honest cold-start label: 'validated' only once enough human-confirmed
+    labels back the confirmed-accuracy metric; else 'provisional'."""
+    return "validated" if n_confirmed >= MIN_CONFIRMED_FOR_VALIDATED else "provisional"
 
 
 def train_person(person_id: str, tsdb, repo, store,
@@ -113,6 +128,7 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
     metrics = evaluate_model(est, X_val, y_val, prov_val)
     metrics["n_train"] = int(len(X_train))
     metrics["feature_count"] = int(X_train.shape[1])
+    metrics["validation_status"] = validation_status(metrics.get("n_confirmed", 0))
     train_acc = float((est.predict_proba(X_train).idxmax(axis=1) == y_train).mean())
     metrics["accuracy_train"] = round(train_acc, 4)
     metrics["hyperparams"] = params
