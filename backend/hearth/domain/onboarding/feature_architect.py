@@ -135,20 +135,18 @@ def composite_prompt(kept: list[EntitySelection], available_feature_names: list[
     )
 
 
+_SEVERITY = {"ok": 0, "suspect": 1, "unusable": 2}
+
+
 def audit_reliability(stats: dict | None, llm_value: str = "ok") -> str:
-    """Deterministic reliability guard layered on the LLM's call: observed stats
-    can FORCE a downgrade the LLM might miss. A sensor that never moved, or whose
-    value space is unintelligible, is unusable regardless of what the LLM said."""
+    """Combine the deterministic stats verdict (heuristic_reliability) with the
+    LLM's call, taking the MORE severe of the two. So observed stats can force a
+    downgrade the LLM missed, and the LLM can still flag something the stats look
+    fine on. Shared with the no-LLM Sensors health view."""
+    from .inventory import heuristic_reliability
+    deterministic, _ = heuristic_reliability(stats)
     llm_value = llm_value if llm_value in _RELIABILITY else "ok"
-    if not stats:
-        return llm_value
-    if stats.get("value_type") == "unknown":
-        return "unusable"
-    if stats.get("flatline_frac") == 1.0 and (stats.get("distinct_values") or 0) <= 1:
-        return "unusable"
-    if (stats.get("pct_missing") or 0) >= 0.99:
-        return "unusable"
-    return llm_value
+    return deterministic if _SEVERITY[deterministic] >= _SEVERITY[llm_value] else llm_value
 
 
 def parse_selections(raw, *, catalog: list[dict], member_ids: list[str]) -> list[EntitySelection]:

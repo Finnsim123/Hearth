@@ -636,6 +636,7 @@ def build_api_router(deps: dict) -> APIRouter:
             for col, v in (m.metrics.get("importance_all") or {}).items():
                 imp_by_col[col] = max(imp_by_col.get(col, 0.0), float(v))
 
+        from ..domain.onboarding.inventory import heuristic_reliability
         out = []
         for b in bindings:
             trace = traces.get(b.name, [])
@@ -645,6 +646,17 @@ def build_api_router(deps: dict) -> APIRouter:
                 status = "constant"
             else:
                 status = "alive"
+            # deterministic reliability verdict (no LLM needed). The clear
+            # statuses map directly; an alive-but-rarely-changing sensor goes
+            # through the shared heuristic on its 7-day change rate.
+            if status == "no_data":
+                reliability, rel_reason = "unusable", "no recent data"
+            elif status == "constant":
+                reliability, rel_reason = "unusable", "value never changes"
+            else:
+                reliability, rel_reason = heuristic_reliability(
+                    {"distinct_values": 2, "flatline_frac": 0.0,
+                     "changes_per_day": round(counts.get(b.name, 0) / 7, 2)})
             kind = "binary" if b.role.value in BINARY_ROLES else "numeric"
             suffixes = recipe_for(b.role).suffixes
             feature = f"{b.name}_{suffixes[0]}" if suffixes else b.name
@@ -653,6 +665,7 @@ def build_api_router(deps: dict) -> APIRouter:
             out.append({"id": b.id, "name": b.name, "role": b.role.value,
                         "entity_id": b.entity_id, "enabled": b.enabled,
                         "status": status,
+                        "reliability": reliability, "reliability_reason": rel_reason,
                         "spark": _norm(trace) if status == "alive" else [],
                         "kind": kind,
                         "obs": int(counts.get(b.name, 0)),

@@ -57,7 +57,7 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
-type Health = { name: string; status: string; spark: number[]; kind: string; obs: number; per_day: number; feature: string | null; model_use: number; room: string | null; tier: number };
+type Health = { name: string; status: string; spark: number[]; kind: string; obs: number; per_day: number; feature: string | null; model_use: number; room: string | null; tier: number; reliability?: string; reliability_reason?: string };
 
 /** Sparkline of the raw signal over the selected window (1H/24H/7D), normalized
  *  0–1 — the per-window input the model aggregates. Binary roles render as a
@@ -179,6 +179,14 @@ function BindingRow({ b, persons, health, onChange }: {
                            color: HEALTH_BADGE[status][1],
                            background: `color-mix(in srgb, ${HEALTH_BADGE[status][1]} 14%, transparent)` }}>
               {HEALTH_BADGE[status][0]}
+            </span>
+          )}
+          {health?.reliability === "suspect" && (
+            <span title={`Looks unreliable: ${health.reliability_reason}. Still used, but treat its signal with caution.`}
+                  style={{ fontSize: 11, padding: "1px 7px", borderRadius: 99, fontWeight: 600,
+                           color: "var(--accent)",
+                           background: "color-mix(in srgb, var(--accent) 14%, transparent)" }}>
+              suspect
             </span>
           )}
           {PERSONAL_ROLES.has(b.role) ? (

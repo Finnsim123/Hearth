@@ -7,8 +7,8 @@ import pandas as pd
 import pytest
 
 from hearth.domain.onboarding.inventory import (
-    build_catalog, catalog_record, entity_stats, set_stats_consent,
-    stats_consent, stats_consent_decided, value_type_of,
+    build_catalog, catalog_record, entity_stats, heuristic_reliability,
+    set_stats_consent, stats_consent, stats_consent_decided, value_type_of,
 )
 
 
@@ -81,6 +81,33 @@ def test_empty_series():
     st = entity_stats(pd.Series(dtype=object), days=7)
     assert st["value_type"] == "unknown" and st["distinct_values"] == 0
     assert st["numeric"] is None and st["top_states"] is None
+
+
+def test_heuristic_reliability():
+    # no stats -> never penalise a fresh install
+    assert heuristic_reliability(None)[0] == "ok"
+    # stuck / constant / unreadable -> unusable
+    assert heuristic_reliability({"distinct_values": 1})[0] == "unusable"
+    assert heuristic_reliability({"flatline_frac": 1.0, "distinct_values": 2})[0] == "unusable"
+    assert heuristic_reliability({"value_type": "unknown"})[0] == "unusable"
+    assert heuristic_reliability({"pct_missing": 1.0})[0] == "unusable"
+    # rarely changes / long gap -> suspect (the middle tier the status badges miss)
+    assert heuristic_reliability({"distinct_values": 5, "changes_per_day": 0.1})[0] == "suspect"
+    assert heuristic_reliability({"distinct_values": 5, "changes_per_day": 50,
+                                  "longest_gap_hours": 96})[0] == "suspect"
+    # healthy -> ok
+    v, reason = heuristic_reliability({"distinct_values": 8, "changes_per_day": 40,
+                                       "flatline_frac": 0.1, "longest_gap_hours": 2})
+    assert v == "ok" and reason == ""
+
+
+def test_reliability_shared_with_llm_audit():
+    """The LLM audit and the no-LLM heuristic share one verdict; the audit takes
+    the more severe of (stats, llm)."""
+    from hearth.domain.onboarding.feature_architect import audit_reliability
+    assert audit_reliability({"distinct_values": 1}, "ok") == "unusable"   # stats win
+    assert audit_reliability({"distinct_values": 8, "changes_per_day": 40}, "suspect") == "suspect"  # llm wins
+    assert audit_reliability(None, "ok") == "ok"
 
 
 def test_stats_consent_toggle():

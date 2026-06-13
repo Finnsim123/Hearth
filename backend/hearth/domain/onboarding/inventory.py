@@ -120,6 +120,33 @@ def entity_stats(series, days: int, end=None) -> dict:
     return out
 
 
+def heuristic_reliability(stats: dict | None) -> tuple[str, str]:
+    """Deterministic reliability verdict from aggregate stats, runnable WITHOUT
+    an LLM (gap analysis: the no-key path gets reliability flags too). Returns
+    (ok | suspect | unusable, short reason). No stats -> 'ok' (a fresh install
+    is not penalised). Shared by the Sensors health view and the LLM audit."""
+    if not stats:
+        return "ok", ""
+    distinct = stats.get("distinct_values")
+    flat = stats.get("flatline_frac")
+    cpd = stats.get("changes_per_day")
+    pct_missing = stats.get("pct_missing")
+    gap = stats.get("longest_gap_hours")
+    if pct_missing is not None and pct_missing >= 0.99:
+        return "unusable", "almost always missing"
+    if stats.get("value_type") == "unknown":
+        return "unusable", "no readable values"
+    if (distinct is not None and distinct <= 1) or flat == 1.0:
+        return "unusable", "value never changes (stuck or constant)"
+    if cpd is not None and cpd < 0.5:
+        return "suspect", "changes less than once every two days"
+    if flat is not None and flat >= 0.9:
+        return "suspect", "flat most of the time"
+    if gap is not None and gap >= 72:
+        return "suspect", f"long silent gap (~{round(gap)}h)"
+    return "ok", ""
+
+
 # ── aggregate-stats consent (the explicit yes/no privacy lever) ──────────────
 # The user decides whether the LLM may see per-entity aggregate statistics and a
 # few sample states. With consent off it sees metadata only (names/types/units),
