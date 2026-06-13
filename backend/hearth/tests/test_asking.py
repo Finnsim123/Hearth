@@ -49,6 +49,37 @@ def _person(**kw):
                   quiet_hours=(23, 6), **kw)
 
 
+def test_load_asking_policy_defaults_and_overrides():
+    class R:
+        def __init__(self, v): self.v = v
+        def get_setting(self, k, d=None): return self.v
+    assert active.load_asking_policy(R(None)) == active.AskingPolicy()
+    pol = active.load_asking_policy(
+        R({"epsilon": 0.2, "cooldown_min": 60, "bogus": 1, "ask_threshold": "x"}))
+    assert pol.epsilon == 0.2 and pol.cooldown_min == 60        # valid overrides applied
+    assert pol.ask_threshold == active.AskingPolicy().ask_threshold  # bad type ignored
+
+
+@pytest.mark.asyncio
+async def test_asking_policy_threshold_is_wired(monkeypatch):
+    """A raised ask_threshold via the 'asking.policy' setting makes an
+    otherwise-confident prediction get asked — proves the policy is consulted,
+    not just defined."""
+    monkeypatch.setattr(active.random, "random", lambda: 0.99)   # no exploration
+
+    class R(AskRepo):
+        def get_setting(self, k, d=None):
+            if k == "timezone":
+                return "UTC"
+            if k == "asking.policy":
+                return {"ask_threshold": 0.99}
+            return d
+
+    repo, notifier = R(), SpyNotifier()
+    # conf 0.92, wide margin: default policy would NOT ask; ask_threshold 0.99 does
+    assert await active.maybe_ask(_pred(0.92), _person(), repo, notifier) is not None
+
+
 @pytest.mark.asyncio
 async def test_uncertain_prediction_asks_mode_based_buttons(monkeypatch):
     repo, notifier = AskRepo(), SpyNotifier()

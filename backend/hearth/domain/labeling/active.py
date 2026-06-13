@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import random
+from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -24,6 +25,40 @@ MARGIN_THRESHOLD = 0.25  # top-2 gap: cooking 55% vs eating 43% is a GREAT
 EPSILON = 0.07
 COOLDOWN_MIN = 30
 REPEAT_MIN = 90
+EXPIRE_HOURS = 12        # unanswered questions expire after this many hours
+
+
+@dataclass(frozen=True)
+class AskingPolicy:
+    """Instance-wide asking thresholds as DATA (editable via the 'asking.policy'
+    setting) rather than scattered constants. Per-person budget and quiet hours
+    stay on the Person record. Defaults equal the historical constants, so
+    loading with no override is a no-op. (gap analysis B3; model_levers.md G6)"""
+    ask_threshold: float = ASK_THRESHOLD
+    margin_threshold: float = MARGIN_THRESHOLD
+    epsilon: float = EPSILON
+    cooldown_min: int = COOLDOWN_MIN
+    repeat_min: int = REPEAT_MIN
+    expire_hours: int = EXPIRE_HOURS
+
+
+def load_asking_policy(repo) -> AskingPolicy:
+    """AskingPolicy with overrides from the 'asking.policy' setting merged over
+    the defaults. Unknown keys and non-numeric values are ignored, so a bad
+    setting degrades to defaults and never blocks the feedback loop."""
+    try:
+        raw = repo.get_setting("asking.policy") or {}
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict) or not raw:
+        return AskingPolicy()
+    names = {f.name for f in fields(AskingPolicy)}
+    clean = {k: v for k, v in raw.items()
+             if k in names and isinstance(v, (int, float)) and not isinstance(v, bool)}
+    try:
+        return replace(AskingPolicy(), **clean)
+    except Exception:
+        return AskingPolicy()
 
 # Fallback when the activity has no explicit `silent` flag (old DBs, LLM
 # taxonomies in other languages): slugs that obviously mean "asleep".
@@ -61,13 +96,14 @@ def _utcnow() -> datetime:
 async def maybe_ask(pred: Prediction, person: Person, repo, notifier) -> Question | None:
     now = _utcnow()
     tz = repo.get_setting("timezone", "UTC") or "UTC"
+    pol = load_asking_policy(repo)
 
     # margin sampling (active-learning standard): ask when the top two
     # classes are CLOSE, not only when the winner is weak
     ranked_p = sorted(pred.probabilities.values(), reverse=True)
     margin = (ranked_p[0] - ranked_p[1]) if len(ranked_p) > 1 else 1.0
-    uncertain = pred.confidence < ASK_THRESHOLD or margin < MARGIN_THRESHOLD
-    explore = random.random() < EPSILON
+    uncertain = pred.confidence < pol.ask_threshold or margin < pol.margin_threshold
+    explore = random.random() < pol.epsilon
     if not (uncertain or explore):
         return None
     if _in_quiet_hours(person, now, tz):
@@ -79,9 +115,9 @@ async def maybe_ask(pred: Prediction, person: Person, repo, notifier) -> Questio
     if last and last.created_at:
         last_at = last.created_at if last.created_at.tzinfo else last.created_at.replace(tzinfo=timezone.utc)
         age_min = (now - last_at).total_seconds() / 60
-        if age_min < COOLDOWN_MIN:
+        if age_min < pol.cooldown_min:
             return None
-        if last.predicted == pred.predicted and age_min < REPEAT_MIN:
+        if last.predicted == pred.predicted and age_min < pol.repeat_min:
             return None
 
     # Never push "are you sleeping?" — if they are, they can't answer; if the
@@ -119,5 +155,7 @@ async def maybe_ask(pred: Prediction, person: Person, repo, notifier) -> Questio
     return q
 
 
-def expire_stale_questions(repo, max_age_hours: int = 12) -> int:
+def expire_stale_questions(repo, max_age_hours: int | None = None) -> int:
+    if max_age_hours is None:
+        max_age_hours = load_asking_policy(repo).expire_hours
     return repo.expire_questions(datetime.now(timezone.utc) - timedelta(hours=max_age_hours))
