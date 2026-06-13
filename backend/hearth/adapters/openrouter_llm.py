@@ -110,6 +110,12 @@ class OpenRouterAdvisor:
     def __init__(self, repo) -> None:
         self.repo = repo
 
+    def _prompt(self, key: str, **tokens: str) -> str:
+        """Resolve an editable system prompt (override-or-default) from the
+        central registry, injecting any [[TOKEN]] values. See domain/prompts.py."""
+        from ..domain.prompts import system_prompt
+        return system_prompt(self.repo, key, **tokens)
+
     def _household_activities(self) -> str:
         """Human-readable list of the activities Hearth predicts for this home,
         so the triage/mapping prompts can keep an otherwise-noisy machine sensor
@@ -223,32 +229,8 @@ class OpenRouterAdvisor:
         items = [e for e in inventory if not e.get("disabled")]
         valid = {e["entity_id"] for e in items}
         lines = [f'{e["entity_id"]} | {e.get("friendly_name") or "-"}' for e in items]
-        activities = self._household_activities()
-        machine_rule = (
-            "Appliances and machines (3D printers, washing machines, dishwashers, "
-            "ovens, servers) and their telemetry usually do NOT reflect a person's "
-            "general day-to-day activity, so DEFAULT such clusters to relevant:false. "
-            "EXCEPTION: if one of this household's activities is clearly about that "
-            "machine, its sensors become a primary signal — mark that cluster "
-            "relevant:true. " + (
-                f"This household's activities: {activities}. "
-                "(e.g. an activity like 'crafting' or 'printing' makes the 3D "
-                "printer relevant; 'laundry' makes the washing machine relevant.) "
-                if activities else
-                "(e.g. an activity like 'crafting' would make a 3D printer relevant.) "))
-        system = (
-            "You triage a smart home's entities for a human-activity-recognition "
-            "system. From entity ids and friendly names ALONE, group them into "
-            "semantic clusters (e.g. '3D printer', 'living-room lights', "
-            "'networking/servers', 'climate', 'presence/people', 'phone "
-            "diagnostics'). For EACH cluster decide `relevant`: true if it helps "
-            "infer what PEOPLE are doing at home (presence, lights, media, power "
-            "use, doors, climate people feel, phones), false for infrastructure, "
-            "diagnostics, firmware, weather/forecasts, batteries, signal levels. "
-            + machine_rule +
-            "Names may be in any language — infer meaning. Every entity goes in "
-            "exactly one cluster. Reply ONLY a JSON array: [{\"label\": str, "
-            "\"relevant\": bool, \"why\": str (<=8 words), \"entities\": [entity_id, …]}].")
+        system = self._prompt("triage_cluster",
+                              activities=self._household_activities() or "none set yet")
         by_label: dict[str, dict] = {}
         for i in range(0, len(lines), 400):                 # ids are cheap; big batches
             chunk = lines[i:i + 400]
@@ -285,33 +267,9 @@ class OpenRouterAdvisor:
         lines = [f"{e['entity_id']} | {e.get('device_class') or '-'} | "
                  f"{e.get('unit') or '-'} | {e.get('friendly_name') or '-'}"
                  for e in inventory if not e.get("disabled")]
-        system = (
-            "You map Home Assistant entities to semantic roles for a home "
-            "activity-recognition system. Names may be in ANY language or be "
-            "nicknames — infer meaning (e.g. 'matras'=mattress=bed, "
-            "'vermogen'=power, 'wekker'=alarm clock). Be selective: only map "
-            "entities genuinely useful for knowing what PEOPLE are doing at "
-            "home. Skip diagnostics, infrastructure, weather, forecasts. "
-            "Appliance/machine telemetry (3D printer, washer, dishwasher, oven) "
-            "usually does NOT reflect general activity — skip it, UNLESS one of "
-            "this household's activities is about that machine, then map it "
-            "(role power for its energy draw, else custom). "
-            f"Household activities: {self._household_activities() or 'unknown'}.\n"
-            "Network nuance: skip GENERIC device trackers (laptops, cameras, "
-            "IoT), BUT a household member's PHONE tracker (role person, set "
-            "person) and router/network occupancy signals — connected-device "
-            "count, total throughput — ARE useful presence proxies; include "
-            "them (role person for a phone, else custom).\n"
-            f"Valid roles: {roles}.\n"
-            f"Household members: {member_ids or 'unknown'}. PERSONAL devices "
-            "(alarm clock, phone focus/steps/battery, wearables) must carry "
-            "\"person\": the owning member id when the entity name implies an "
-            "owner — wrong-person signals poison that person's model.\n"
-            "Reply with ONLY a JSON array: [{\"entity_id\": str, \"role\": str, "
-            "\"name\": short_snake_case_slug, \"room\": str|null, "
-            "\"person\": member_id|null, "
-            "\"reason\": str}] — nothing else. Keep each reason under 8 words; "
-            "omit the reason field entirely when the mapping is obvious.")
+        system = self._prompt("map_bindings", roles=roles,
+                              members=str(member_ids or "unknown"),
+                              activities=self._household_activities() or "unknown")
         out: list[Binding] = []
         seen: set[str] = set()
         for i in range(0, len(lines), 300):           # chunk large homes
@@ -368,14 +326,7 @@ class OpenRouterAdvisor:
                  and not e.get("disabled")]
         if not members or not cands:
             return {}
-        system = (
-            "Match each household member to the Home Assistant entity that tracks "
-            "whether THEY are home or away (a zone state like home/not_home). "
-            "Prefer person.* over device_tracker.*. Never pick a numeric "
-            "distance/proximity sensor — that is not a home/away state. "
-            "Names may be nicknames or in another language — infer (e.g. 'Alex' ↔ "
-            "person.alexander_jansen). Reply ONLY a JSON object {member_id: entity_id "
-            "or null}, one entry per member, entity_id chosen from the candidates.")
+        system = self._prompt("match_person")
         user = json.dumps({
             "members": [{"id": p.id, "name": p.name} for p in members],
             "candidates": [{"entity_id": e["entity_id"],
@@ -401,14 +352,7 @@ class OpenRouterAdvisor:
         Office). Returns {original: canonical}; unknown/garbage degrades to {}."""
         if len(rooms) < 2:
             return {}
-        system = (
-            "You normalise smart-home room/area names. Given a list, merge ones "
-            "that mean the SAME physical room into a single canonical English "
-            "name (e.g. 'Sleepingroom'->'Bedroom', 'livingroom'/'Living_room'->"
-            "'Living Room', 'Backoffice'->'Office'). Keep genuinely distinct "
-            "rooms separate. Names may be in any language. Reply ONLY a JSON "
-            "object mapping every input string to its canonical name: "
-            "{\"input\": \"Canonical\"}.")
+        system = self._prompt("room_canon")
         try:
             res = await self._chat(system, json.dumps(rooms), max_tokens=2000,
                                    task="Tidying room names",
@@ -424,11 +368,7 @@ class OpenRouterAdvisor:
     # ── taxonomy ─────────────────────────────────────────────────────────────
     async def propose_taxonomy(self, inventory: list[dict]) -> list[Activity]:
         domains = sorted({e["entity_id"].split(".")[0] for e in inventory})
-        system = (
-            "Given a smart home's entity domains, propose 4-8 daily activities "
-            "an activity-recognition system should learn. Always include "
-            "sleeping, away, home. Reply ONLY JSON: [{\"slug\": snake_case, "
-            "\"name\": str, \"phrase\": verb_phrase_for_notifications}]")
+        system = self._prompt("propose_taxonomy")
         try:
             items = await self._chat(system, f"domains: {', '.join(domains)}",
                                      task="Proposing activities to recognise")
@@ -454,17 +394,7 @@ class OpenRouterAdvisor:
             f"{', person=' + b.person_id if b.person_id else ''})"
             for b in bindings)
         act_desc = ", ".join(a.slug for a in activities)
-        system = (
-            "You write labeling rules for a home activity-recognition system. "
-            "A rule is a JSON predicate over FEATURE columns mapped to an "
-            "activity. Grammar: {\"all\":[...]}/{\"any\":[...]}/{\"not\":...}/"
-            "{\"feat\":str,\"op\":one of > < >= <= == !=,\"value\":number}. "
-            "USE ONLY features from the provided list. hour_of_day is LOCAL "
-            "0-23. Write high-PRECISION rules (better to not fire than to "
-            "mislabel). Exploit household-specific signals a generic template "
-            "would miss. Reply ONLY JSON: [{\"activity\": slug, \"person\": "
-            "str|null, \"priority\": int 10-90 (lower wins), \"predicate\": "
-            "object, \"reason\": str}]")
+        system = self._prompt("propose_rules")
         user = (f"Activities: {act_desc}\n\nBindings:\n{binding_desc}\n\n"
                 f"Allowed features:\n{', '.join(sorted(feats))}")
         try:
@@ -494,10 +424,7 @@ class OpenRouterAdvisor:
     async def annotate_windows(self, window_summaries: list[dict],
                                activities: list[Activity]) -> list[tuple[str | None, float]]:
         slugs = [a.slug for a in activities]
-        system = (
-            f"Label each window summary with one of: {', '.join(slugs)} or null "
-            "if unclear. Reply ONLY JSON: [{\"i\": int, \"label\": str|null, "
-            "\"confidence\": 0..1}] in input order.")
+        system = self._prompt("annotate_windows", activities=", ".join(slugs))
         results: list[tuple[str | None, float]] = [(None, 0.0)] * len(window_summaries)
         for i in range(0, len(window_summaries), 200):
             chunk = window_summaries[i:i + 200]
@@ -522,8 +449,7 @@ class OpenRouterAdvisor:
 
     async def suggest_cluster_name(self, card: ClusterCard,
                                    activities: list[Activity]) -> str | None:
-        system = ("Given a cluster signature from home sensor data, suggest "
-                  "which activity it is. Reply ONLY JSON: {\"slug\": str|null}")
+        system = self._prompt("name_cluster")
         try:
             res = await self._chat(system, json.dumps({
                 "signature": card.signature, "hour_histogram": card.hour_histogram}))
@@ -540,10 +466,11 @@ class OpenRouterAdvisor:
         what succeeded; the result is always a validated, executable spec."""
         from ..domain.features.validate import validate_spec
         from ..domain.onboarding.feature_architect import (
-            ARCHITECT_MODEL_DEFAULT, SYSTEM_PROMPT, assemble_spec, composite_prompt,
+            ARCHITECT_MODEL_DEFAULT, assemble_spec, composite_prompt,
             feature_prompt, parse_features, parse_selections, selection_prompt)
         from ..domain.schemas import InfoTier
 
+        arch = self._prompt("feature_architect")   # editable persona (Settings)
         try:
             member_ids = [p.id for p in self.repo.persons()]
         except Exception:
@@ -553,7 +480,7 @@ class OpenRouterAdvisor:
         for i in range(0, len(catalog), 150):                 # batch large homes
             batch = catalog[i:i + 150]
             try:
-                raw = await self._chat(SYSTEM_PROMPT,
+                raw = await self._chat(arch,
                                        selection_prompt(batch, activities, member_ids),
                                        max_tokens=8000, model=ARCHITECT_MODEL_DEFAULT,
                                        task="Choosing useful sensors",
@@ -570,7 +497,7 @@ class OpenRouterAdvisor:
         if kept:
             try:
                 features = parse_features(await self._chat(
-                    SYSTEM_PROMPT, feature_prompt(kept, mode), model=ARCHITECT_MODEL_DEFAULT,
+                    arch, feature_prompt(kept, mode), model=ARCHITECT_MODEL_DEFAULT,
                     task="Designing features", sent=f"{len(kept)} sensors"))
             except Exception as exc:
                 log.warning("feature_spec feature pass failed: %s", exc)
@@ -578,7 +505,7 @@ class OpenRouterAdvisor:
             try:
                 names = [f.name for f in features]
                 features += parse_features(await self._chat(
-                    SYSTEM_PROMPT, composite_prompt(kept, names, mode),
+                    arch, composite_prompt(kept, names, mode),
                     model=ARCHITECT_MODEL_DEFAULT,
                     task="Combining features", sent=f"{len(names)} features"))
             except Exception as exc:
@@ -601,9 +528,10 @@ class OpenRouterAdvisor:
         returned unchanged."""
         from ..domain.features.validate import validate_spec
         from ..domain.onboarding.feature_architect import (
-            ARCHITECT_MODEL_DEFAULT, SYSTEM_PROMPT, parse_delta, revision_prompt)
+            ARCHITECT_MODEL_DEFAULT, parse_delta, revision_prompt)
         try:
-            raw = await self._chat(SYSTEM_PROMPT, revision_prompt(feedback, mode),
+            raw = await self._chat(self._prompt("feature_architect"),
+                                   revision_prompt(feedback, mode),
                                    model=ARCHITECT_MODEL_DEFAULT)
         except Exception as exc:
             log.warning("revise_feature_spec failed: %s", exc)

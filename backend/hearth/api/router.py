@@ -174,6 +174,33 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"ok": True, "family": fam,
                 "note": "applies on the next training run"}
 
+    # ── editable LLM system prompts (Settings → AI prompts) ────────────────
+    @api.get("/prompts")
+    def list_prompts_ep() -> dict:
+        from ..domain.prompts import list_prompts
+        return {"prompts": list_prompts(repo)}
+
+    @api.post("/prompts")
+    def set_prompt_ep(body: dict) -> dict:
+        """Override a system prompt, or reset it to the default (body
+        {key, reset:true}). Editing changes how the AI assistant behaves on the
+        next analysis; the JSON output contract lives in the text, so a reckless
+        edit can break a pass — every prompt has a one-click reset."""
+        from ..domain.prompts import PROMPT_DEFS, reset_override, set_override
+        key = body.get("key")
+        if key not in PROMPT_DEFS:
+            raise HTTPException(404, "unknown prompt")
+        if body.get("reset"):
+            reset_override(repo, key)
+            return {"ok": True, "reset": True}
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise HTTPException(400, "text required (non-empty)")
+        if len(text) > 20_000:
+            raise HTTPException(400, "prompt too long (max 20000 chars)")
+        set_override(repo, key, text)
+        return {"ok": True}
+
     # ── training look-back window (how far back each run learns) ───────────
     @api.get("/training-window")
     def get_training_window() -> dict:
@@ -1110,6 +1137,17 @@ def build_api_router(deps: dict) -> APIRouter:
     @api.get("/clusters")
     def clusters(status: str | None = None, person: str | None = None) -> list:
         return repo.clusters(status=status, person_id=person)
+
+    @api.get("/clusters/{cluster_id}/evidence")
+    def cluster_evidence(cluster_id: int) -> dict:
+        """Deterministic 'what is this' card: plain-English signature, when/where
+        it happens, weekday cadence, what sits before/after it, and which named
+        activity it resembles. Pure code — works with no AI key."""
+        card = repo.get_cluster(cluster_id)
+        if card is None:
+            raise HTTPException(404, "no such pattern")
+        from ..domain.discovery.evidence import build_evidence
+        return build_evidence(card, repo, deps.get("tsdb"))
 
     @api.post("/discovery/run")
     async def discovery_run(body: dict | None = None) -> dict:

@@ -927,8 +927,108 @@ function DangerZone() {
 
 // ── settings hub (tiles → sections) ──────────────────────────────────────────
 
+// ── editable AI system prompts ───────────────────────────────────────────────
+
+type PromptDef = {
+  key: string; title: string; description: string;
+  tokens: string[]; default: string; override: string | null;
+};
+
+function PromptEditor({ p, onSaved }: { p: PromptDef; onSaved: () => void }) {
+  const [text, setText] = useState(p.override ?? "");
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<SaveState>("idle");
+  const overridden = p.override != null;
+  const save = async () => {
+    setState("saving");
+    try { await post("/api/prompts", { key: p.key, text }).then(j); setState("ok"); onSaved(); }
+    catch { setState("fail"); }
+  };
+  const reset = async () => {
+    if (!window.confirm(`Reset “${p.title}” to the built-in default?`)) return;
+    setState("saving");
+    try {
+      await post("/api/prompts", { key: p.key, reset: true }).then(j);
+      setText(""); setState("ok"); onSaved();
+    } catch { setState("fail"); }
+  };
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+      <button onClick={() => setOpen(!open)}
+        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none",
+                 background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
+                 color: "var(--text)", padding: "12px 14px", textAlign: "left" }}>
+        <strong style={{ fontSize: 14 }}>{p.title}</strong>
+        {overridden && (
+          <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 99, fontWeight: 600,
+                         background: "color-mix(in srgb, var(--accent) 16%, transparent)",
+                         color: "var(--accent)" }}>edited</span>
+        )}
+        <span style={{ fontSize: 12.5, color: "var(--text-dim)", overflow: "hidden",
+                       textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.description}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+             style={{ marginLeft: "auto", flexShrink: 0, color: "var(--text-dim)",
+                      transition: "transform .18s", transform: open ? "none" : "rotate(-90deg)" }}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10,
+                      borderTop: "1px solid var(--border)" }}>
+          {p.tokens.length > 0 && (
+            <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+              Auto-filled placeholders (keep them where you want the live data):{" "}
+              {p.tokens.map((t) => <code key={t} style={{ marginRight: 6 }}>{`[[${t}]]`}</code>)}
+            </p>
+          )}
+          <textarea value={text} placeholder={p.default}
+                    onChange={(e) => { setText(e.target.value); setState("idle"); }}
+                    rows={12} spellCheck={false}
+                    style={{ width: "100%", fontFamily: "var(--mono, monospace)", fontSize: 12.5,
+                             lineHeight: 1.5, resize: "vertical", padding: 10 }} />
+          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+            Empty = use the built-in default (shown faint above as the placeholder).
+            Saved edits apply the next time the AI assistant runs.
+          </p>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            {text.trim() === "" && (
+              <button className="btn btn-ghost" onClick={() => setText(p.default)}>
+                Load default to edit
+              </button>
+            )}
+            <SaveButton state={state} onClick={save} />
+            {overridden && (
+              <button className="btn btn-ghost" style={{ color: "var(--danger)" }} onClick={reset}>
+                Reset to default
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AiPrompts() {
+  const [prompts, setPrompts] = useState<PromptDef[] | null>(null);
+  const load = () => fetch("/api/prompts").then(j)
+    .then((d) => setPrompts(d.prompts)).catch(() => setPrompts([]));
+  useEffect(() => { load(); }, []);
+  return (
+    <Card title="AI assistant prompts"
+          sub="Every instruction Hearth sends to the language model, editable. Make them stricter, soften them, or tailor them to your home. Prompts only run when an AI key is set, during setup, re-mapping, feature design and pattern naming — never during prediction. The JSON-output part lives in the text, so a careless edit can break a pass; each prompt resets in one click.">
+      {prompts === null && <p style={{ color: "var(--text-dim)", fontSize: 14 }}>Loading…</p>}
+      {prompts?.length === 0 && <p style={{ color: "var(--text-dim)", fontSize: 14 }}>No prompts found.</p>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {prompts?.map((p) => <PromptEditor key={p.key} p={p} onSaved={load} />)}
+      </div>
+    </Card>
+  );
+}
+
 type SectionKey =
-  | "household" | "model" | "integrations" | "logs" | "account" | "general" | "methodology";
+  | "household" | "model" | "integrations" | "prompts" | "logs" | "account" | "general" | "methodology";
 
 const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }[] = [
   { key: "household", icon: "household", title: "Household",
@@ -937,6 +1037,8 @@ const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }
     desc: "Data sharing, feature power, model family, clock trust, commit threshold and history retention." },
   { key: "integrations", icon: "flow", title: "Integrations",
     desc: "Home Assistant, InfluxDB, the AI assistant, and API tokens for the HA integration." },
+  { key: "prompts", icon: "models", title: "AI prompts",
+    desc: "Read and edit every system prompt Hearth sends to the language model." },
   { key: "logs", icon: "monitor", title: "Logs",
     desc: "Recent backend activity, live." },
   { key: "account", icon: "user", title: "Account",
@@ -980,6 +1082,7 @@ function SectionBody({ section }: { section: SectionKey }) {
     case "household": return <Household />;
     case "model": return (<><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /></>);
     case "integrations": return <ConnectionsSection />;
+    case "prompts": return <AiPrompts />;
     case "logs": return <Logs />;
     case "account": return <Account />;
     case "general": return (<><Appearance /><System /><DangerZone /></>);
