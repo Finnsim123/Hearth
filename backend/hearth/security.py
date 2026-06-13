@@ -60,6 +60,14 @@ def verify_api_token(presented: str, stored_sha256: str) -> bool:
     return hmac.compare_digest(_sha256(presented), stored_sha256)
 
 
+def mint_reset_token() -> tuple[str, str]:
+    """One-time password-recovery token: ('hrt_reset_<urlsafe>', sha256_for_db).
+    Generated out-of-band (the `hearth.recover` CLI) since there's no mail server;
+    the plaintext is printed once to the operator and redeemed at /reset."""
+    v = "hrt_reset_" + _secrets.token_urlsafe(24)
+    return v, _sha256(v)
+
+
 # ── third-party secrets at rest ────────────────────────────────────────────
 _fernet: Fernet | None = None
 

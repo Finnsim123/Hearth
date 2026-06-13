@@ -41,8 +41,14 @@ values have `__repr__` redaction; tokens are masked `hrt_****…` in UI and logs
   record *who* confirmed.
 - Sessions: server-side rows (revocable in Settings → Users), 30-day idle
   expiry, rotation on login. Logout = row deletion, not just cookie clearing.
-- Login throttling: per-account exponential backoff stored on the user row
-  (homelab-appropriate; no captchas).
+- Login throttling: after 5 consecutive failures, per-account exponential
+  backoff (capped 15 min) stored on the user row — refused *before* argon2 runs,
+  so it also blunts the unauth CPU-flood lever. A success clears the counters.
+- Account recovery (no mail server): the operator mints a one-time token from a
+  shell — `docker compose exec hearth python -m hearth.recover <email>` — and
+  redeems it at `/reset` ("Forgot password?" on the sign-in screen). Tokens are
+  SHA-256-hashed in `password_resets`, single-use, expire in 1 hour, and revoke
+  every session on redemption. Shell access to the box is the recovery bar.
 
 ## API authentication
 

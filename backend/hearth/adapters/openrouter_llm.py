@@ -110,6 +110,21 @@ class OpenRouterAdvisor:
     def __init__(self, repo) -> None:
         self.repo = repo
 
+    def _household_activities(self) -> str:
+        """Human-readable list of the activities Hearth predicts for this home,
+        so the triage/mapping prompts can keep an otherwise-noisy machine sensor
+        when an activity is actually ABOUT that machine (e.g. 'crafting' makes a
+        3D printer a primary signal). Empty string when unknown (e.g. the wizard
+        preview, before a taxonomy exists) — the prompt then omits the clause."""
+        get = getattr(self.repo, "activities", None)
+        if not callable(get):
+            return ""
+        try:
+            names = [a.name for a in get() if getattr(a, "enabled", True)]
+        except Exception:
+            return ""
+        return ", ".join(dict.fromkeys(n for n in names if n))
+
     def _set_status(self, ok: bool, code: int, detail: str | None) -> None:
         """Record the health of the last LLM call so the UI (ember buddy,
         Settings) can tell the user when their key is rate-limited / out of
@@ -208,6 +223,19 @@ class OpenRouterAdvisor:
         items = [e for e in inventory if not e.get("disabled")]
         valid = {e["entity_id"] for e in items}
         lines = [f'{e["entity_id"]} | {e.get("friendly_name") or "-"}' for e in items]
+        activities = self._household_activities()
+        machine_rule = (
+            "Appliances and machines (3D printers, washing machines, dishwashers, "
+            "ovens, servers) and their telemetry usually do NOT reflect a person's "
+            "general day-to-day activity, so DEFAULT such clusters to relevant:false. "
+            "EXCEPTION: if one of this household's activities is clearly about that "
+            "machine, its sensors become a primary signal — mark that cluster "
+            "relevant:true. " + (
+                f"This household's activities: {activities}. "
+                "(e.g. an activity like 'crafting' or 'printing' makes the 3D "
+                "printer relevant; 'laundry' makes the washing machine relevant.) "
+                if activities else
+                "(e.g. an activity like 'crafting' would make a 3D printer relevant.) "))
         system = (
             "You triage a smart home's entities for a human-activity-recognition "
             "system. From entity ids and friendly names ALONE, group them into "
@@ -217,6 +245,7 @@ class OpenRouterAdvisor:
             "infer what PEOPLE are doing at home (presence, lights, media, power "
             "use, doors, climate people feel, phones), false for infrastructure, "
             "diagnostics, firmware, weather/forecasts, batteries, signal levels. "
+            + machine_rule +
             "Names may be in any language — infer meaning. Every entity goes in "
             "exactly one cluster. Reply ONLY a JSON array: [{\"label\": str, "
             "\"relevant\": bool, \"why\": str (<=8 words), \"entities\": [entity_id, …]}].")
@@ -263,6 +292,11 @@ class OpenRouterAdvisor:
             "'vermogen'=power, 'wekker'=alarm clock). Be selective: only map "
             "entities genuinely useful for knowing what PEOPLE are doing at "
             "home. Skip diagnostics, infrastructure, weather, forecasts. "
+            "Appliance/machine telemetry (3D printer, washer, dishwasher, oven) "
+            "usually does NOT reflect general activity — skip it, UNLESS one of "
+            "this household's activities is about that machine, then map it "
+            "(role power for its energy draw, else custom). "
+            f"Household activities: {self._household_activities() or 'unknown'}.\n"
             "Network nuance: skip GENERIC device trackers (laptops, cameras, "
             "IoT), BUT a household member's PHONE tracker (role person, set "
             "person) and router/network occupancy signals — connected-device "

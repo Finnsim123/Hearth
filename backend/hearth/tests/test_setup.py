@@ -213,6 +213,49 @@ def test_login_below_threshold_still_succeeds_and_resets(client):
     assert repo.verify_login("a@b.c", "averylongpassword") is not None
 
 
+def test_password_recovery_token_flow(client):
+    import hashlib
+    from hearth import security
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)        # user a@b.c / averylongpassword
+    user = repo.user_by_email("a@b.c")
+    assert user is not None
+
+    # mint a recovery token (what the CLI does) and redeem it via the public endpoint
+    token, sha = security.mint_reset_token()
+    repo.create_reset_token(user.id, sha)
+    r = c.post("/api/auth/reset", json={"token": token, "new": "brand-new-pass-123"})
+    assert r.status_code == 200
+
+    # old password dead, new one works
+    assert repo.verify_login("a@b.c", "averylongpassword") is None
+    assert repo.verify_login("a@b.c", "brand-new-pass-123") is not None
+    # the token is single-use — a replay is refused
+    assert c.post("/api/auth/reset", json={"token": token, "new": "another-pass-456"}).status_code == 400
+    # garbage / short password rejected
+    assert c.post("/api/auth/reset", json={"token": "hrt_reset_nope", "new": "x" * 12}).status_code == 400
+    assert c.post("/api/auth/reset", json={"token": token, "new": "short"}).status_code == 400
+
+
+def test_recovery_token_expires(client):
+    from datetime import timedelta
+    from hearth import security
+    from hearth.adapters import app_db
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)
+    user = repo.user_by_email("a@b.c")
+    token, sha = security.mint_reset_token()
+    repo.create_reset_token(user.id, sha, hours=1)
+    # force-expire the stored token, then a redeem must fail
+    from sqlalchemy.orm import Session
+    from sqlalchemy import select
+    with Session(repo.engine) as s:
+        row = s.scalars(select(app_db.PasswordResetRow)).first()
+        row.expires_at = app_db._now() - timedelta(minutes=1)
+        s.commit()
+    assert c.post("/api/auth/reset", json={"token": token, "new": "brand-new-pass-123"}).status_code == 400
+
+
 def test_change_password_revokes_other_sessions(client):
     c, repo = client
     c.post("/api/setup/complete", json=PAYLOAD)        # auto-signs in

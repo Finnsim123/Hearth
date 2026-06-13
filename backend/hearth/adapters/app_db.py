@@ -54,6 +54,15 @@ class SessionRow(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class PasswordResetRow(Base):
+    __tablename__ = "password_resets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    token_sha256: Mapped[str] = mapped_column(String, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class PersonRow(Base):
     __tablename__ = "persons"
     id: Mapped[str] = mapped_column(String, primary_key=True)  # slug
@@ -583,6 +592,57 @@ class AppDb:
             s.commit()
             u.id = r.id
             return u
+
+    # ── password recovery (no mail server: token minted by the recover CLI) ──
+    def user_by_email(self, email: str):
+        with Session(self.engine) as s:
+            r = s.scalars(select(UserRow).where(
+                UserRow.email == self._norm_email(email))).first()
+            return (User(id=r.id, email=r.email, display_name=r.display_name,
+                         role=r.role, person_id=r.person_id, disabled=r.disabled)
+                    if r is not None else None)
+
+    def create_reset_token(self, user_id: int, token_sha256: str, hours: int = 1) -> None:
+        from datetime import timedelta
+        with Session(self.engine) as s:
+            # one live token per user — drop any previous, unredeemed ones
+            for old in s.scalars(select(PasswordResetRow).where(
+                    PasswordResetRow.user_id == user_id)).all():
+                s.delete(old)
+            s.add(PasswordResetRow(user_id=user_id, token_sha256=token_sha256,
+                                   expires_at=_now() + timedelta(hours=hours)))
+            s.commit()
+
+    def reset_password_with_token(self, token_sha256: str, new_password: str) -> bool:
+        """Redeem a one-time reset token: set the new password, revoke every
+        session, clear the lockout counters, and consume the token. False if the
+        token is unknown/expired."""
+        with Session(self.engine) as s:
+            r = s.scalars(select(PasswordResetRow).where(
+                PasswordResetRow.token_sha256 == token_sha256)).first()
+            if r is None:
+                return False
+            exp = r.expires_at
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp < _now():
+                s.delete(r)
+                s.commit()
+                return False
+            user = s.get(UserRow, r.user_id)
+            if user is None:
+                s.delete(r)
+                s.commit()
+                return False
+            user.password_hash = security.hash_password(new_password)
+            user.failed_logins = 0
+            user.backoff_until = None
+            for sess in s.scalars(select(SessionRow).where(
+                    SessionRow.user_id == user.id)).all():
+                s.delete(sess)
+            s.delete(r)                      # one-time use
+            s.commit()
+            return True
 
     def create_session(self, user_id: int, token_sha256: str, days: int = 30) -> None:
         from datetime import timedelta

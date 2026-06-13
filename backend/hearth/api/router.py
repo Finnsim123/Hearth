@@ -67,6 +67,21 @@ def build_api_router(deps: dict) -> APIRouter:
                             samesite="lax", max_age=30 * 86400)
         return {"ok": True}
 
+    @api.post("/auth/reset")
+    def reset_password(body: dict) -> dict:
+        """Redeem a one-time recovery token (minted by `python -m hearth.recover`)
+        and set a new password. Public — the high-entropy single-use token is the
+        credential. On success every existing session is revoked."""
+        import hashlib
+        token = (body.get("token") or "").strip()
+        new_pw = body.get("new") or ""
+        if len(new_pw) < 10:
+            raise HTTPException(400, "New password must be at least 10 characters")
+        sha = hashlib.sha256(token.encode()).hexdigest()
+        if not token or not repo.reset_password_with_token(sha, new_pw):
+            raise HTTPException(400, "Invalid or expired recovery token")
+        return {"ok": True}
+
     @api.get("/health")
     def health() -> dict:
         import os
