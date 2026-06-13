@@ -34,6 +34,22 @@ def _heuristic_clusters(usable: list[dict]) -> list[dict]:
     return list(groups.values())
 
 
+def keepset_from(triage: dict, excluded_labels: set[str]) -> list[str]:
+    """Recompute the kept entity set from a stored triage when the user toggles
+    whole clusters off (the Sensors / Welcome review). Relevant, non-excluded
+    clusters are kept; the presence safety floor (real home/away trackers) is
+    always re-added regardless of the toggles."""
+    keep: set[str] = set()
+    everything: set[str] = set()
+    for c in triage.get("clusters", []):
+        ents = c.get("entities", [])
+        everything.update(ents)
+        if c.get("relevant") and c["label"] not in excluded_labels:
+            keep.update(ents)
+    keep |= {e for e in everything if is_person_tracker(e)}
+    return sorted(keep)
+
+
 async def triage_entities(repo, inventory: list[dict], advisor=None) -> dict:
     """Cluster the inventory and derive the relevant shortlist. Stores the result
     in setting `entity_triage` (clusters for the bubble cloud + the kept ids) and
@@ -71,7 +87,10 @@ async def triage_entities(repo, inventory: list[dict], advisor=None) -> dict:
         "clusters": [
             {"label": c["label"], "relevant": bool(c.get("relevant")),
              "why": c.get("why", ""), "count": len(c.get("entities", [])),
-             "kept": sum(1 for e in c.get("entities", []) if e in keep)}
+             "kept": sum(1 for e in c.get("entities", []) if e in keep),
+             # membership kept so the Sensors page can toggle a whole cluster
+             # on/off and recompute the keep-set (not sent to the bubble cloud).
+             "entities": sorted(c.get("entities", []))}
             for c in sorted(clusters, key=lambda c: -len(c.get("entities", [])))
         ],
         "at": datetime.now(timezone.utc).isoformat(),

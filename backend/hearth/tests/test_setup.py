@@ -114,6 +114,46 @@ async def test_post_restart_seed_creates_bindings_and_rules(client):
     assert repo.get_setting("seed.status")["stage"] == "done"
 
 
+class _OneLight:
+    async def discover_entities(self):
+        return [{"entity_id": "light.kitchen", "domain": "light", "friendly_name": None,
+                 "device_class": None, "unit": None, "area": "Kitchen",
+                 "disabled": False, "state": "off"}]
+
+
+@pytest.mark.asyncio
+async def test_seed_defers_llm_pass_until_approved(client):
+    c, repo = client
+    assert c.post("/api/setup/complete", json=PAYLOAD).status_code == 200
+    # an AI key is present → the expensive mapping pass is gated behind approval
+    repo.set_connection("llm", "http://nope.local/v1", "sk-x", {"model": "openai/gpt-4o-mini"})
+    repo.set_setting("seed.pending", {"members": []})
+
+    from hearth.domain.onboarding.seed import run_seed
+    await run_seed(repo, _OneLight())
+
+    assert repo.get_setting("triage.awaiting") is True          # waiting for the user
+    # …but the free heuristic baseline still bound the light, so warm start works
+    assert any(b.entity_id == "light.kitchen" for b in repo.bindings())
+
+
+@pytest.mark.asyncio
+async def test_entity_triage_approve_gate(client):
+    c, repo = client
+    assert c.post("/api/setup/complete", json=PAYLOAD).status_code == 200
+    # no triage yet, no key → refuse
+    assert c.post("/api/entity-triage/approve", json={}).status_code == 409
+    repo.set_connection("llm", "http://nope.local/v1", "sk-x", {"model": "openai/gpt-4o-mini"})
+    repo.set_setting("seed.pending", {"members": []})
+    from hearth.domain.onboarding.seed import run_seed
+    await run_seed(repo, _OneLight())
+    # now there's a triage + a key → approval flips the gate and re-queues mapping
+    r = c.post("/api/entity-triage/approve", json={})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert repo.get_setting("triage.approved") is True
+    assert repo.get_setting("triage.awaiting") is False
+
+
 def test_update_endpoints(client, tmp_path, monkeypatch):
     c, repo = client
     c.post("/api/setup/complete", json=PAYLOAD)        # signs us in

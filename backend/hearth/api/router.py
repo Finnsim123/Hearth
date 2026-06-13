@@ -162,8 +162,58 @@ def build_api_router(deps: dict) -> APIRouter:
     # ── entity triage (coarse funnel stage): clusters + relevant shortlist ──
     @api.get("/entity-triage")
     def get_entity_triage() -> dict:
-        return repo.get_setting("entity_triage") or {
+        tr = repo.get_setting("entity_triage") or {
             "by": None, "total": 0, "kept_count": 0, "kept": [], "clusters": []}
+        # strip per-cluster membership (kept server-side for re-scoping) — the UI
+        # only needs labels + counts; it toggles by label.
+        clusters = [{k: v for k, v in c.items() if k != "entities"}
+                    for c in tr.get("clusters", [])]
+        return {**tr, "clusters": clusters,
+                "awaiting": bool(repo.get_setting("triage.awaiting")),
+                "has_llm": repo.get_connection("llm") is not None}
+
+    @api.post("/entity-triage/approve")
+    async def approve_entity_triage(body: dict) -> dict:
+        """Approve the keep-set (optionally with whole clusters toggled off) and
+        run the expensive AI mapping pass on it — the 'don't spend without a yes'
+        gate. Re-seeds with the LLM enabled, then re-warm-starts. Needs a key."""
+        if repo.get_connection("llm") is None:
+            raise HTTPException(409, "No AI key configured")
+        tr = repo.get_setting("entity_triage")
+        if not tr:
+            raise HTTPException(409, "No triage to approve yet")
+        from ..domain.onboarding.triage import keepset_from
+        excluded = set(body.get("excluded_labels") or [])
+        kept = keepset_from(tr, excluded)
+        kept_set = set(kept)
+        tr["kept"] = kept
+        tr["kept_count"] = len(kept)
+        for c in tr.get("clusters", []):
+            c["kept"] = sum(1 for e in c.get("entities", []) if e in kept_set)
+        repo.set_setting("entity_triage", tr)
+        repo.set_setting("triage.approved", True)
+        repo.set_setting("triage.awaiting", False)
+        # re-run mapping (LLM now enabled) then re-warm-start on the new bindings
+        repo.set_setting("seed.pending", {"members": []})
+        influx = repo.get_connection("influx") or {}
+        src = (influx.get("options") or {}).get("source_bucket")
+        repo.set_setting("fasttrack.pending",
+                         {"source_bucket": src} if src else {"source": "recorder", "days": 10})
+        events = deps.get("events")
+        if events is None:
+            return {"ok": True, "restart": True,
+                    "note": "restart the container to apply: docker compose restart hearth"}
+        import asyncio
+
+        async def _refine() -> None:
+            from ..domain.fasttrack import run_fast_track
+            from ..domain.onboarding.seed import run_seed
+            await run_seed(repo, events)
+            if deps.get("tsdb"):
+                await run_fast_track(repo, deps["tsdb"], deps["models"],
+                                     deps.get("notifier"), events)
+        asyncio.create_task(_refine())
+        return {"ok": True, "restart": False, "kept_count": len(kept)}
 
     # ── recent logs (Logs page) — session-only, never in integration scope ──
     @api.get("/logs")

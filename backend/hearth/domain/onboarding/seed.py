@@ -44,19 +44,32 @@ async def run_seed(repo, events) -> None:
             from ...adapters.openrouter_llm import OpenRouterAdvisor
             advisor = OpenRouterAdvisor(repo)
 
+        # The expensive metadata pass (binding map, person match, rules) can be
+        # gated behind explicit approval so a key isn't spent without a yes. When
+        # gated we still lay down the FREE heuristic baseline + warm start, then
+        # flag `triage.awaiting`; the user approves the bubble cloud and a second
+        # run (triage.approved) does the full LLM mapping. No key, gate off, or
+        # already-approved → run it inline as before.
+        approved = bool(repo.get_setting("triage.approved"))
+        review = bool(repo.get_setting("triage.review", True))
+        use_llm = advisor is not None and (approved or not review)
+
         # Stage 0 of the funnel: cluster the FULL list from names alone and keep
         # only the clusters relevant to activity prediction, so the expensive
-        # metadata pass below sees a focused shortlist, not 1700 entities. With
-        # no LLM this falls back to heuristic-role clustering (same old set).
+        # metadata pass sees a focused shortlist, not 1700 entities. With no LLM
+        # this falls back to heuristic-role clustering (same old set). An approved
+        # re-run reuses the (possibly user-edited) shortlist rather than re-triaging.
         _status(repo, "triaging", entities=len(usable))
         from .triage import triage_entities
-        triage = await triage_entities(repo, usable, advisor)
-        kept = set(triage["kept"])
+        if approved and (repo.get_setting("entity_triage") or {}).get("kept"):
+            kept = set(repo.get_setting("entity_triage")["kept"])
+        else:
+            kept = set((await triage_entities(repo, usable, advisor))["kept"])
         shortlist = [e for e in usable if e["entity_id"] in kept]
 
         _status(repo, "mapping", entities=len(shortlist), of=len(usable))
         merged = {b.entity_id: b for b in heuristic_bindings(shortlist)}
-        if advisor is not None:
+        if use_llm:
             try:
                 for b in await advisor.propose_bindings(shortlist, repo.persons()):
                     merged[b.entity_id] = b              # LLM wins ties
@@ -100,7 +113,7 @@ async def run_seed(repo, events) -> None:
         from .person_link import (ensure_member_persons, force_core_roles,
                                    repair_person_bindings)
         llm_matches = {}
-        if advisor is not None:
+        if use_llm:
             try:
                 llm_matches = await advisor.match_person_entities(repo.persons(), usable)
             except Exception:
@@ -116,13 +129,22 @@ async def run_seed(repo, events) -> None:
         _status(repo, "writing_rules", bindings=len(repo.bindings()))
         for rule in starter_rules(repo.bindings(), repo.activities()):
             repo.save_rule(rule)
-        if advisor is not None:
+        if use_llm:
             try:
                 for rule in await advisor.propose_rules(repo.bindings(),
                                                         repo.activities()):
                     repo.save_rule(rule)
             except Exception:
                 log.exception("LLM rule proposal failed — templates only")
+
+        # Gate bookkeeping: if there's a key but we deferred the LLM pass, flag
+        # that the bubble cloud is awaiting the user's go-ahead. An approved run
+        # clears both flags so the gate doesn't re-trigger next boot.
+        if advisor is not None and review and not approved:
+            repo.set_setting("triage.awaiting", True)
+        else:
+            repo.set_setting("triage.awaiting", False)
+            repo.set_setting("triage.approved", None)
 
         bound = repo.bindings()
         repo.set_setting("inventory.scan", {
