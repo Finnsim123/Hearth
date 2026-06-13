@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { PRESET_HUES } from "../components/Avatar";
 import Welcome from "./Welcome";
+import BubbleCloud, { type TriageCluster } from "../components/BubbleCloud";
 import { Icon } from "../icons";
 import {
   Callout, ChoiceCard, Field, FooterNav, Progress, StepShell, TestRow, type TestState,
@@ -25,9 +26,13 @@ type WizardData = {
   members: Member[];
   llmKey: string;
   llmModel: string;
+  shareStats: boolean;        // AI data-sharing consent (metadata-only vs +stats)
   taxonomyPreset: "minimal" | "standard" | "custom";
   modelFamily: "random_forest" | "gradient_boosting" | "logistic" | "embedding";
-  inventoryCount: number;     // bindable entities from the scan — for the cost estimate
+  haEntities: number;         // total entity count from the HA test — for the AI cost estimate
+  inventoryCount: number;     // kept entities after triage — shown on the scan step
+  triageExcluded: string[];   // cluster labels the user toggled OFF in the scan step
+  triageIncluded: string[];   // irrelevant clusters the user toggled back ON
 };
 
 const empty: WizardData = {
@@ -38,9 +43,13 @@ const empty: WizardData = {
   members: [{ name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:ember", notifySystem: true, askBudget: 8 }],
   llmKey: "",
   llmModel: "openai/gpt-4o-mini",
+  shareStats: false,
   taxonomyPreset: "standard",
   modelFamily: "random_forest",
+  haEntities: 0,
   inventoryCount: 0,
+  triageExcluded: [],
+  triageIncluded: [],
 };
 
 
@@ -85,7 +94,8 @@ export default function Wizard() {
     try {
       await fetch("/api/setup/complete", { method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...data, appBaseUrl: window.location.origin }) });
+        body: JSON.stringify({ ...data, appBaseUrl: window.location.origin,
+          triage: { excluded_labels: data.triageExcluded, included_labels: data.triageIncluded } }) });
     } catch { /* server restarts mid-request; expected — Welcome polls until it's up */ }
   };
 
@@ -99,8 +109,8 @@ export default function Wizard() {
       {step === 3 && <StepInflux d={data} set={set} next={next} back={back} />}
       {step === 4 && <StepMqtt d={data} set={set} next={next} back={back} />}
       {step === 5 && <StepHousehold d={data} set={set} next={next} back={back} />}
-      {step === 6 && <StepInventory d={data} set={set} next={next} back={back} />}
-      {step === 7 && <StepAiAssist d={data} set={set} next={next} back={back} />}
+      {step === 6 && <StepAiAssist d={data} set={set} next={next} back={back} />}
+      {step === 7 && <StepInventory d={data} set={set} next={next} back={back} />}
       {step === 8 && <StepActivities d={data} set={set} next={next} back={back} />}
       {step === 9 && <StepOutput d={data} set={set} next={finishSetup} back={back} />}
       {step === 10 && <StepDone d={data} />}
@@ -171,6 +181,7 @@ function StepHA({ d, set, next, back }: StepProps) {
               const j = await r.json();
               if (j.authed) {
                 setOkMsg(`Connected — HA ${j.version ?? ""}, ${j.entities.toLocaleString()} entities found`);
+                set("haEntities", j.entities ?? 0);
                 setTest("ok");
               } else {
                 setFailMsg(j.error ?? "Couldn't reach HA — check the URL and token");
@@ -423,43 +434,94 @@ function StepHousehold({ d, set, next, back }: StepProps) {
   );
 }
 
+type Inv = { entity_id: string; friendly_name: string | null; domain: string | null };
+type TriageResp = { by: string | null; total: number; kept_count: number;
+                    clusters: TriageCluster[] };
+
 function StepInventory({ d, set, next, back }: StepProps & { back: () => void }) {
-  const [state, setState] = useState<"scanning" | "done" | "error">("scanning");
-  const [scan, setScan] = useState<{ count: number; bindable: number; domains: number;
-                                     inventory: unknown[] } | null>(null);
+  const [state, setState] = useState<"scanning" | "grouping" | "done" | "error">("scanning");
+  const [inventory, setInventory] = useState<Inv[]>([]);
+  const [scan, setScan] = useState<{ count: number; domains: number } | null>(null);
+  const [triage, setTriage] = useState<TriageResp | null>(null);
+  const [kept, setKept] = useState<Record<string, boolean>>({});
+  const [cursor, setCursor] = useState(0);     // rolling "reading…" ticker index
+
+  // 1) pull the inventory, then 2) run the coarse triage (AI if a key is set)
   useEffect(() => {
-    fetch("/api/ha/inventory", { method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: d.ha.url, token: d.ha.token }) })
-      .then((r) => r.json())
-      .then((j) => { setScan(j); set("inventoryCount", j.bindable ?? j.count ?? 0); setState("done"); })
-      .catch(() => setState("error"));
+    let live = true;
+    (async () => {
+      try {
+        const inv = await fetch("/api/ha/inventory", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: d.ha.url, token: d.ha.token }) }).then((r) => r.json());
+        if (!live) return;
+        const items: Inv[] = inv.inventory ?? [];
+        setInventory(items);
+        setScan({ count: inv.count ?? items.length, domains: inv.domains ?? 0 });
+        setState("grouping");
+        const tr: TriageResp = await fetch("/api/triage/preview", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inventory: items,
+            llm: d.llmKey ? { key: d.llmKey, model: d.llmModel } : null }) }).then((r) => r.json());
+        if (!live) return;
+        setTriage(tr);
+        setKept(Object.fromEntries(tr.clusters.map((c) => [c.label, c.relevant])));
+        setState("done");
+      } catch { if (live) setState("error"); }
+    })();
+    return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const download = () => {
-    const blob = new Blob([JSON.stringify(scan?.inventory ?? [], null, 2)],
-                          { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "inventory.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
+
+  // rolling entity ticker while we read + group (the "scanning through" feel)
+  useEffect(() => {
+    if (state === "done" || state === "error" || inventory.length === 0) return;
+    const id = setInterval(() => setCursor((c) => (c + 1) % inventory.length), 90);
+    return () => clearInterval(id);
+  }, [state, inventory.length]);
+
+  // persist the selection into wizard data whenever a group is toggled
+  const persist = (next: Record<string, boolean>) => {
+    setKept(next);
+    if (!triage) return;
+    const excluded = triage.clusters.filter((c) => c.relevant && !next[c.label]).map((c) => c.label);
+    const included = triage.clusters.filter((c) => !c.relevant && next[c.label]).map((c) => c.label);
+    const keptCount = triage.clusters.reduce((n, c) => n + (next[c.label] ? c.count : 0), 0);
+    set("triageExcluded", excluded);
+    set("triageIncluded", included);
+    set("inventoryCount", keptCount);
   };
+  useEffect(() => { if (triage) persist(kept); /* eslint-disable-line */ }, [triage]);
+
+  const keptCount = triage ? triage.clusters.reduce((n, c) => n + (kept[c.label] ? c.count : 0), 0) : 0;
+  const busy = state === "scanning" || state === "grouping";
   return (
     <>
-      <StepShell step={6} total={TOTAL} title="Scanning your home"
-        explainer="Hearth is reading your entity list and — where history exists — computing per-sensor statistics. Nothing to fill in; this takes a few seconds.">
-        {state === "scanning" && (
-          <Callout icon="refresh">Pulling entities and device classes from Home Assistant…</Callout>
+      <StepShell step={7} total={TOTAL} title="Scanning your home"
+        explainer={d.llmKey
+          ? "Hearth reads every entity and, with your AI key, groups them and judges which matter for activity. This can take a moment — you can watch."
+          : "Hearth reads every entity and groups them by type, keeping the ones useful for activity. Takes a few seconds."}>
+        {busy && (
+          <Callout icon="refresh">
+            {state === "scanning" ? "Reading your entities from Home Assistant…"
+              : d.llmKey ? "Grouping them with AI and judging relevance…" : "Grouping by type…"}
+            {inventory.length > 0 && (
+              <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12,
+                            color: "var(--text-dim)", marginTop: 6, whiteSpace: "nowrap",
+                            overflow: "hidden", textOverflow: "ellipsis" }}>
+                {inventory[cursor]?.friendly_name || inventory[cursor]?.entity_id}
+              </div>
+            )}
+          </Callout>
         )}
         {state === "error" && (
           <Callout icon="warning">Scan failed — go back a step and re-test the HA connection.</Callout>
         )}
-        {state === "done" && scan && (
+        {state === "done" && scan && triage && (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))", gap: 12 }}>
               {[[scan.count.toLocaleString(), "entities found"],
-                [scan.bindable.toLocaleString(), "look useful for activity sensing"],
+                [keptCount.toLocaleString(), "kept for activity"],
                 [scan.domains.toLocaleString(), "entity types"]].map(([n, l]) => (
                 <div key={l} className="card" style={{ textAlign: "center", padding: 16 }}>
                   <div style={{ fontSize: 25, fontWeight: 600 }}>{n}</div>
@@ -467,16 +529,12 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
                 </div>
               ))}
             </div>
-            <button className="btn btn-secondary" style={{ alignSelf: "flex-start" }} onClick={download}>
-              <Icon name="download" size={16} /> Download inventory.json
-            </button>
-            <Callout>
-              This inventory — names, device classes and aggregate stats, never raw history — is all
-              Hearth's suggestions are based on. After setup, Hearth first sorts these into groups
-              (from names alone) and keeps only the ones relevant to activity — you'll watch it happen.
-              It's also exactly what the optional AI assistant in the next step would see. Download it
-              if you want to check first.
-            </Callout>
+            <p style={{ margin: 0, fontSize: 13.5, color: "var(--text-dim)" }}>
+              {triage.by === "llm" ? "AI grouped your entities" : "Grouped by type"} — tap a group to
+              keep or skip it. Only kept groups go into your model.
+            </p>
+            <BubbleCloud clusters={triage.clusters} kept={kept}
+              onToggle={(l) => persist({ ...kept, [l]: !kept[l] })} />
           </>
         )}
       </StepShell>
@@ -492,21 +550,22 @@ function StepAiAssist({ d, set, next, back }: StepProps) {
   const [est, setEst] = useState<CostEst | null>(null);
   const [estErr, setEstErr] = useState(false);
   const hasKey = !!d.llmKey;
+  const nEst = d.haEntities || d.inventoryCount;
   useEffect(() => {
     if (!hasKey) { setEst(null); setEstErr(false); return; }
     let live = true;
     fetch("/api/feature-spec/estimate", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entity_count: d.inventoryCount, model: d.llmModel }) })
+      body: JSON.stringify({ entity_count: nEst, model: d.llmModel }) })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((j) => { if (live) { setEst(j); setEstErr(false); } })
       .catch(() => { if (live) setEstErr(true); });
     return () => { live = false; };
-  }, [hasKey, d.llmModel, d.inventoryCount]);
+  }, [hasKey, d.llmModel, nEst]);
   return (
     <>
-      <StepShell step={7} total={TOTAL} title="Want an AI to do the boring part?"
-        explainer="Next you'll map sensors to roles and pick activities. Built-in heuristics pre-fill everything for free — or paste an LLM API key and a model reads your inventory and proposes smarter mappings, tailored activities and starter rules. You approve every single row either way.">
+      <StepShell step={6} total={TOTAL} title="Want an AI to do the boring part?"
+        explainer="Next, Hearth reads your whole entity list and groups it. With an AI key it clusters and judges relevance far better than rules — and later maps sensors to roles and writes starter rules. Built-in heuristics do all of this for free if you skip. You approve everything either way.">
         <Field label="OpenRouter or OpenAI-compatible API key (optional)"
           hint="Estimated one-time cost for a typical home: a few cents. Stored encrypted, removable in Settings, never needed again after first training.">
           <input type="password" placeholder="sk-or-…" value={d.llmKey} onChange={(e) => set("llmKey", e.target.value)} />
@@ -539,8 +598,8 @@ function StepAiAssist({ d, set, next, back }: StepProps) {
               <span>
                 Estimated one-time cost: <strong>~{fmtUsd(est.est_usd)}</strong>
                 <span style={{ color: "var(--text-dim)" }}>
-                  {" "}· ~{est.est_total_tokens.toLocaleString()} tokens across{" "}
-                  {d.inventoryCount.toLocaleString()} useful sensors · charged by your provider, not us
+                  {" "}· ~{est.est_total_tokens.toLocaleString()} tokens across ~{nEst.toLocaleString()}{" "}
+                  entities · charged by your provider, not us
                 </span>
               </span>
             ) : (
@@ -548,14 +607,24 @@ function StepAiAssist({ d, set, next, back }: StepProps) {
             )}
           </div>
         )}
+        {d.llmKey && (
+          <Field label="What may the AI see?"
+            hint="This shapes how well it designs features. You can change it later in Settings.">
+            <ChoiceCard icon="lock" title="Names & device classes only (recommended)"
+              description="Metadata only — entity names, types, units. Never raw history."
+              selected={!d.shareStats} onSelect={() => set("shareStats", false)} />
+            <ChoiceCard icon="patterns" title="Also share aggregate stats"
+              description="Adds per-sensor summaries (ranges, how often it changes) — sharper feature design, still never raw history or a timeline."
+              selected={d.shareStats} onSelect={() => set("shareStats", true)} />
+          </Field>
+        )}
         <Callout icon="lock">
-          Privacy: the model receives entity names and aggregate stats from the inventory you just
-          saw — never raw sensor history, and never anything after setup unless you ask. Once your
-          first model is trained, predictions are 100% local and the key is dead weight.
+          Privacy: the model only ever sees what you pick above — never raw sensor history or a
+          timeline of your life, and nothing after setup unless you ask. Once your first model is
+          trained, predictions are 100% local and the key is dead weight.
         </Callout>
       </StepShell>
       <FooterNav onBack={back} onNext={next}
-        nextLabel={d.llmKey ? "Analyze my home" : "Continue"}
         skip={d.llmKey ? undefined : { label: "Skip — use heuristics", onSkip: next }} />
     </>
   );
