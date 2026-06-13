@@ -513,6 +513,7 @@ const FAMILY_LABELS: Record<string, [string, string]> = {
   random_forest: ["Random forest (default)", "Robust on small data, no tuning needed, interpretable. The recommended starting point."],
   gradient_boosting: ["Gradient boosted trees", "Usually a few points stronger once you have plenty of labels, but easier to overfit early."],
   logistic: ["Logistic regression", "A simple linear baseline — fast and very stable; mainly a sanity check."],
+  embedding: ["Learned embeddings (experimental)", "Classifies in a self-supervised embedding space (the JEPA / world-model direction). Behaves like random forest until a HEPA-style encoder is installed — research preview."],
 };
 
 function ModelFamily() {

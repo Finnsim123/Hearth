@@ -6,8 +6,8 @@ import pandas as pd
 import pytest
 
 from hearth.domain.training.estimators import (
-    GradientBoostedEstimator, KNOWN_FAMILIES, LogisticEstimator,
-    RandomForestEstimator, make_estimator,
+    EmbeddingEstimator, GradientBoostedEstimator, KNOWN_FAMILIES,
+    LogisticEstimator, RandomForestEstimator, make_estimator,
 )
 
 
@@ -26,11 +26,25 @@ def test_make_estimator_dispatch():
     assert isinstance(make_estimator("gradient_boosting"), GradientBoostedEstimator)
     assert isinstance(make_estimator("gbt"), GradientBoostedEstimator)        # alias
     assert isinstance(make_estimator("logistic"), LogisticEstimator)
+    assert isinstance(make_estimator("embedding"), EmbeddingEstimator)
+    assert isinstance(make_estimator("jepa"), EmbeddingEstimator)             # alias
     assert isinstance(make_estimator("nonsense"), RandomForestEstimator)      # fallback
-    assert set(KNOWN_FAMILIES) == {"random_forest", "gradient_boosting", "logistic"}
+    assert set(KNOWN_FAMILIES) == {"random_forest", "gradient_boosting", "logistic", "embedding"}
 
 
-@pytest.mark.parametrize("family", ["random_forest", "gradient_boosting", "logistic"])
+def test_embedding_estimator_identity_passthrough(xy):
+    """With the default identity embedder, the embedding family equals its head
+    on raw features — a real seam that's selectable/testable now (JEPA bet)."""
+    X, y = xy
+    est = make_estimator("embedding")          # identity embedder + RF head
+    est.fit(X, y)
+    assert est.supports_sample_weight is True
+    imp = est.importances()
+    assert imp and imp["signal"] >= imp["noise"]   # head sees the raw features
+    assert est.predict_proba(X.tail(1)).idxmax(axis=1).iloc[0] in ("home", "movie")
+
+
+@pytest.mark.parametrize("family", ["random_forest", "gradient_boosting", "logistic", "embedding"])
 def test_family_implements_port(xy, family):
     X, y = xy
     est = make_estimator(family)

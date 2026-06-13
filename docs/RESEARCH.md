@@ -294,3 +294,64 @@ Two consequences, both now reflected in the design:
    entities, retrain, keep by importance behind a hold-out check. Evidence
    replaces the heuristic. The appeal path (manual bind + LLM override) covers
    the tail until then.
+
+
+## World models / JEPA and the Embedder bet (added June 2026)
+
+**Prompt:** Yann LeCun, "World Models: Enabling the next AI revolution"
+(ETH Zürich, Frontiers of Embodied AI, June 2026 —
+https://www.youtube.com/watch?v=72Xj8k5WQX4). Does his programme change ours?
+
+**His thesis (short):** autoregressive LLMs that predict the next token over raw
+data are the wrong substrate for grounded intelligence — they lack a world model,
+persistent memory, planning and reasoning. His alternative is **JEPA** (Joint
+Embedding Predictive Architecture): instead of *generative* models that
+reconstruct raw inputs (pixels, tokens, raw sensor values), predict the *abstract
+representation* of the missing/future part in a learned latent space, trained
+self-supervised with no labels. Discard the unpredictable detail, keep structure.
+A **world model** then predicts how state evolves given actions, so a system can
+plan by simulating in latent space rather than memorising sequences (I-JEPA,
+V-JEPA are the vision instances).
+
+**Why this is not a new bet for us — it's the HEPA bet's parent (§4).** Hearth
+already commits to exactly this shape: the `Embedder` port in `domain/ports.py`,
+and the HEPA-style self-supervised pretraining bet in §4. LeCun's framing
+sharpens *why* it fits our two hardest problems:
+
+- **P1 label scarcity.** JEPA pretrains on *unlabeled* data, and every home has
+  months of unlabeled sensor history. Predict a future window's embedding from
+  its context → a frozen encoder → a tiny head learns activities from the few
+  dozen confirmed labels a household actually gives. This is a more fundamental
+  attack on label starvation than rules, LLM weak labels or clustering.
+- **P7 clustering.** Clustering *learned embeddings* yields far cleaner regimes
+  than handcrafted features → better Pattern cards.
+- **Anticipation, not just recognition.** A world model answers "P(activity X
+  starts within Δt)", the horizon-conditioned event-prediction idea already noted
+  in §4 (preheat the espresso *because* wake-up is predicted, not on a schedule).
+
+**Why we predict in latent space, not raw values.** LeCun's central discipline —
+don't waste capacity reconstructing unpredictable detail — is the same instinct
+behind decisions we already made: the LLM sees aggregate stats, never raw series;
+features are aggregations, not reconstructions. It validates the direction.
+
+**Cost fit.** JEPA encoders are small (HEPA ≈2.16M params; the smart-home
+foundation model DomusFM is <500 MB, ~10 ms inference). They pretrain overnight
+on a CPU-class box and inference is one forward pass — consistent with our
+local-first, spend-once, free-at-inference model.
+
+**What we do NOT change.** This stays a Phase-4 research bet behind a feature
+flag, not a v1 dependency. JEPA is far better proven on vision than on sparse
+ambient home sensors; **DomusFM** (2026) is the main evidence it transfers to our
+domain. And it *complements* the LLM rather than replacing it (§4b): the LLM
+understands *names/semantics* one-shot at design time; a JEPA encoder understands
+*signals/representations* continuously. Different halves of cold start.
+
+**Concrete integration (already seamed).** `adapters/hepa_embedder.py` implements
+the `Embedder` port and pretrains on the home's raw stream. An
+`EmbeddingEstimator` (training/estimators.py) composes any `Embedder` with a cheap
+downstream head and slots into the model-family selector as family `embedding`
+(identity passthrough until an encoder is installed, so it is selectable and
+testable now and gains power when the encoder lands). The model registry then
+compares it head-to-head with RF-on-recipes; it is kept only if it beats RF on
+*confirmed* accuracy. If it never wins on real homes, it stays off — the bet is
+cheap.

@@ -182,15 +182,68 @@ class LogisticEstimator(_SklearnEstimator):
         return {c: float(v) for c, v in zip(self.columns, mag)}
 
 
+class IdentityEmbedder:
+    """Default Embedder (domain.ports.Embedder): passthrough. Replaced by a
+    trained self-supervised encoder — adapters/hepa_embedder.py, the JEPA /
+    world-model bet (RESEARCH.md §World models) — once one is installed."""
+
+    def embed(self, X: pd.DataFrame) -> pd.DataFrame:
+        return X
+
+
+class EmbeddingEstimator:
+    """Classify in a learned EMBEDDING space (LeCun world-model / JEPA direction;
+    RESEARCH.md §4 + §World models). Composes an Embedder (a self-supervised
+    encoder, or identity until one exists) with a cheap downstream head, and
+    implements the Estimator port so it slots into make_estimator/the family
+    selector as 'embedding'. With the identity embedder it equals its head on raw
+    features; the value arrives when a real encoder is plugged in behind the
+    Embedder port and few-label heads learn from its representations."""
+
+    def __init__(self, embedder=None, head: str = "random_forest", **head_params):
+        self.embedder = embedder or IdentityEmbedder()
+        self.head = make_estimator(head, **head_params)
+        self.supports_sample_weight = self.head.supports_sample_weight
+
+    def _embed(self, X: pd.DataFrame) -> pd.DataFrame:
+        try:
+            out = self.embedder.embed(X)
+            return out if out is not None and len(out) == len(X) else X
+        except Exception:
+            log.warning("embedder failed — falling back to raw features")
+            return X
+
+    def fit(self, X, y, sample_weight=None) -> None:
+        self.head.fit(self._embed(X), y, sample_weight=sample_weight)
+
+    def predict_proba(self, X):
+        return self.head.predict_proba(self._embed(X))
+
+    def calibrate(self, X_val, y_val) -> bool:
+        return self.head.calibrate(self._embed(X_val), y_val)
+
+    def importances(self) -> dict:
+        return self.head.importances()
+
+    def explain(self, X):
+        return self.head.explain(self._embed(X))
+
+    @property
+    def classes_(self) -> list[str]:
+        return self.head.classes_
+
+
 _FAMILIES = {
     "random_forest": RandomForestEstimator,
     "gradient_boosting": GradientBoostedEstimator,
     "logistic": LogisticEstimator,
+    "embedding": EmbeddingEstimator,
 }
 # friendly aliases accepted from settings
 _FAMILY_ALIASES = {"rf": "random_forest", "gbt": "gradient_boosting",
                    "gbm": "gradient_boosting", "gradient_boosted": "gradient_boosting",
-                   "logreg": "logistic", "logistic_regression": "logistic"}
+                   "logreg": "logistic", "logistic_regression": "logistic",
+                   "jepa": "embedding", "hepa": "embedding"}
 
 KNOWN_FAMILIES = tuple(_FAMILIES)
 
