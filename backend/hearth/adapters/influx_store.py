@@ -206,30 +206,45 @@ class InfluxStore:
 
     def read_raw(self, bindings: list[Binding], start: datetime, end: datetime,
                  freq: str = "1m") -> pd.DataFrame:
-        """Wide 1-min DataFrame, one column per binding.name (UTC index)."""
-        series: dict[str, pd.Series] = {}
+        """Wide 1-min DataFrame, one column per binding.name (UTC index).
+
+        Batched: one Flux round-trip per lookback group (slow roles get the
+        extended window) instead of one per binding — so a 100-sensor home is
+        ~2 queries per build, not 100. Keeping `_measurement` (not `_field`)
+        leaves each entity's series in its own table, so num and str never
+        collide in a shared `_value` column.
+        """
+        # group bindings by their effective start (slow roles read further back)
+        groups: dict[datetime, list[Binding]] = {}
         for b in bindings:
             b_start = start - SLOW_LOOKBACK if b.role in SLOW_ROLES else start
-            field = "num" if b.role in NUMERIC_ROLES else "str"
+            groups.setdefault(b_start, []).append(b)
+
+        series: dict[str, pd.Series] = {}
+        for b_start, group in groups.items():
+            meas_set = "[" + ", ".join(f'"raw_{_flux_tag(b.name)}"' for b in group) + "]"
             flux = f'''
 from(bucket: "{RAW_BUCKET}")
   |> range(start: {b_start.isoformat()}, stop: {end.isoformat()})
-  |> filter(fn: (r) => r._measurement == "raw_{_flux_tag(b.name)}" and r._field == "{field}")
+  |> filter(fn: (r) => contains(value: r._measurement, set: {meas_set})
+                       and (r._field == "num" or r._field == "str"))
   |> aggregateWindow(every: {freq}, fn: last, createEmpty: false)
-  |> keep(columns: ["_time", "_value"])
+  |> keep(columns: ["_time", "_value", "_measurement"])
 '''
             try:
                 df = self.query_api.query_data_frame(flux)
             except Exception as exc:
-                log.warning("read_raw %s failed: %s", b.name, exc)
+                log.warning("read_raw batch failed (%d sensors): %s", len(group), exc)
                 continue
             if isinstance(df, list):
                 df = pd.concat(df, ignore_index=True) if df else pd.DataFrame()
-            if df.empty:
+            if df.empty or "_measurement" not in df.columns:
                 continue
-            s = (df[["_time", "_value"]].assign(_time=lambda d: pd.to_datetime(d["_time"], utc=True))
-                 .set_index("_time")["_value"].sort_index())
-            series[b.name] = s[~s.index.duplicated(keep="last")]
+            df = df.assign(_time=lambda d: pd.to_datetime(d["_time"], utc=True))
+            for meas, sub in df.groupby("_measurement"):
+                name = str(meas)[4:]            # strip "raw_"
+                s = sub.set_index("_time")["_value"].sort_index()
+                series[name] = s[~s.index.duplicated(keep="last")]
         if not series:
             return pd.DataFrame()
         wide = pd.concat(series, axis=1)

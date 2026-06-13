@@ -893,7 +893,7 @@ const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }
   { key: "household", icon: "household", title: "Household",
     desc: "People, avatars, notifications and daily question budgets." },
   { key: "model", icon: "models", title: "Model",
-    desc: "Data sharing, feature power, model family, clock trust and commit threshold." },
+    desc: "Data sharing, feature power, model family, clock trust, commit threshold and history retention." },
   { key: "integrations", icon: "flow", title: "Integrations",
     desc: "Home Assistant, InfluxDB, the AI assistant, and API tokens for the HA integration." },
   { key: "logs", icon: "monitor", title: "Logs",
@@ -937,7 +937,7 @@ function ConnectionsSection() {
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
     case "household": return <Household />;
-    case "model": return (<><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /></>);
+    case "model": return (<><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /></>);
     case "integrations": return <ConnectionsSection />;
     case "logs": return <Logs />;
     case "account": return <Account />;
