@@ -254,6 +254,7 @@ function ConnectionCard({ kind, title, sub, fields }: {
   const [masked, setMasked] = useState<string | null>(null);
   const [state, setState] = useState<SaveState>("idle");
   const [restarting, setRestarting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [llmStatus, setLlmStatus] = useState<{ ok: boolean; code: number } | null>(null);
   const [usage, setUsage] = useState<LlmUsage | null>(null);
   const needsRestart = kind === "ha" || kind === "influx";
@@ -271,6 +272,33 @@ function ConnectionCard({ kind, title, sub, fields }: {
     if (!window.confirm("Reset the AI usage counter to zero?")) return;
     await fetch("/api/llm/usage/reset", { method: "POST" });
     loadConn();
+  };
+  // After a top-up / new key: persist the key (if freshly typed), re-queue the
+  // sensor mapping that fell back to basic rules, then poll until the remap's
+  // live LLM calls report the key healthy — at which point the banner clears.
+  const tryAgain = async () => {
+    setRetrying(true);
+    try {
+      if (conn.token) {
+        const options: Record<string, string> = {};
+        for (const f of fields) if (f.fromOptions) options[f.key] = conn[f.key] ?? "";
+        await post(`/api/connections/${kind}`, {
+          url: conn.url ?? "https://openrouter.ai/api/v1", token: conn.token,
+          ...(Object.keys(options).length ? { options } : {}),
+        }).then(j);
+      }
+      await post("/api/llm/retry", {}).then(j);
+    } catch { setRetrying(false); return; }
+    let tries = 0;
+    const id = setInterval(async () => {
+      tries += 1;
+      try {
+        const c = await fetch(`/api/connections/${kind}`).then(j);
+        setLlmStatus(c.status ?? null);
+        setUsage(c.usage ?? null);
+        if (c.status?.ok || tries >= 24) { clearInterval(id); setRetrying(false); }
+      } catch { /* remap still running — keep polling */ }
+    }, 2500);
   };
   const save = async () => {
     setState("saving");
@@ -293,12 +321,19 @@ function ConnectionCard({ kind, title, sub, fields }: {
     <Card title={title} sub={sub}>
       {llmBad && (
         <div style={{ padding: "9px 12px", borderRadius: 8, fontSize: 13,
+                      display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
                       background: "color-mix(in srgb, var(--danger) 12%, transparent)",
                       border: "1px solid var(--danger)" }}>
-          Your AI key is <strong>{llmMsg}</strong> — sensor mapping fell back to the basic rules.{" "}
-          {(conn.url ?? "").includes("openrouter")
-            ? <a href="https://openrouter.ai/credits" target="_blank" rel="noopener">Top up OpenRouter →</a>
-            : "Update the key below."}
+          <span style={{ flex: 1, minWidth: 200 }}>
+            Your AI key is <strong>{llmMsg}</strong> — sensor mapping fell back to the basic rules.{" "}
+            {(conn.url ?? "").includes("openrouter")
+              ? <a href="https://openrouter.ai/credits" target="_blank" rel="noopener">Top up OpenRouter →</a>
+              : "Update the key below."}
+          </span>
+          <button className="btn btn-secondary" style={{ fontSize: 12.5 }}
+                  disabled={retrying} onClick={tryAgain}>
+            {retrying ? "Re-mapping…" : "Try again"}
+          </button>
         </div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>

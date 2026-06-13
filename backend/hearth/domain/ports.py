@@ -133,6 +133,15 @@ class LlmAdvisor(Protocol):
     human approval. Absent key -> heuristic suggester covers the same calls.
     """
 
+    async def cluster_entities(self, inventory: list[dict]) -> list[dict]:
+        """Coarse first pass: from entity ids + friendly names ONLY (no
+        device-class/units/stats — cheap, low-noise), group the whole entity
+        list into semantic clusters and judge each cluster's relevance to human-
+        activity prediction. Each: {label, relevant: bool, why, entities:[id…]}.
+        The relevant clusters become the shortlist the expensive metadata pass
+        then analyses. Absent key -> heuristic clustering by role."""
+        ...
+
     async def propose_bindings(self, inventory: list[dict]) -> list[Binding]: ...
     async def propose_composites(self, bindings: list[Binding]) -> list[dict]:
         """Candidate cross-binding features, proposed generously — RF tolerates

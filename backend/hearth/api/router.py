@@ -105,6 +105,27 @@ def build_api_router(deps: dict) -> APIRouter:
         repo.set_setting("llm.usage", None)
         return {"ok": True}
 
+    @api.post("/llm/retry")
+    async def retry_llm() -> dict:
+        """Re-run sensor mapping after the user tops up / fixes their AI key.
+        Seed mapping silently degrades to the basic rules when the LLM call
+        fails (401/402/429); this re-queues it so the now-working key remaps at
+        full quality. Runs in-process when the HA event adapter is live (no
+        restart); otherwise it applies on the next boot, same path as seeding."""
+        if repo.get_connection("llm") is None:
+            raise HTTPException(409, "No AI key configured")
+        # preserve any members from an in-flight seed; a bare re-map needs none.
+        repo.set_setting("seed.pending", repo.get_setting("seed.pending") or {"members": []})
+        events = deps.get("events")
+        if events is None:
+            return {"ok": True, "restart": True,
+                    "note": "restart the container to remap: docker compose restart hearth"}
+        import asyncio
+
+        from ..domain.onboarding.seed import run_seed
+        asyncio.create_task(run_seed(repo, events))
+        return {"ok": True, "restart": False}
+
     # ── feature power mode (conservative vs full whitelist) ────────────────
     @api.get("/feature-power")
     def get_feature_power() -> dict:

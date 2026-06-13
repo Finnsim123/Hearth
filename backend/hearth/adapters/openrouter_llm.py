@@ -185,6 +185,56 @@ class OpenRouterAdvisor:
                            out_tokens=usage.get("completion_tokens"), reply=_preview(content))
         return parsed
 
+    # ── coarse triage: cluster the FULL entity list, ids + names only ────────
+    async def cluster_entities(self, inventory: list[dict]) -> list[dict]:
+        """Stage 0 of the funnel. Sends only entity_id + friendly_name (cheap,
+        low-noise) for EVERY entity, asks the model to cluster them by what they
+        belong to and judge each cluster's relevance to knowing what people are
+        doing at home. The relevant clusters form the shortlist for the
+        expensive metadata pass. Chunked + merged by label; degrades to []."""
+        items = [e for e in inventory if not e.get("disabled")]
+        valid = {e["entity_id"] for e in items}
+        lines = [f'{e["entity_id"]} | {e.get("friendly_name") or "-"}' for e in items]
+        system = (
+            "You triage a smart home's entities for a human-activity-recognition "
+            "system. From entity ids and friendly names ALONE, group them into "
+            "semantic clusters (e.g. '3D printer', 'living-room lights', "
+            "'networking/servers', 'climate', 'presence/people', 'phone "
+            "diagnostics'). For EACH cluster decide `relevant`: true if it helps "
+            "infer what PEOPLE are doing at home (presence, lights, media, power "
+            "use, doors, climate people feel, phones), false for infrastructure, "
+            "diagnostics, firmware, weather/forecasts, batteries, signal levels. "
+            "Names may be in any language — infer meaning. Every entity goes in "
+            "exactly one cluster. Reply ONLY a JSON array: [{\"label\": str, "
+            "\"relevant\": bool, \"why\": str (<=8 words), \"entities\": [entity_id, …]}].")
+        by_label: dict[str, dict] = {}
+        for i in range(0, len(lines), 400):                 # ids are cheap; big batches
+            chunk = lines[i:i + 400]
+            try:
+                res = await self._chat(system, "\n".join(chunk), max_tokens=8000,
+                                       task="Clustering your entities",
+                                       sent=f"{len(chunk)} entities")
+            except Exception as exc:
+                log.warning("cluster_entities chunk failed: %s", exc)
+                continue
+            for c in res if isinstance(res, list) else []:
+                try:
+                    label = str(c["label"]).strip()[:48]
+                    ents = [e for e in c.get("entities", []) if e in valid]
+                    if not label or not ents:
+                        continue
+                    cur = by_label.setdefault(label.lower(),
+                        {"label": label, "relevant": False, "why": "", "entities": []})
+                    cur["relevant"] = cur["relevant"] or bool(c.get("relevant"))
+                    if not cur["why"] and c.get("why"):
+                        cur["why"] = str(c["why"]).strip()[:80]
+                    cur["entities"].extend(ents)
+                except (KeyError, TypeError):
+                    continue
+        for c in by_label.values():
+            c["entities"] = sorted(set(c["entities"]))
+        return list(by_label.values())
+
     # ── bindings: the name->role brain ──────────────────────────────────────
     async def propose_bindings(self, inventory: list[dict],
                                persons: list | None = None) -> list[Binding]:
