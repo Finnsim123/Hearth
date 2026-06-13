@@ -7,6 +7,7 @@ gate -> artifact. Never trains across a feature_set boundary (ADR-7).
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
 
 from ..features.registry import feature_set_version
@@ -35,22 +36,59 @@ MIN_CONFIRMED_FOR_VALIDATED = 30  # below this a model is "provisional", not
                                   # exist to measure it non-circularly (audit §3).
 
 
-def validation_status(n_confirmed: int) -> str:
+@dataclass(frozen=True)
+class TrainingConfig:
+    """Every training behaviour knob in one place, so they are DATA (editable in
+    Settings via the 'training.config' setting) rather than scattered module
+    constants. Defaults equal the historical constants, so loading with no
+    override is a no-op. (gap analysis B2; levers in model_levers.md)"""
+    min_train_windows: int = MIN_TRAIN_WINDOWS
+    val_days: int = VAL_DAYS
+    recency_half_life_days: float = RECENCY_HALF_LIFE_DAYS
+    tune_min_windows: int = TUNE_MIN_WINDOWS
+    tune_every_days: int = TUNE_EVERY_DAYS
+    min_confirmed_for_validated: int = MIN_CONFIRMED_FOR_VALIDATED
+    promotion_margin: float = 0.02   # confirmed-accuracy CI slack tolerated before
+                                     # a new model is rejected as a regression
+
+
+def load_training_config(repo) -> TrainingConfig:
+    """TrainingConfig with per-instance overrides from the 'training.config'
+    setting merged over the defaults. Unknown keys and non-numeric values are
+    ignored, so a bad setting degrades to defaults and never crashes training."""
+    try:
+        raw = repo.get_setting("training.config") or {}
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict) or not raw:
+        return TrainingConfig()
+    names = {f.name for f in fields(TrainingConfig)}
+    clean = {k: v for k, v in raw.items()
+             if k in names and isinstance(v, (int, float)) and not isinstance(v, bool)}
+    try:
+        return replace(TrainingConfig(), **clean)
+    except Exception:
+        return TrainingConfig()
+
+
+def validation_status(n_confirmed: int,
+                      threshold: int = MIN_CONFIRMED_FOR_VALIDATED) -> str:
     """Honest cold-start label: 'validated' only once enough human-confirmed
     labels back the confirmed-accuracy metric; else 'provisional'."""
-    return "validated" if n_confirmed >= MIN_CONFIRMED_FOR_VALIDATED else "provisional"
+    return "validated" if n_confirmed >= threshold else "provisional"
 
 
 def train_person(person_id: str, tsdb, repo, store,
                  weeks: int = 8, force: bool = False) -> ModelRecord | None:
+    cfg = load_training_config(repo)
     composites = repo.get_setting("composites", []) or []
     fset = feature_set_version(composites, repo.get_setting("time_granularity", "coarse") or "coarse")
     end = datetime.now(timezone.utc)
     start = end - timedelta(weeks=weeks)
 
     feats = tsdb.read_features(person_id, fset, start, end)
-    if len(feats) < MIN_TRAIN_WINDOWS:
-        log.info("[%s] %d windows < %d — skip", person_id, len(feats), MIN_TRAIN_WINDOWS)
+    if len(feats) < cfg.min_train_windows:
+        log.info("[%s] %d windows < %d — skip", person_id, len(feats), cfg.min_train_windows)
         return None
 
     # never learn from another member's personal-cadence sensors (their alarm
@@ -75,7 +113,7 @@ def train_person(person_id: str, tsdb, repo, store,
     coarse_labels = labels.map(lambda lab: to_coarse(lab, pmap))
 
     record = _fit_node(person_id, "root", feats, coarse_labels, provenance,
-                       repo, store, fset, end, excluded, force)
+                       repo, store, fset, end, excluded, force, cfg)
     if record is not None:
         from ..inference.smoothing import learn_transitions
         repo.set_setting(f"transitions.{person_id}", learn_transitions(coarse_labels))
@@ -90,12 +128,13 @@ def train_person(person_id: str, tsdb, repo, store,
                      person_id, parent, int(mask.sum()), n_fine_children)
             continue
         _fit_node(person_id, parent, feats[mask], fine[mask], provenance[mask],
-                  repo, store, fset, end, excluded, force)
+                  repo, store, fset, end, excluded, force, cfg)
     return record
 
 
 def _fit_node(person_id: str, node: str, feats, labels, provenance,
-              repo, store, fset: str, end, excluded, force: bool) -> ModelRecord | None:
+              repo, store, fset: str, end, excluded, force: bool,
+              cfg: TrainingConfig) -> ModelRecord | None:
     """Fit + evaluate + register + gate ONE hierarchy node's classifier."""
     label_counts = {f"{prov}": int((provenance == prov).sum())
                     for prov in provenance.unique()}
@@ -105,9 +144,9 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
         log.info("[%s] %s-node: only one class present — skip", person_id, node)
         return None
 
-    cutoff = end - timedelta(days=VAL_DAYS)
+    cutoff = end - timedelta(days=cfg.val_days)
     train_mask = feats.index < cutoff
-    if train_mask.sum() < MIN_TRAIN_WINDOWS // 2 or (~train_mask).sum() < 10:
+    if train_mask.sum() < cfg.min_train_windows // 2 or (~train_mask).sum() < 10:
         train_mask = feats.index < feats.index[int(len(feats) * 0.75)]
     if train_mask.sum() < 10 or (~train_mask).sum() < 5:
         log.info("[%s] %s-node: split too small — skip", person_id, node)
@@ -120,15 +159,16 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
     keep = y_val.isin(known)
     X_val, y_val, prov_val = X_val[keep], y_val[keep], prov_val[keep]
 
-    params = _hyperparams(repo, f"{person_id}.{node}", fset, X_train, y_train, force)
+    params = _hyperparams(repo, f"{person_id}.{node}", fset, X_train, y_train, force, cfg)
     est = RandomForestEstimator(**params)
     age_days = (end - X_train.index).total_seconds() / 86400
-    weights = 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
+    weights = 0.5 ** (age_days / cfg.recency_half_life_days)
     est.fit(X_train, y_train, sample_weight=weights.to_numpy())
     metrics = evaluate_model(est, X_val, y_val, prov_val)
     metrics["n_train"] = int(len(X_train))
     metrics["feature_count"] = int(X_train.shape[1])
-    metrics["validation_status"] = validation_status(metrics.get("n_confirmed", 0))
+    metrics["validation_status"] = validation_status(
+        metrics.get("n_confirmed", 0), cfg.min_confirmed_for_validated)
     train_acc = float((est.predict_proba(X_train).idxmax(axis=1) == y_train).mean())
     metrics["accuracy_train"] = round(train_acc, 4)
     metrics["hyperparams"] = params
@@ -164,7 +204,7 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
 
     current = next((m for m in repo.models(person_id)
                     if m.promoted and m.node == node), None)
-    if force or promotion_gate(record, current):
+    if force or promotion_gate(record, current, cfg.promotion_margin):
         repo.promote_model(record.id)
         record.promoted = True
         log.info("[%s] %s promoted (confirmed acc: %s)", person_id, version,
@@ -175,16 +215,18 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
 
 
 def _hyperparams(repo, person_id: str, fset: str, X_train, y_train,
-                 force: bool) -> dict:
+                 force: bool, cfg: TrainingConfig | None = None) -> dict:
     """Tuning policy: only with enough data; cached per person; re-tuned when
     stale, when the feature set changed, or on force. Guards against tuning-
     on-bootstrap circularity by simply not over-tuning (small grid, monthly)."""
+    if cfg is None:
+        cfg = load_training_config(repo)
     key = f"hyperparams.{person_id}"
     cached = repo.get_setting(key) or {}
     fresh = (cached.get("feature_set") == fset and cached.get("tuned_at")
              and (datetime.now(timezone.utc)
-                  - datetime.fromisoformat(cached["tuned_at"])).days < TUNE_EVERY_DAYS)
-    if len(X_train) < TUNE_MIN_WINDOWS:
+                  - datetime.fromisoformat(cached["tuned_at"])).days < cfg.tune_every_days)
+    if len(X_train) < cfg.tune_min_windows:
         return cached.get("params", {})
     if fresh and not force:
         return cached.get("params", {})
@@ -199,10 +241,12 @@ def _hyperparams(repo, person_id: str, fset: str, X_train, y_train,
     return params
 
 
-def promotion_gate(new: ModelRecord, current: ModelRecord | None) -> bool:
+def promotion_gate(new: ModelRecord, current: ModelRecord | None,
+                   margin: float = 0.02) -> bool:
     """Promote iff new's confirmed accuracy isn't credibly worse (CI overlap,
     RESEARCH.md P6). No current model -> promote. No confirmed labels yet ->
-    fall back to bootstrap-agreement comparison."""
+    fall back to bootstrap-agreement comparison. `margin` is the tolerated CI
+    slack (TrainingConfig.promotion_margin)."""
     if current is None:
         return True
     n_new, n_cur = new.metrics.get("n_confirmed", 0), current.metrics.get("n_confirmed", 0)
@@ -211,9 +255,9 @@ def promotion_gate(new: ModelRecord, current: ModelRecord | None) -> bool:
             round(new.metrics["accuracy_confirmed"] * n_new), n_new)
         cur_lo, _ = wilson_interval(
             round(current.metrics["accuracy_confirmed"] * n_cur), n_cur)
-        return new_lo >= cur_lo - 0.02
+        return new_lo >= cur_lo - margin
     a, b = new.metrics.get("accuracy_bootstrap"), current.metrics.get("accuracy_bootstrap")
-    return a is None or b is None or a >= b - 0.02
+    return a is None or b is None or a >= b - margin
 
 
 def rollback(person_id: str, repo) -> ModelRecord | None:

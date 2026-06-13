@@ -20,7 +20,8 @@ from hearth.domain.training.evaluate import (
     evaluate_model, population_stability_index, wilson_interval,
 )
 from hearth.domain.training.trainer import (
-    MIN_CONFIRMED_FOR_VALIDATED, promotion_gate, train_person, validation_status,
+    MIN_CONFIRMED_FOR_VALIDATED, TrainingConfig, load_training_config,
+    promotion_gate, train_person, validation_status,
 )
 
 
@@ -157,6 +158,31 @@ def test_train_promote_and_beat_rules(world):
     assert record.metrics["accuracy_bootstrap"] > 0.9          # learnable world
     assert record.metrics["n_train"] > 300
     assert "per_class" in record.metrics and "confusion" in record.metrics
+
+
+def test_load_training_config_defaults_and_overrides(world):
+    _, repo, _ = world
+    # no setting -> defaults
+    assert load_training_config(repo) == TrainingConfig()
+    # valid override merged over defaults; other fields unchanged
+    repo.settings["training.config"] = {"val_days": 14, "promotion_margin": 0.05}
+    cfg = load_training_config(repo)
+    assert cfg.val_days == 14 and cfg.promotion_margin == 0.05
+    assert cfg.min_train_windows == TrainingConfig().min_train_windows
+    # junk keys / wrong types / bools are ignored, never crash
+    repo.settings["training.config"] = {"bogus": 1, "val_days": "ten", "tune_min_windows": True}
+    cfg2 = load_training_config(repo)
+    assert cfg2 == TrainingConfig()
+
+
+def test_promotion_gate_margin_is_configurable():
+    # a 3-pt confirmed-accuracy drop passes a 5-pt margin but fails the default 2-pt
+    new = ModelRecord(person_id="a", version="a-v2", feature_set="v1",
+                      metrics={"n_confirmed": 80, "accuracy_confirmed": 0.87})
+    cur = ModelRecord(person_id="a", version="a-v1", feature_set="v1",
+                      metrics={"n_confirmed": 80, "accuracy_confirmed": 0.90})
+    assert promotion_gate(new, cur, margin=0.05) is True
+    assert promotion_gate(new, cur, margin=0.0) is False
 
 
 def test_validation_status_threshold():
