@@ -159,6 +159,12 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"ok": True, "family": fam,
                 "note": "applies on the next training run"}
 
+    # ── entity triage (coarse funnel stage): clusters + relevant shortlist ──
+    @api.get("/entity-triage")
+    def get_entity_triage() -> dict:
+        return repo.get_setting("entity_triage") or {
+            "by": None, "total": 0, "kept_count": 0, "kept": [], "clusters": []}
+
     # ── recent logs (Logs page) — session-only, never in integration scope ──
     @api.get("/logs")
     def get_logs(level: str = "INFO", limit: int = 500,

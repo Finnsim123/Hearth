@@ -63,7 +63,10 @@ passwords are never persisted.
    registry) and computes per-entity stats from available history (DATA_MODEL
    §4). Shows a summary ("214 entities, 31 with useful signal, 14 d of
    history") with a **Download inventory.json** button so users can inspect
-   exactly what an LLM would see.
+   exactly what an LLM would see. On large homes a coarse **triage** runs first
+   (ARCHITECTURE §3.2): the full list is clustered from names alone and only the
+   activity-relevant clusters go on to the metadata pass — surfaced as a bubble
+   cloud during the live Welcome hand-off (`GET /api/entity-triage`).
 6b. **AI assist (optional)** — paste an OpenRouter / OpenAI-compatible API key
    to let an LLM act as a *feature architect* over the inventory: it selects
    which entities matter, assigns each an information tier, designs an executable

@@ -130,6 +130,22 @@ yields `{room}_{name}_on`, `_max_w`, `_kwh_delta`; a `media` binding always yiel
 recipes. The onboarding wizard pre-suggests roles from HA's `device_class`,
 `domain` and unit of measurement; the user confirms in one screen.
 
+**Two-stage funnel (a home can have 1700+ entities).** Sending all of them WITH
+metadata + per-sensor stats to the LLM is wasteful and noisy, and a pure rule
+filter is too blunt. So binding runs in two passes:
+
+1. **Coarse triage** (`domain/onboarding/triage.py`): the FULL entity list goes
+   to the LLM as ids + friendly names ONLY — cheap, low-noise — and comes back
+   clustered ("3D printer", "living-room lights", "networking/servers"…) with a
+   relevance verdict per cluster. The relevant clusters form the shortlist. The
+   model does the filtering, not rules; a thin safety floor never drops a real
+   home/away tracker. Stored in setting `entity_triage` (clusters + kept ids) and
+   surfaced at `GET /api/entity-triage` (drives the onboarding bubble cloud).
+   No LLM key → heuristic clustering by role reproduces the old candidate set.
+2. **Fine pass**: only the shortlist is sent WITH metadata (and, with consent,
+   aggregate stats) to `propose_bindings` / the feature architect, which assign
+   roles and design features as before.
+
 ### 3.3 Window builder + feature store
 
 A scheduler job (default every 5 min, configurable) materializes **30-min sliding

@@ -39,15 +39,26 @@ async def run_seed(repo, events) -> None:
         inventory = await events.discover_entities()
         usable = [e for e in inventory if not e.get("disabled")]
 
-        _status(repo, "mapping", entities=len(usable))
         advisor = None
         if repo.get_connection("llm"):
             from ...adapters.openrouter_llm import OpenRouterAdvisor
             advisor = OpenRouterAdvisor(repo)
-        merged = {b.entity_id: b for b in heuristic_bindings(usable)}
+
+        # Stage 0 of the funnel: cluster the FULL list from names alone and keep
+        # only the clusters relevant to activity prediction, so the expensive
+        # metadata pass below sees a focused shortlist, not 1700 entities. With
+        # no LLM this falls back to heuristic-role clustering (same old set).
+        _status(repo, "triaging", entities=len(usable))
+        from .triage import triage_entities
+        triage = await triage_entities(repo, usable, advisor)
+        kept = set(triage["kept"])
+        shortlist = [e for e in usable if e["entity_id"] in kept]
+
+        _status(repo, "mapping", entities=len(shortlist), of=len(usable))
+        merged = {b.entity_id: b for b in heuristic_bindings(shortlist)}
         if advisor is not None:
             try:
-                for b in await advisor.propose_bindings(usable, repo.persons()):
+                for b in await advisor.propose_bindings(shortlist, repo.persons()):
                     merged[b.entity_id] = b              # LLM wins ties
             except Exception:
                 log.exception("LLM binding proposal failed — heuristics only")

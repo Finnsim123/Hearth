@@ -92,6 +92,23 @@ def buddy_state(repo, tsdb) -> dict:
         title, detail = copy.get(istage, ("Adding your new sensors", "One moment"))
         return _state(f"integrate:{istage}", "work", title, detail)
 
+    # re-mapping sensors after an AI-key retry (Settings "Try again"). run_seed
+    # writes seed.status as it goes; narrate the live stages so the click gets a
+    # visible reaction. Sits above llm_error so the active remap wins over the
+    # stale "key rejected" message (which clears once the first call succeeds).
+    # During initial onboarding this is masked by fast-track (its pending flag
+    # is set), so it only surfaces for a deliberate re-map.
+    seed = _get(repo, "seed.status") or {}
+    if seed.get("stage") in ("scanning", "mapping", "writing_rules"):
+        copy = {"scanning": ("Re-reading your sensors",
+                             "Taking a fresh look at everything Home Assistant exposes"),
+                "mapping": ("Re-mapping your sensors",
+                            "Matching sensors to roles with your AI key"),
+                "writing_rules": ("Refreshing your rules",
+                                  "Writing smarter household rules from the new mapping")}
+        title, detail = copy[seed["stage"]]
+        return _state(f"remap:{seed['stage']}", "work", title, detail)
+
     persons = [p for p in _safe(repo.persons, []) if getattr(p, "enabled", True)]
     promoted = [m for m in _safe(repo.models, []) if m.promoted]
     bound = len([b for b in _safe(repo.bindings, []) if b.enabled])
