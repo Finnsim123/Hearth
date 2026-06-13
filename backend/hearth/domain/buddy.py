@@ -5,9 +5,14 @@ ONE source of truth, so they never disagree. Pure read, cheap: a few settings +
 counts. Returns a friendly, first-person narration of the current phase.
 
 Phase priority (first match wins):
-  error → fast-track (import→features→patterns→training) → stalled sensors →
-  retraining → questions waiting → live (watch & predict) → collecting (no data
-  yet) → waiting (nothing connected).
+  fast-track failed → live incident (domain/health: can't reach HA, history
+  failing, …) → fast-track / seed (import→sort→map→features→train→patterns) →
+  stalled sensors → retraining → questions waiting → live (watch & predict) →
+  collecting (no data yet) → waiting (nothing connected).
+
+Any component records a problem via domain.health.record_issue and the buddy
+surfaces it prominently (and loudly) until it's cleared or expires — so runtime
+failures reach the user instead of dying silently in the logs.
 """
 from __future__ import annotations
 

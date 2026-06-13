@@ -38,6 +38,19 @@ def test_fasttrack_building_progress_tracks_chunks():
     assert 0.4 <= out["progress"] <= 0.7
 
 
+def test_live_issue_surfaces_and_stale_one_does_not():
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    issue = {"kind": "ha_unreachable", "title": "I can't reach Home Assistant",
+             "detail": "Lost the connection", "cta": {"label": "Settings", "href": "/settings"}}
+    fresh = buddy_state(_Repo({"system.issue": {**issue, "at": now.isoformat()}}), None)
+    assert fresh["phase"] == "issue:ha_unreachable" and fresh["tone"] == "alert"
+    assert "Home Assistant" in fresh["title"] and fresh["cta"]["href"] == "/settings"
+    # an old, already-recovered issue must NOT keep nagging
+    old = buddy_state(_Repo({"system.issue": {**issue, "at": (now - timedelta(hours=2)).isoformat()}}), None)
+    assert not old["phase"].startswith("issue:")
+
+
 def test_failed_is_error():
     out = buddy_state(_Repo({"fasttrack.status": {"stage": "failed", "error": "boom"}}), None)
     assert out["phase"] == "error" and out["tone"] == "error"
