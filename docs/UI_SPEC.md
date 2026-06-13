@@ -59,26 +59,23 @@ passwords are never persisted.
    typical for kids) are never notified — their activity is labeled by other
    members or via the Inbox. Every enabled member gets their own model;
    members can be disabled (guest room, infant) without deleting history.
-6. **Inventory** — automatic: Hearth pulls every entity (states + entity/area
-   registry) and computes per-entity stats from available history (DATA_MODEL
-   §4). Shows a summary ("214 entities, 31 with useful signal, 14 d of
-   history") with a **Download inventory.json** button so users can inspect
-   exactly what an LLM would see. On large homes a coarse **triage** runs first
-   (ARCHITECTURE §3.2): the full list is clustered from names alone and only the
-   activity-relevant clusters go on to the metadata pass — surfaced as a bubble
-   cloud during the live Welcome hand-off (`GET /api/entity-triage`).
-6b. **AI assist (optional)** — paste an OpenRouter / OpenAI-compatible API key
-   to let an LLM act as a *feature architect* over the inventory: it selects
-   which entities matter, assigns each an information tier, designs an executable
-   feature spec (from a safe transform whitelist) plus cross-sensor composites,
-   drafts taxonomy and rules, and **flags unreliable sensors** — returning
-   clarifying questions where ambiguous. An explicit **yes/no choice** governs
-   whether the model may see aggregate per-sensor statistics (default off =
-   metadata only), and an **estimated one-time cost** is shown before any run.
-   "Skip — use built-in heuristics" is equally prominent. Key stored encrypted,
-   reusable later for re-analysis and cluster-naming hints, removable in Settings.
-   Predictions run fully locally; the LLM is used only for setup and re-analysis.
-7. **Sensors** — table of HA entities with *suggested* role/room/person
+6. **AI assist (optional)** — comes BEFORE scanning so the AI is connected when
+   the home is read. Paste an OpenRouter / OpenAI-compatible API key (or skip for
+   heuristics). An explicit **data-sharing choice** governs what the model sees —
+   *names & device classes only* (default) vs *also aggregate per-sensor stats* —
+   because it shapes the feature design. An **estimated one-time cost** (from the
+   HA entity count) is shown. Key stored encrypted, removable in Settings;
+   predictions run fully locally — the LLM is used only at setup and re-analysis.
+7. **Scanning your home** — pulls the full entity inventory, then runs the coarse
+   **triage** (ARCHITECTURE §3.2) right here: with the AI key it clusters the
+   whole list from names alone and judges relevance (heuristic-by-role without a
+   key). A rolling "reading <entity>…" ticker plays while it works, then a
+   **bubble cloud** lets the user keep/skip whole groups; the "kept for activity"
+   count is the triage result, not a heuristic guess. The selection + consent are
+   carried into `setup/complete`, which pre-approves them so seeding maps straight
+   away (no second ask on the Welcome screen). Backed by `POST /api/triage/preview`.
+7b. **Sensors** (post-setup page, not a wizard step) — table of HA entities with
+   *suggested* role/room/person
    (heuristics, or LLM proposals with a reason per row — badge shows which);
    user confirms/edits; unbound entities are simply ignored. One-click
    "import history" if an existing HA→Influx bucket is detected.
@@ -114,9 +111,10 @@ external HA→Influx bucket with the longest history, `recorder` = ~10 days from
 HA's own recorder — see §3.1):
 
 - **Warm-start arc** (the default): the stepper lights up live as the phase
-  advances — scanning your home → **sorting into groups** (a bubble cloud of the
-  triage clusters from `GET /api/entity-triage`, accent-tinted for the ones kept,
-  with "keeping N of M entities") → reading with AI (only if a key is set) →
+  advances — scanning your home → **sorting into groups** (a *read-only* bubble-
+  cloud recap of the triage clusters from `GET /api/entity-triage`; the keep/skip
+  selection already happened in the wizard's Scanning step, so there's no second
+  ask here) → reading with AI (only if a key is set) →
   building features → learning your routines → finding patterns — finishing
   with the first model live and CTAs to name patterns / answer questions (or, if
   the recorder was too thin to train, a softer "I've started learning" close).
