@@ -576,6 +576,11 @@ def build_api_router(deps: dict) -> APIRouter:
         # milliseconds and the auto-login cookie reliably reaches the browser.
         repo.set_setting("seed.pending", {"members": body.get("members", [])})
 
+        # treat the install build as already seen, so the buddy's "what's new"
+        # only ever fires for a LATER update, never on first boot.
+        from ..domain.whatsnew import mark_seen
+        mark_seen(repo)
+
         # Warm start: an external bucket (HA→Influx) gives the longest history;
         # otherwise pull ~10 days from HA's own recorder via the history API, so
         # EVERY home gets a provisional model on day one — no integration needed.
@@ -1413,6 +1418,14 @@ def build_api_router(deps: dict) -> APIRouter:
         (shared / "update_requested").touch()
         return {"ok": True, "note": "the host updater picks this up within a "
                                     "minute; Hearth rebuilds and restarts"}
+
+    @api.post("/system/whats-new/seen")
+    def whats_new_seen() -> dict:
+        """Acknowledge the 'what's new' the buddy showed after an update —
+        marks this build seen so it stops announcing."""
+        from ..domain.whatsnew import mark_seen
+        mark_seen(repo)
+        return {"ok": True}
 
     @api.post("/system/restart")
     def restart_app() -> dict:

@@ -18,10 +18,11 @@ import { onBuddyCheer, type BuddyCheer } from "./buddyBus";
 type State = {
   phase: string; tone: string; title: string; detail: string;
   progress: number | null; cta: { label: string; href: string } | null;
+  ack?: string | null;
 };
 
 const TONE: Record<string, string> = {
-  work: "var(--accent)", ask: "var(--accent)",
+  work: "var(--accent)", ask: "var(--accent)", news: "var(--accent)",
   live: "var(--ok, #34D399)", alert: "var(--danger)", error: "var(--danger)",
 };
 
@@ -81,8 +82,17 @@ export default function Buddy() {
   // a cheer takes over the bubble briefly, forcing it open
   const d: State = cheer
     ? { phase: "cheer", tone: "live", title: cheer.title, detail: cheer.detail ?? "",
-        progress: null, cta: null }
+        progress: null, cta: null, ack: null }
     : (s as State);
+
+  // acknowledge a "what's new" announcement: mark the build seen, then re-poll.
+  const ackNews = () => {
+    if (!d.ack) return;
+    fetch(d.ack, { method: "POST" }).catch(() => {}).finally(() => {
+      window.clearTimeout(timer.current);
+      tickRef.current?.();
+    });
+  };
   const color = TONE[d.tone] ?? "var(--accent)";
   const working = d.tone === "work" || d.tone === "ask";
   const collapsed = cheer ? false : (override ?? (d.tone === "live"));   // rest = just the orb
@@ -91,7 +101,8 @@ export default function Buddy() {
     setOverride(next);
     localStorage.setItem("hearth.buddy.collapsed", next ? "1" : "0");
   };
-  const attention = d.tone === "ask" || d.tone === "alert" || d.tone === "error";
+  const attention = d.tone === "ask" || d.tone === "alert" || d.tone === "error"
+    || d.tone === "news";
 
   const orb = (
     <span className={`buddy-orb${working ? " anim" : ""}`}
@@ -153,6 +164,13 @@ export default function Buddy() {
                       else navigate(h);
                     }}>
               {d.cta.label}
+            </button>
+          )}
+          {d.ack && (
+            <button className="btn btn-secondary"
+                    style={{ marginTop: 9, fontSize: 12.5, minHeight: 30, padding: "4px 10px" }}
+                    onClick={ackNews}>
+              Got it
             </button>
           )}
         </div>

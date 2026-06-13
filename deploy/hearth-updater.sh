@@ -30,8 +30,17 @@ LOCAL="$(git rev-parse --short HEAD 2>/dev/null)"
 REMOTE="$(git rev-parse --short origin/main 2>/dev/null)"
 BEHIND="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
 SUBJECT="$(git log -1 --format=%s origin/main 2>/dev/null | head -c 100)"
+# the DEPLOYED commit (current HEAD = what the running container was built from):
+# its message is what the buddy announces as "what's new" after an update.
+HEAD_SUBJECT="$(git log -1 --format=%s HEAD 2>/dev/null | head -c 200)"
+HEAD_BODY="$(git log -1 --format=%b HEAD 2>/dev/null | head -c 600)"
+# JSON-escape arbitrary text safely (commit messages contain quotes/newlines).
+jesc() { printf '%s' "${1:-}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '""'; }
 cat > "$SHARED/update_status.json" <<JSON
 {"local": "${LOCAL}", "remote": "${REMOTE}", "behind": ${BEHIND:-0},
- "latest_subject": $(printf '%s' "$SUBJECT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '""'),
+ "latest_subject": $(jesc "$SUBJECT"),
+ "deployed_sha": "${LOCAL}",
+ "deployed_subject": $(jesc "$HEAD_SUBJECT"),
+ "deployed_body": $(jesc "$HEAD_BODY"),
  "checked_at": "$(date -Is)"}
 JSON
