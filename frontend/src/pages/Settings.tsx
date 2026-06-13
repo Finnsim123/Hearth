@@ -911,7 +911,7 @@ export default function Settings() {
           <button key={s.key} className="card" onClick={() => open(s.key)}
             style={{ textAlign: "left", cursor: "pointer", padding: 18, display: "flex",
                      flexDirection: "column", gap: 8, border: "1px solid var(--border)",
-                     background: "var(--surface)" }}>
+                     background: "var(--surface)", color: "var(--text)" }}>
             <span style={{ width: 38, height: 38, borderRadius: 10, display: "flex",
                            alignItems: "center", justifyContent: "center",
                            background: "color-mix(in srgb, var(--accent) 14%, transparent)",

@@ -305,8 +305,8 @@ export default function App() {
             Update ({update.behind})
           </button>
         )}
-        <NavLink to="/settings" end style={navLinkStyle} onClick={closeNav}>Settings</NavLink>
         <ConnectionLinks onClick={closeNav} />
+        <NavLink to="/settings" end style={navLinkStyle} onClick={closeNav}>Settings</NavLink>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                       gap: 8, marginTop: 8, paddingTop: 10, paddingLeft: 2,

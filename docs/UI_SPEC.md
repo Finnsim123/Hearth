@@ -91,14 +91,19 @@ passwords are never persisted.
    the host pre-filled; the user only pastes the token generated here (shown
    once). Manual fallback instructions in a callout; MQTT remains the
    alternative channel.
-10. **Done** — ingest starts; the wizard hands off to the live Welcome screen
-   below.
+10. The final step's "Finish setup" hands **straight** to the live Welcome
+   screen below — there is no separate "applying…" progress page.
 
 ### 1a. Welcome hand-off (onboarding/Welcome.tsx)
 
 A full-screen moment between the wizard and the dashboard that introduces the
 buddy (Ember) and *shows* the pipeline running on this home's real data — no
-faked numbers. It polls `GET /api/buddy` for the current phase and `GET /api/flow`
+faked numbers. It is also the loading screen: the wizard renders it the instant
+"Finish setup" is pressed (fire-and-forget `POST /api/setup/complete`), and while
+Hearth restarts it shows the buddy greeting + "Settling in…" with stages pending,
+then lights up once the backend is back (polls only accept genuine 200s, so the
+restart 401/503s never read as real state). "Go to my dashboard" is disabled
+until it's up. It polls `GET /api/buddy` for the current phase and `GET /api/flow`
 for live counts, and animates an entity strip over the sensors Hearth actually
 bound (`GET /api/bindings`). Two arcs, chosen by whether history was imported
 (flag in `localStorage['hearth.welcome']`):

@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from "react";
 import { PRESET_HUES } from "../components/Avatar";
-import ProgressWait from "../components/ProgressWait";
+import Welcome from "./Welcome";
 import { Icon } from "../icons";
 import {
   Callout, ChoiceCard, Field, FooterNav, Progress, StepShell, TestRow, type TestState,
@@ -65,63 +65,27 @@ export default function Wizard() {
   const next = () => setStep((s) => Math.min(s + 1, TOTAL));
   const back = () => setStep((s) => Math.max(s - 1, 1));
   const set = <K extends keyof WizardData>(k: K, v: WizardData[K]) => setData((d) => ({ ...d, [k]: v }));
-  const [applying, setApplying] = useState<"idle" | "saving" | "failed">("idle");
+  const [applying, setApplying] = useState<"idle" | "welcome">("idle");
 
   const finishSetup = async () => {
-    setApplying("saving");
+    // Hand straight off to the live Welcome screen — it IS the loading
+    // experience now: it shows the buddy intro while Hearth restarts and lights
+    // up the pipeline once the backend is back. No separate progress page.
+    localStorage.removeItem(STORE);
+    const fastTrack = data.influx.mode === "external" && !!data.influx.sourceBucket;
+    // greet only whoever receives system messages (the operator), not every member
+    localStorage.setItem("hearth.welcome", JSON.stringify({
+      fastTrack,
+      members: data.members.filter((m) => m.notifySystem).map((m) => m.name).filter(Boolean) }));
+    setApplying("welcome");
     try {
-      const r = await fetch("/api/setup/complete", { method: "POST",
+      await fetch("/api/setup/complete", { method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...data, appBaseUrl: window.location.origin }) });
-      if (!r.ok && r.status !== 409) throw new Error(String(r.status));
-    } catch { /* server restarts mid-request; that's expected */ }
-    // poll until the backend is back with setup complete
-    for (let i = 0; i < 60; i++) {
-      await new Promise((res) => setTimeout(res, 2000));
-      try {
-        const h = await fetch("/api/health").then((x) => x.json());
-        if (h && h.needs_setup === false) {
-          localStorage.removeItem(STORE);
-          // Hand off to the live Welcome screen (introduces the buddy and shows
-          // the pipeline running on real data). Stash the arc + names for it.
-          const fastTrack = data.influx.mode === "external" && !!data.influx.sourceBucket;
-          // greet only whoever receives system messages (the operator), not every member
-          localStorage.setItem("hearth.welcome", JSON.stringify({
-            fastTrack,
-            members: data.members.filter((m) => m.notifySystem).map((m) => m.name).filter(Boolean) }));
-          window.location.href = "/welcome";
-          return;
-        }
-      } catch { /* still restarting */ }
-    }
-    setApplying("failed");
+    } catch { /* server restarts mid-request; expected — Welcome polls until it's up */ }
   };
 
-  if (applying === "saving") {
-    return (
-      <ProgressWait
-        title="Applying your setup…"
-        sub="Saving everything and restarting Hearth — about fifteen seconds. Sensor mapping and model training continue in the background after that."
-        estimateS={15}
-        stages={[
-          [0, "Saving your account, connections and household…"],
-          [5, "Restarting Hearth with your settings…"],
-          [20, "Coming back up…"],
-          [45, "Taking longer than usual — first boot builds caches. Still going."],
-        ]}
-      />
-    );
-  }
-  if (applying === "failed") {
-    return (
-      <div style={{ padding: "120px 16px", maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
-        <h2>That took too long</h2>
-        <p style={{ color: "var(--text-dim)", fontSize: 14.5 }}>
-          Hearth didn't come back up. Check: docker compose logs hearth — your wizard answers are still here.
-        </p>
-      </div>
-    );
-  }
+  if (applying === "welcome") return <Welcome />;
 
   return (
     <div style={{ padding: "32px 16px" }}>

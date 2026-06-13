@@ -361,36 +361,43 @@ export default function Welcome() {
   const sawSetup = useRef(false);
 
   useEffect(() => {
-    fetch("/api/bindings").then((r) => r.json())
-      .then((b: Binding[]) => setBindings((b || []).filter((x) => x.enabled).slice(0, 50)))
-      .catch(() => {});
+    let stop = false;
+    // Retry until the backend is up — we arrive here while Hearth is still
+    // restarting from setup, so these will 401/fail for the first few seconds.
+    const loadOnce = (url: string, onData: (d: unknown) => void) => {
+      const attempt = () => fetch(url)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((d) => { if (!stop) onData(d); })
+        .catch(() => { if (!stop) setTimeout(attempt, 2500); });
+      attempt();
+    };
+    loadOnce("/api/bindings", (b) =>
+      setBindings(((b as Binding[]) || []).filter((x) => x.enabled).slice(0, 50)));
     // the live entity list — what Hearth is actually reading from your home; the
     // scan feed rolls through these so you recognise your own stuff.
-    fetch("/api/ha/entities").then((r) => r.json())
-      .then((res) => setEntities((res?.entities ?? []).map((e: Ent) => ({
-        entity_id: e.entity_id, friendly_name: e.friendly_name, domain: e.domain }))))
-      .catch(() => {});
-    fetch("/api/persons").then((r) => r.json())
-      .then((ps: { id: string; name: string; notify_system?: boolean }[]) => {
-        const list = ps || [];
-        setPersonMap(Object.fromEntries(list.map((p) => [p.id, p.name])));
-        // greet only whoever actually receives Hearth's messages (the operator),
-        // not every household member — others aren't the one setting this up.
-        if (!flag.members) setNames(list.filter((p) => p.notify_system).map((p) => p.name));
-      }).catch(() => {});
+    loadOnce("/api/ha/entities", (res) =>
+      setEntities(((res as { entities?: Ent[] })?.entities ?? []).map((e) => ({
+        entity_id: e.entity_id, friendly_name: e.friendly_name, domain: e.domain }))));
+    loadOnce("/api/persons", (ps) => {
+      const list = (ps as { id: string; name: string; notify_system?: boolean }[]) || [];
+      setPersonMap(Object.fromEntries(list.map((p) => [p.id, p.name])));
+      // greet only whoever actually receives Hearth's messages (the operator),
+      // not every household member — others aren't the one setting this up.
+      if (!flag.members) setNames(list.filter((p) => p.notify_system).map((p) => p.name));
+    });
+    return () => { stop = true; };
   }, []);
 
   useEffect(() => {
     let alive = true;
+    // only accept genuinely OK responses — during the post-setup restart these
+    // 401/503 for a few seconds, and we must NOT treat that as real state.
+    const ok = (url: string) => fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     const tick = () => {
-      Promise.all([
-        fetch("/api/buddy").then((r) => r.json()).catch(() => null),
-        fetch("/api/flow").then((r) => r.json()).catch(() => null),
-        fetch("/api/connections/llm").then((r) => r.json()).catch(() => null),
-        fetch("/api/feature-spec").then((r) => r.json()).catch(() => null),
-      ]).then(([b, f, c, fs]) => {
+      Promise.all([ok("/api/buddy"), ok("/api/flow"), ok("/api/connections/llm"),
+                   ok("/api/feature-spec")]).then(([b, f, c, fs]) => {
         if (!alive) return;
-        if (b) { setBuddy(b); if (String(b.phase).startsWith("setup:")) sawSetup.current = true; }
+        if (b?.phase) { setBuddy(b); if (String(b.phase).startsWith("setup:")) sawSetup.current = true; }
         if (f) setFlow(f);
         if (c) setLlm({ configured: !!c.configured, model: c.options?.model, activity: c.activity });
         if (fs?.active && Array.isArray(fs.features))
@@ -408,6 +415,7 @@ export default function Welcome() {
   const phase = buddy?.phase ?? "";
   const pos = ORDER.indexOf(phase);
   const inSetup = phase.startsWith("setup:");
+  const started = !!buddy;                 // false while Hearth is still restarting
   const node = (k: string) => flow?.nodes?.[k];
   const hasModel = node("model")?.status === "ok";   // survives a later reload
   const finished = !!buddy && !inSetup && (sawSetup.current || !fastTrack || hasModel);
@@ -441,7 +449,7 @@ export default function Welcome() {
   const people = bindings.filter((b) => b.role === "person").map((b) => ({
     key: b.id, name: (b.person_id && personMap[b.person_id]) || prettify(b.name) }));
   const sensorChips = bindings.filter((b) => b.role !== "person");
-  const scanStatus: StageStatus = inSetup ? statusFor(0, 2) : "done";
+  const scanStatus: StageStatus = inSetup ? statusFor(0, 2) : (started ? "done" : "pending");
   const scanActive = scanStatus === "active";
   const scanDone = scanStatus === "done";
   // bound-sensor count from the flow map (e.g. "96 sensors"); 0/absent early on
@@ -468,7 +476,7 @@ export default function Welcome() {
   })();
   // AI is "done" only once it's genuinely idle (no fresh call) AND the pipeline
   // has moved past scanning — and always by the time training starts.
-  const aiStatus: StageStatus = !inSetup ? "done"
+  const aiStatus: StageStatus = !inSetup ? (started ? "done" : "pending")
     : (pos >= 5 || (pos >= 3 && !actFresh)) ? "done" : "active";
 
   return (
@@ -478,9 +486,14 @@ export default function Welcome() {
       <style>{CSS}</style>
       <div style={{ width: "100%", maxWidth: 560, display: "flex", flexDirection: "column",
                     alignItems: "center", textAlign: "center", gap: 14 }}>
-        <Ember busy={inSetup} />
+        <Ember busy={inSetup || !started} />
         <h1 style={{ margin: 0, fontSize: 26, letterSpacing: "-0.02em" }}>{greeting}</h1>
         <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 15, maxWidth: 460 }}>{sub}</p>
+        {!started && (
+          <div style={{ fontSize: 13.5, color: "var(--accent)", fontWeight: 600 }}>
+            Settling in — getting Hearth up and running
+          </div>
+        )}
         {inSetup && buddy && (
           <div style={{ fontSize: 13.5, color: "var(--accent)", fontWeight: 600 }}>
             {buddy.title}{buddy.detail ? ` — ${buddy.detail}` : ""}
@@ -548,8 +561,8 @@ export default function Welcome() {
               {youNode.value}
             </button>
           )}
-          <button className="btn btn-primary" onClick={() => go("/")}>
-            {inSetup ? "Skip ahead to my dashboard" : "Go to my dashboard"}
+          <button className="btn btn-primary" disabled={!started} onClick={() => go("/")}>
+            {inSetup || !started ? "Skip ahead to my dashboard" : "Go to my dashboard"}
           </button>
         </div>
         {inSetup && (
