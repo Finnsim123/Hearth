@@ -107,6 +107,51 @@ function StageRow({ title, detail, status, children }: {
   );
 }
 
+const PersonGlyph = ({ color }: { color: string }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color}
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="12" cy="8" r="3.4" />
+    <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
+  </svg>
+);
+
+/** Household members recognised from their person.* tracker — surfaced by name
+ *  ("Found Alex from your household") as the scan reaches them, rather than as
+ *  a cryptic binding chip. */
+function PersonFinds({ people, active, done }: {
+  people: { key: number; name: string }[]; active: boolean; done: boolean;
+}) {
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    if (done) { setShown(people.length); return; }
+    if (!active || people.length === 0) return;
+    setShown(0);
+    const id = setInterval(() => setShown((n) => Math.min(n + 1, people.length)), 450);
+    return () => clearInterval(id);
+  }, [active, done, people.length]);
+  if (people.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+      {people.map((p, i) => {
+        const seen = done || i < shown;
+        return (
+          <div key={p.key} className={seen ? "wlc-row" : ""}
+            style={{ display: seen ? "flex" : "none", alignItems: "center", gap: 8,
+                     fontSize: 13.5, color: "var(--text)" }}>
+            <span style={{ width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                           display: "flex", alignItems: "center", justifyContent: "center",
+                           background: "color-mix(in srgb, var(--ok, #34D399) 14%, transparent)",
+                           border: "1.5px solid var(--ok, #34D399)" }}>
+              <PersonGlyph color="var(--ok, #34D399)" />
+            </span>
+            Found <strong style={{ fontWeight: 600 }}>{p.name}</strong> from your household
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** The scanning entity strip — chips for the sensors Hearth bound, ticked off
  *  one by one while the scan stage is active, all checked once it's done. */
 function EntityStrip({ bindings, active, done }: {
@@ -158,18 +203,21 @@ export default function Welcome() {
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [llm, setLlm] = useState<{ configured: boolean; model?: string } | null>(null);
   const [names, setNames] = useState<string[]>(flag.members ?? []);
+  const [personMap, setPersonMap] = useState<Record<string, string>>({});
   const sawSetup = useRef(false);
 
   useEffect(() => {
     fetch("/api/bindings").then((r) => r.json())
-      .then((b: Binding[]) => setBindings((b || []).filter((x) => x.enabled).slice(0, 40)))
+      .then((b: Binding[]) => setBindings((b || []).filter((x) => x.enabled).slice(0, 50)))
       .catch(() => {});
     fetch("/api/connections/llm").then((r) => r.json())
       .then((c) => setLlm({ configured: !!c.configured, model: c.options?.model })).catch(() => {});
-    if (!flag.members) {
-      fetch("/api/persons").then((r) => r.json())
-        .then((ps) => setNames((ps || []).map((p: { name: string }) => p.name))).catch(() => {});
-    }
+    fetch("/api/persons").then((r) => r.json())
+      .then((ps: { id: string; name: string }[]) => {
+        const list = ps || [];
+        setPersonMap(Object.fromEntries(list.map((p) => [p.id, p.name])));
+        if (!flag.members) setNames(list.map((p) => p.name));
+      }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -220,6 +268,16 @@ export default function Welcome() {
   const nPatterns = parseInt(patterns?.value ?? "", 10);
   const youNode = node("you");
 
+  // person.* trackers become "Found <name> from your household"; everything
+  // else shows in the sensor chip strip.
+  const prettify = (s: string) => s.replace(/_loc$/, "").replace(/_/g, " ");
+  const people = bindings.filter((b) => b.role === "person").map((b) => ({
+    key: b.id, name: (b.person_id && personMap[b.person_id]) || prettify(b.name) }));
+  const sensorChips = bindings.filter((b) => b.role !== "person");
+  const scanStatus: StageStatus = inSetup ? statusFor(0, 2) : "done";
+  const scanActive = scanStatus === "active";
+  const scanDone = scanStatus === "done";
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
                   alignItems: "center", padding: "48px 18px 80px",
@@ -240,10 +298,9 @@ export default function Welcome() {
       <div style={{ width: "100%", maxWidth: 560, marginTop: 34 }}>
         <StageRow title="Scanning your home"
           detail={node("ha")?.value ? `${node("ha")!.value} found` : "Reading what you've connected"}
-          status={inSetup ? statusFor(0, 2) : "done"}>
-          <EntityStrip bindings={bindings}
-            active={inSetup ? statusFor(0, 2) === "active" : false}
-            done={!inSetup || statusFor(0, 2) === "done"} />
+          status={scanStatus}>
+          <PersonFinds people={people} active={scanActive} done={scanDone} />
+          <EntityStrip bindings={sensorChips} active={scanActive} done={scanDone} />
         </StageRow>
 
         {llm?.configured && (
