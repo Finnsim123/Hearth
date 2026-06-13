@@ -316,7 +316,7 @@ def build_api_router(deps: dict) -> APIRouter:
         if not model:
             conn = repo.get_connection("llm") or {}
             model = (conn.get("options") or {}).get("model")
-        return estimate_spec_cost(n, mode=mode, model=model)
+        return estimate_spec_cost(n, mode=mode, model=model, repo=repo)
 
     # ── setup completion: persist EVERYTHING the wizard collected ──────────
     TAXONOMY_PRESETS = {

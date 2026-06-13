@@ -127,7 +127,7 @@ class OpenRouterAdvisor:
         try:
             from ..domain.onboarding.feature_architect import _price_for
             cur = self.repo.get_setting("llm.usage") or {}
-            pin, pout = _price_for(model)
+            pin, pout = _price_for(model, self.repo)
             it, ot = int(in_tok or 0), int(out_tok or 0)
             now = datetime.now(timezone.utc).isoformat()
             self.repo.set_setting("llm.usage", {

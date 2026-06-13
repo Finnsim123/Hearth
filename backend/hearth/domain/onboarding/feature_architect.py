@@ -239,8 +239,8 @@ def assemble_spec(selections: list[EntitySelection], features: list[FeatureDef],
 # repetitive features), so this is the default when the user hasn't chosen one.
 ARCHITECT_MODEL_DEFAULT = "openai/gpt-4o"
 
-# Rough USD per 1M tokens (input, output). ESTIMATES, provider-dependent; matched
-# by substring against the model id. Used only to show a ballpark before a run.
+# Static fallback — USD per 1M tokens (input, output). Used only when the live
+# catalogue is unreachable; matched by substring against the model id.
 _PRICE_PER_MTOK = {
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4o": (2.50, 10.0),
@@ -251,12 +251,86 @@ _PRICE_PER_MTOK = {
 }
 _DEFAULT_PRICE = (1.0, 4.0)
 
+# Live prices, exact-id keyed, in USD/Mtok. Cached in-process (short TTL) and
+# persisted to settings "llm.prices" so we touch the network at most ~daily.
+_PRICE_CACHE: dict[str, tuple[float, float]] = {}
+_PRICE_CACHE_AT = 0.0
+_PRICE_TTL = 6 * 3600
+
+
+def _fetch_prices(repo) -> dict[str, tuple[float, float]]:
+    """Pull the provider's /models catalogue and read each model's per-token
+    price. OpenRouter exposes pricing.prompt/.completion (USD per token); we
+    scale to per-Mtok. OpenAI-compatible bases without a pricing field are
+    skipped. Best-effort: any failure returns {} so callers fall back."""
+    import json as _json
+    import urllib.request
+    try:
+        conn = repo.get_connection("llm")
+    except Exception:
+        conn = None
+    base = ((conn or {}).get("url") or "https://openrouter.ai/api/v1").rstrip("/")
+    try:
+        req = urllib.request.Request(f"{base}/models", headers={"User-Agent": "hearth"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = _json.loads(r.read())
+    except Exception:
+        return {}
+    out: dict[str, tuple[float, float]] = {}
+    for m in data.get("data", []) or []:
+        mid, pr = m.get("id"), (m.get("pricing") or {})
+        try:
+            pin, pout = float(pr["prompt"]) * 1e6, float(pr["completion"]) * 1e6
+        except (KeyError, TypeError, ValueError):
+            continue
+        if mid and (pin or pout):
+            out[mid] = (pin, pout)
+    return out
+
+
+def _live_prices(repo) -> dict[str, tuple[float, float]]:
+    """Exact-id → (USD/Mtok in, out), live where available. In-process cache
+    backed by a persisted daily snapshot; with no repo (tests) it stays empty
+    and never hits the network — preserving the module's no-network guarantee."""
+    global _PRICE_CACHE, _PRICE_CACHE_AT
+    if repo is None:
+        return _PRICE_CACHE
+    import time
+    now = time.time()
+    if _PRICE_CACHE and now - _PRICE_CACHE_AT < _PRICE_TTL:
+        return _PRICE_CACHE
+    try:
+        cached = repo.get_setting("llm.prices")
+    except Exception:
+        cached = None
+    if cached and (now - float(cached.get("at", 0))) < 86400 and cached.get("by"):
+        _PRICE_CACHE = {k: (v[0], v[1]) for k, v in cached["by"].items()}
+        _PRICE_CACHE_AT = now
+        return _PRICE_CACHE
+    fetched = _fetch_prices(repo)
+    if fetched:
+        _PRICE_CACHE, _PRICE_CACHE_AT = fetched, now
+        try:
+            repo.set_setting("llm.prices",
+                             {"at": now, "by": {k: list(v) for k, v in fetched.items()}})
+        except Exception:
+            pass
+    elif cached and cached.get("by"):          # network down: ride the stale snapshot
+        _PRICE_CACHE = {k: (v[0], v[1]) for k, v in cached["by"].items()}
+        _PRICE_CACHE_AT = now
+    return _PRICE_CACHE
+
 
 def _tok(text: str) -> int:
     return max(1, len(text) // 4)          # ~4 chars/token, good enough for a quote
 
 
-def _price_for(model: str | None):
+def _price_for(model: str | None, repo=None):
+    """Live exact-id price when the catalogue has it, else the static substring
+    table. repo enables (and caches) the live lookup; omit it for a pure quote."""
+    live = _live_prices(repo)
+    if model in live:                        # provider ids are exact, case-sensitive
+        return live[model]
     m = (model or "").lower()
     for key, price in _PRICE_PER_MTOK.items():
         if key in m:
@@ -265,7 +339,7 @@ def _price_for(model: str | None):
 
 
 def estimate_spec_cost(n_entities: int, mode: str = "conservative",
-                       model: str | None = None) -> dict:
+                       model: str | None = None, repo=None) -> dict:
     """A coarse, one-time token/cost estimate for a full feature-spec analysis of
     `n_entities` (the three passes: selection, features, composites). Assumes all
     entities are kept (an upper bound; real runs are usually cheaper). Shown
@@ -284,7 +358,7 @@ def estimate_spec_cost(n_entities: int, mode: str = "conservative",
         comp_in, comp_out = sys_tok + wl_tok + n * 10, 300
         in_tok = sel_in + feat_in + comp_in
         out_tok = sel_out + feat_out + comp_out
-    pin, pout = _price_for(model)
+    pin, pout = _price_for(model, repo)
     usd = in_tok / 1e6 * pin + out_tok / 1e6 * pout
     return {
         "model": model, "mode": mode, "entity_count": n,
