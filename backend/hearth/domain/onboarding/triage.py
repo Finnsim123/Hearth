@@ -34,17 +34,21 @@ def _heuristic_clusters(usable: list[dict]) -> list[dict]:
     return list(groups.values())
 
 
-def keepset_from(triage: dict, excluded_labels: set[str]) -> list[str]:
+def keepset_from(triage: dict, excluded_labels: set[str],
+                 included_labels: set[str] | None = None) -> list[str]:
     """Recompute the kept entity set from a stored triage when the user toggles
-    whole clusters off (the Sensors / Welcome review). Relevant, non-excluded
-    clusters are kept; the presence safety floor (real home/away trackers) is
-    always re-added regardless of the toggles."""
+    whole clusters in the review. A cluster is kept if it was relevant and not
+    excluded, OR explicitly included (overriding an irrelevant verdict). The
+    presence safety floor (real home/away trackers) is always re-added."""
+    included = included_labels or set()
     keep: set[str] = set()
     everything: set[str] = set()
     for c in triage.get("clusters", []):
         ents = c.get("entities", [])
         everything.update(ents)
-        if c.get("relevant") and c["label"] not in excluded_labels:
+        kept = (c.get("relevant") and c["label"] not in excluded_labels) \
+            or c["label"] in included
+        if kept:
             keep.update(ents)
     keep |= {e for e in everything if is_person_tracker(e)}
     return sorted(keep)

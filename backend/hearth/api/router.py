@@ -184,7 +184,8 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(409, "No triage to approve yet")
         from ..domain.onboarding.triage import keepset_from
         excluded = set(body.get("excluded_labels") or [])
-        kept = keepset_from(tr, excluded)
+        included = set(body.get("included_labels") or [])
+        kept = keepset_from(tr, excluded, included)
         kept_set = set(kept)
         tr["kept"] = kept
         tr["kept_count"] = len(kept)
@@ -956,20 +957,34 @@ def build_api_router(deps: dict) -> APIRouter:
     # ── labels: bulk range + question skip ────────────────────────────────
     @api.post("/labels/bulk")
     def labels_bulk(body: dict) -> dict:
-        """body: {person_id, start, end (ISO), activity}"""
+        """body: {person_id, start, end (ISO), activity}
+
+        A manual correction is the user's ground truth, so it does two things:
+        (1) stores a CONFIRMED training label the next model learns from, and
+        (2) overwrites the displayed prediction for each window so the dashboard
+        reflects the correction at once (Influx last-write-wins on the window
+        timestamp; model_version='correction' marks it user-set, not model
+        output). This is why a corrected heatmap cell repaints immediately."""
         tsdb = deps.get("tsdb")
         if tsdb is None:
             raise HTTPException(409, "Connect InfluxDB first")
         from datetime import datetime
+
         from ..domain.labeling.bulk import bulk_label_events
+        from ..domain.schemas import Prediction
+        activity = body["activity"]
         events = bulk_label_events(
             body["person_id"],
             datetime.fromisoformat(body["start"]),
             datetime.fromisoformat(body["end"]),
-            body["activity"],
+            activity,
             source=body.get("source", "bulk"))
         for ev in events:
             tsdb.write_label(ev)
+            tsdb.write_prediction(Prediction(
+                person_id=ev.person_id, window_ts=ev.window_ts,
+                model_version="correction", predicted=activity, smoothed=activity,
+                confidence=1.0, probabilities={activity: 1.0}))
         return {"labeled_windows": len(events)}
 
     @api.post("/inbox/{question_id}/skip")

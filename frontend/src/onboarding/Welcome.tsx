@@ -28,13 +28,16 @@ type LlmActivity = { phase: "sending" | "received" | "error"; task: string;
                      prompt?: string; reply?: string };
 type Feat = { name: string; transform: string };
 type Cluster = { label: string; relevant: boolean; why: string; count: number; kept: number };
-type Triage = { by: string | null; total: number; kept_count: number; clusters: Cluster[] };
+type Triage = { by: string | null; total: number; kept_count: number; clusters: Cluster[];
+                awaiting?: boolean; has_llm?: boolean };
 type Llm = { configured: boolean; model?: string; activity?: LlmActivity | null };
 type Binding = { id: number; name: string; role: string; room: string | null;
                  person_id: string | null; enabled: boolean };
 type Ent = { entity_id: string; friendly_name: string | null; domain: string | null };
 
 // the ordered fast-track phases, used to place the current phase on the arc
+const fmtUsd = (u: number) => (u < 0.01 ? "<$0.01" : `$${u.toFixed(2)}`);
+
 const ORDER = [
   "setup:importing", "setup:imported", "setup:pruned_empty",
   "setup:building_features", "setup:features_built",
@@ -268,39 +271,50 @@ function FeatureFeed({ features, active, done }: {
  *  entities it holds, tinted by whether it's relevant to activity prediction —
  *  so the user sees "lots of lights, a 3D printer, some server stuff" and which
  *  of it Hearth is keeping. Real data from GET /api/entity-triage. */
-function BubbleCloud({ triage }: { triage: Triage }) {
-  const clusters = triage.clusters.slice(0, 14);
+function BubbleCloud({ triage, kept, onToggle }: {
+  triage: Triage; kept?: Record<string, boolean>; onToggle?: (label: string) => void;
+}) {
+  const clusters = triage.clusters.slice(0, 18);
   if (!clusters.length) return null;
   const max = Math.max(...clusters.map((c) => c.count), 1);
   const size = (n: number) => Math.round(46 + 52 * Math.sqrt(n / max));   // 46–98px
+  const interactive = !!onToggle;
+  const isOn = (c: Cluster) => (kept ? !!kept[c.label] : c.relevant);
   return (
     <div style={{ marginTop: 10 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center",
                     justifyContent: "center" }}>
         {clusters.map((c) => {
           const d = size(c.count);
-          const on = c.relevant;
+          const on = isOn(c);
           return (
-            <div key={c.label} title={`${c.label} · ${c.count} entities${c.why ? ` · ${c.why}` : ""}`}
+            <button key={c.label} disabled={!interactive}
+              onClick={() => onToggle?.(c.label)}
+              title={`${c.label} · ${c.count} entities${c.why ? ` · ${c.why}` : ""}`
+                     + (interactive ? (on ? " · click to skip" : " · click to keep") : "")}
               style={{ width: d, height: d, borderRadius: "50%", flexShrink: 0,
                        display: "flex", flexDirection: "column", alignItems: "center",
                        justifyContent: "center", textAlign: "center", padding: 4, lineHeight: 1.15,
+                       cursor: interactive ? "pointer" : "default",
                        border: `1.5px solid ${on ? "var(--accent)" : "var(--border)"}`,
                        background: on ? "color-mix(in srgb, var(--accent) 16%, transparent)"
                                       : "var(--surface)",
-                       color: on ? "var(--text)" : "var(--text-dim)" }}>
+                       color: on ? "var(--text)" : "var(--text-dim)",
+                       opacity: on ? 1 : 0.6 }}>
               <span style={{ fontSize: Math.max(9, Math.min(12, d / 7)), fontWeight: 600,
                              overflow: "hidden", textOverflow: "ellipsis",
                              maxWidth: d - 8, whiteSpace: "nowrap" }}>{c.label}</span>
               <span style={{ fontSize: 10, opacity: 0.7 }}>{c.count}</span>
-            </div>
+            </button>
           );
         })}
       </div>
-      <div style={{ fontSize: 12, color: "var(--text-dim)", textAlign: "center", marginTop: 8 }}>
-        Keeping <strong style={{ color: "var(--accent)" }}>{triage.kept_count}</strong> of {triage.total}{" "}
-        entities for your model{triage.by === "llm" ? " — chosen by AI" : ""}.
-      </div>
+      {!interactive && (
+        <div style={{ fontSize: 12, color: "var(--text-dim)", textAlign: "center", marginTop: 8 }}>
+          Keeping <strong style={{ color: "var(--accent)" }}>{triage.kept_count}</strong> of {triage.total}{" "}
+          entities for your model{triage.by === "llm" ? " — chosen by AI" : ""}.
+        </div>
+      )}
     </div>
   );
 }
@@ -402,6 +416,11 @@ export default function Welcome() {
   const [entities, setEntities] = useState<Ent[]>([]);
   const [features, setFeatures] = useState<Feat[]>([]);
   const [triage, setTriage] = useState<Triage | null>(null);
+  const [kept, setKept] = useState<Record<string, boolean>>({});
+  const [approving, setApproving] = useState(false);
+  const [approved, setApproved] = useState(false);
+  const [triageCost, setTriageCost] = useState<number | null>(null);
+  const keptInit = useRef(false);
   const [llm, setLlm] = useState<Llm | null>(null);
   const [names, setNames] = useState<string[]>(flag.members ?? []);
   const [personMap, setPersonMap] = useState<Record<string, string>>({});
@@ -460,6 +479,45 @@ export default function Welcome() {
     return () => { alive = false; };
   }, []);
 
+  // seed the per-cluster keep toggles once, from the AI's relevance verdict
+  useEffect(() => {
+    if (triage && !keptInit.current && triage.clusters.length) {
+      setKept(Object.fromEntries(triage.clusters.map((c) => [c.label, c.relevant])));
+      keptInit.current = true;
+    }
+  }, [triage]);
+
+  const awaiting = !!triage?.awaiting && !!triage?.has_llm && !approved;
+  const keptEstimate = triage
+    ? triage.clusters.reduce((n, c) => n + (kept[c.label] ? c.count : 0), 0)
+    : 0;
+
+  // live cost estimate for the gated AI pass, recomputed as clusters toggle
+  useEffect(() => {
+    if (!awaiting) return;
+    let live = true;
+    fetch("/api/feature-spec/estimate", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entity_count: keptEstimate, model: llm?.model }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (live && j) setTriageCost(j.est_usd); }).catch(() => {});
+    return () => { live = false; };
+  }, [awaiting, keptEstimate, llm?.model]);
+
+  const approveTriage = async () => {
+    if (!triage) return;
+    setApproving(true);
+    const excluded = triage.clusters.filter((c) => c.relevant && !kept[c.label]).map((c) => c.label);
+    const included = triage.clusters.filter((c) => !c.relevant && kept[c.label]).map((c) => c.label);
+    try {
+      await fetch("/api/entity-triage/approve", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ excluded_labels: excluded, included_labels: included }) });
+      setApproved(true);
+    } catch { /* the poll will reflect state either way */ }
+    setApproving(false);
+  };
+
   const phase = buddy?.phase ?? "";
   const pos = ORDER.indexOf(phase);
   const inSetup = phase.startsWith("setup:");
@@ -508,8 +566,8 @@ export default function Welcome() {
   const featActive = featStatus === "active";
   const featDone = featStatus === "done";
   const hasTriage = !!(triage && triage.clusters.length);
-  const triageStatus: StageStatus = inSetup ? (pos >= 3 ? "done" : "active")
-                                            : (started ? "done" : "pending");
+  const triageStatus: StageStatus = awaiting ? "active"
+    : inSetup ? (pos >= 3 ? "done" : "active") : (started ? "done" : "pending");
 
   // live narration of the AI calls: "sending ... now" → "receiving ... now",
   // but only while the call is actually fresh (so a finished call doesn't keep
@@ -518,6 +576,7 @@ export default function Welcome() {
   const model = llm?.model && llm.model !== "auto" ? llm.model : "the LLM";
   const actFresh = !!act?.at && Date.now() - Date.parse(act.at) < 12000;
   const aiDetail = (() => {
+    if (awaiting) return "Waiting for you to approve the groups above";
     if (act && actFresh && act.phase === "sending")
       return `Sending to ${model} now — ${act.task.toLowerCase()}${act.sent ? ` (${act.sent})` : ""}`;
     if (act && actFresh && act.phase === "received")
@@ -529,7 +588,8 @@ export default function Welcome() {
   })();
   // AI is "done" only once it's genuinely idle (no fresh call) AND the pipeline
   // has moved past scanning — and always by the time training starts.
-  const aiStatus: StageStatus = !inSetup ? (started ? "done" : "pending")
+  const aiStatus: StageStatus = awaiting ? "pending"
+    : !inSetup ? (started ? "done" : "pending")
     : (pos >= 5 || (pos >= 3 && !actFresh)) ? "done" : "active";
 
   return (
@@ -566,11 +626,29 @@ export default function Welcome() {
         </StageRow>
 
         <StageRow title="Sorting your home into groups"
-          detail={hasTriage
-            ? `${triage!.clusters.length} groups found${triage!.by === "llm" ? "" : " (by type)"}`
-            : "Grouping what I found, keeping what matters"}
+          detail={awaiting ? "Tap a group to keep or skip it, then let AI dig in"
+            : hasTriage
+              ? `${triage!.clusters.length} groups found${triage!.by === "llm" ? "" : " (by type)"}`
+              : "Grouping what I found, keeping what matters"}
           status={triageStatus}>
-          {hasTriage && <BubbleCloud triage={triage!} />}
+          {hasTriage && (
+            <BubbleCloud triage={triage!}
+              kept={awaiting ? kept : undefined}
+              onToggle={awaiting ? (l) => setKept((k) => ({ ...k, [l]: !k[l] })) : undefined} />
+          )}
+          {awaiting && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center",
+                          justifyContent: "center", marginTop: 12 }}>
+              <button className="btn btn-primary" disabled={approving || keptEstimate === 0}
+                      onClick={approveTriage}>
+                {approving ? "Sending to AI…"
+                  : `Analyse these ${keptEstimate} entities${triageCost != null ? ` · ~${fmtUsd(triageCost)}` : ""}`}
+              </button>
+              <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+                or keep the free baseline — you can refine later on the Sensors page.
+              </span>
+            </div>
+          )}
         </StageRow>
 
         {llm?.configured && (
