@@ -206,3 +206,65 @@ def assemble_spec(selections: list[EntitySelection], features: list[FeatureDef],
                   llm_model: str | None = None) -> FeatureSpec:
     return FeatureSpec(created_at=datetime.now(timezone.utc), created_by="llm",
                        llm_model=llm_model, selections=selections, features=features)
+
+
+# ── pre-run cost estimate (so the user consents before tokens are spent) ─────
+# A capable model earns its keep on the architect task (REFEAT: weak models give
+# repetitive features), so this is the default when the user hasn't chosen one.
+ARCHITECT_MODEL_DEFAULT = "openai/gpt-4o"
+
+# Rough USD per 1M tokens (input, output). ESTIMATES, provider-dependent; matched
+# by substring against the model id. Used only to show a ballpark before a run.
+_PRICE_PER_MTOK = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.0),
+    "claude-sonnet": (3.0, 15.0),
+    "claude-3-5-sonnet": (3.0, 15.0),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-flash": (0.30, 2.50),
+}
+_DEFAULT_PRICE = (1.0, 4.0)
+
+
+def _tok(text: str) -> int:
+    return max(1, len(text) // 4)          # ~4 chars/token, good enough for a quote
+
+
+def _price_for(model: str | None):
+    m = (model or "").lower()
+    for key, price in _PRICE_PER_MTOK.items():
+        if key in m:
+            return price
+    return _DEFAULT_PRICE
+
+
+def estimate_spec_cost(n_entities: int, mode: str = "conservative",
+                       model: str | None = None) -> dict:
+    """A coarse, one-time token/cost estimate for a full feature-spec analysis of
+    `n_entities` (the three passes: selection, features, composites). Assumes all
+    entities are kept (an upper bound; real runs are usually cheaper). Shown
+    before a run so the user can consent (no silent token burn)."""
+    import math
+    n = max(int(n_entities), 0)
+    model = model or ARCHITECT_MODEL_DEFAULT
+    sys_tok = _tok(SYSTEM_PROMPT)
+    wl_tok = _tok(_whitelist_json(mode))
+    if n == 0:
+        in_tok = out_tok = 0
+    else:
+        batches = math.ceil(n / 150)
+        sel_in, sel_out = batches * sys_tok + n * 30, n * 40
+        feat_in, feat_out = sys_tok + wl_tok + n * 20, n * 70    # kept ≈ n (upper bound)
+        comp_in, comp_out = sys_tok + wl_tok + n * 10, 300
+        in_tok = sel_in + feat_in + comp_in
+        out_tok = sel_out + feat_out + comp_out
+    pin, pout = _price_for(model)
+    usd = in_tok / 1e6 * pin + out_tok / 1e6 * pout
+    return {
+        "model": model, "mode": mode, "entity_count": n,
+        "est_input_tokens": int(in_tok), "est_output_tokens": int(out_tok),
+        "est_total_tokens": int(in_tok + out_tok), "est_usd": round(usd, 4),
+        "note": "Rough one-time estimate (assumes every entity is kept; actual "
+                "runs are usually cheaper). Prices are approximate and depend on "
+                "your provider.",
+    }

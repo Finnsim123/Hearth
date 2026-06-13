@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from hearth.domain.features.validate import validate_spec
 from hearth.domain.onboarding.feature_architect import (
-    assemble_spec, audit_reliability, composite_prompt, feature_prompt,
-    parse_features, parse_selections, selection_prompt,
+    assemble_spec, audit_reliability, composite_prompt, estimate_spec_cost,
+    feature_prompt, parse_features, parse_selections, selection_prompt,
 )
 from hearth.domain.schemas import InfoTier, Role
 
@@ -68,6 +68,24 @@ def test_parse_features_drops_malformed():
     feats = parse_features(raw)
     assert [f.name for f in feats] == ["sofa_occ"]
     assert feats[0].window_min == 15 and feats[0].info_tier is InfoTier.DISCRETE_EVENT_GATE
+
+
+def test_estimate_spec_cost():
+    zero = estimate_spec_cost(0)
+    assert zero["est_total_tokens"] == 0 and zero["est_usd"] == 0.0
+
+    est = estimate_spec_cost(100, mode="conservative", model="openai/gpt-4o-mini")
+    assert est["entity_count"] == 100
+    assert est["est_input_tokens"] > 0 and est["est_output_tokens"] > 0
+    assert est["est_usd"] > 0.0
+
+    # a pricier model costs more for the same work
+    cheap = estimate_spec_cost(100, model="openai/gpt-4o-mini")["est_usd"]
+    dear = estimate_spec_cost(100, model="anthropic/claude-sonnet-4.6")["est_usd"]
+    assert dear > cheap
+    # full whitelist injects a larger prompt than conservative -> more input tokens
+    assert (estimate_spec_cost(100, mode="full")["est_input_tokens"]
+            > estimate_spec_cost(100, mode="conservative")["est_input_tokens"])
 
 
 def test_assemble_and_validate_end_to_end():

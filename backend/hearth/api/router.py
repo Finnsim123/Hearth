@@ -130,6 +130,21 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(400, str(exc))
         return {"ok": True, "share_stats": share}
 
+    # ── pre-run cost estimate for an AI feature-spec analysis ──────────────
+    @api.post("/feature-spec/estimate")
+    def feature_spec_estimate(body: dict) -> dict:
+        from ..domain.features.transforms import active_mode
+        from ..domain.onboarding.feature_architect import estimate_spec_cost
+        n = body.get("entity_count")
+        if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+            raise HTTPException(400, "entity_count (non-negative int) required")
+        mode = body.get("mode") or active_mode(repo)
+        model = body.get("model")
+        if not model:
+            conn = repo.get_connection("llm") or {}
+            model = (conn.get("options") or {}).get("model")
+        return estimate_spec_cost(n, mode=mode, model=model)
+
     # ── setup completion: persist EVERYTHING the wizard collected ──────────
     TAXONOMY_PRESETS = {
         "minimal": [("sleeping", "Sleeping", "sleeping"), ("away", "Away", "out of the house"),

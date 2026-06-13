@@ -3,7 +3,16 @@ from __future__ import annotations
 
 import pytest
 
-from hearth.adapters.openrouter_llm import OpenRouterAdvisor
+from hearth.adapters.openrouter_llm import DEFAULT_MODEL, OpenRouterAdvisor, choose_model
+
+
+def test_choose_model_precedence():
+    # user's explicit choice always wins
+    assert choose_model("anthropic/claude-sonnet-4.6", "openai/gpt-4o") == "anthropic/claude-sonnet-4.6"
+    # unset or 'auto' -> the per-task fallback
+    assert choose_model(None, "openai/gpt-4o") == "openai/gpt-4o"
+    assert choose_model("auto", "openai/gpt-4o") == "openai/gpt-4o"
+    assert choose_model("", "") == DEFAULT_MODEL
 
 
 class FakeRepo:
@@ -34,7 +43,7 @@ async def test_propose_feature_spec_orchestration(monkeypatch):
     ]
     calls = {"n": 0}
 
-    async def fake_chat(system, user, max_tokens=4000):
+    async def fake_chat(system, user, max_tokens=4000, model=None):
         out = responses[calls["n"]]
         calls["n"] += 1
         return out
@@ -60,7 +69,7 @@ async def test_propose_feature_spec_orchestration(monkeypatch):
 async def test_propose_feature_spec_degrades_on_chat_failure(monkeypatch):
     adv = OpenRouterAdvisor(FakeRepo())
 
-    async def boom(system, user, max_tokens=4000):
+    async def boom(system, user, max_tokens=4000, model=None):
         raise RuntimeError("LLM down")
 
     monkeypatch.setattr(adv, "_chat", boom)

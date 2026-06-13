@@ -31,6 +31,15 @@ _OPS = {">", "<", ">=", "<=", "==", "!="}
 TEMPORAL_FEATS = {"hour_of_day", "day_of_week", "is_weekend"}
 
 
+def choose_model(configured: str | None, fallback: str) -> str:
+    """The user's explicitly configured model wins; otherwise (unset or 'auto')
+    use the per-task fallback. Lets the architect task default to a stronger
+    model without overriding a deliberate user choice."""
+    if configured and configured != "auto":
+        return configured
+    return fallback or DEFAULT_MODEL
+
+
 def _slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:60]
 
@@ -93,13 +102,14 @@ class OpenRouterAdvisor:
         except Exception:
             pass
 
-    async def _chat(self, system: str, user: str, max_tokens: int = 4000):
+    async def _chat(self, system: str, user: str, max_tokens: int = 4000,
+                    model: str | None = None):
         conn = self.repo.get_connection("llm")
         if conn is None:
             raise RuntimeError("LLM connection not configured")
-        model = (conn.get("options") or {}).get("model") or DEFAULT_MODEL
-        if model == "auto":
-            model = DEFAULT_MODEL
+        # user's explicit model wins; else the per-task fallback (model arg) or default
+        model = choose_model((conn.get("options") or {}).get("model"),
+                             model or DEFAULT_MODEL)
         url = f"{conn['url'].rstrip('/')}/chat/completions"
         payload = {"model": model, "max_tokens": max_tokens, "temperature": 0,
                    "messages": [{"role": "system", "content": system},
@@ -372,8 +382,8 @@ class OpenRouterAdvisor:
         what succeeded; the result is always a validated, executable spec."""
         from ..domain.features.validate import validate_spec
         from ..domain.onboarding.feature_architect import (
-            SYSTEM_PROMPT, assemble_spec, composite_prompt, feature_prompt,
-            parse_features, parse_selections, selection_prompt)
+            ARCHITECT_MODEL_DEFAULT, SYSTEM_PROMPT, assemble_spec, composite_prompt,
+            feature_prompt, parse_features, parse_selections, selection_prompt)
         from ..domain.schemas import InfoTier
 
         try:
@@ -387,7 +397,7 @@ class OpenRouterAdvisor:
             try:
                 raw = await self._chat(SYSTEM_PROMPT,
                                        selection_prompt(batch, activities, member_ids),
-                                       max_tokens=8000)
+                                       max_tokens=8000, model=ARCHITECT_MODEL_DEFAULT)
                 selections.extend(parse_selections(raw, catalog=batch,
                                                    member_ids=member_ids))
             except Exception as exc:
@@ -400,14 +410,15 @@ class OpenRouterAdvisor:
         if kept:
             try:
                 features = parse_features(await self._chat(
-                    SYSTEM_PROMPT, feature_prompt(kept, mode)))
+                    SYSTEM_PROMPT, feature_prompt(kept, mode), model=ARCHITECT_MODEL_DEFAULT))
             except Exception as exc:
                 log.warning("feature_spec feature pass failed: %s", exc)
         if kept and features:
             try:
                 names = [f.name for f in features]
                 features += parse_features(await self._chat(
-                    SYSTEM_PROMPT, composite_prompt(kept, names, mode)))
+                    SYSTEM_PROMPT, composite_prompt(kept, names, mode),
+                    model=ARCHITECT_MODEL_DEFAULT))
             except Exception as exc:
                 log.warning("feature_spec composite pass failed: %s", exc)
 
