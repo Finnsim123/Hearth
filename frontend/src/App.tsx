@@ -16,6 +16,7 @@ import Patterns from "./pages/Patterns";
 import Models from "./pages/Models";
 import Sensors from "./pages/Sensors";
 import Methodology from "./pages/Methodology";
+import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import Login from "./components/Login";
@@ -303,6 +304,7 @@ export default function App() {
         )}
         <ConnectionLinks onClick={closeNav} />
         <NavLink to="/methodology" style={navLinkStyle} onClick={closeNav}>How it works</NavLink>
+        <NavLink to="/logs" style={navLinkStyle} onClick={closeNav}>Logs</NavLink>
         <NavLink to="/settings" end style={navLinkStyle} onClick={closeNav}>Settings</NavLink>
         <Link to="/settings#account" style={{ ...navLinkStyle({ isActive: false }) }} onClick={closeNav}>Account</Link>
 
@@ -342,6 +344,7 @@ export default function App() {
           <Route path="/models" element={<Models />} />
           <Route path="/sensors" element={<Sensors />} />
           <Route path="/methodology" element={<Methodology />} />
+          <Route path="/logs" element={<Logs />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/onboarding" element={<Onboarding />} />
         </Routes>

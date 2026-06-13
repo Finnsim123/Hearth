@@ -10,7 +10,7 @@ an explanation of how it was computed.
 ## Navigation
 
 ```
-⌂ Dashboard · ✉ Inbox · ⊞ Activities · ✦ Patterns · ⚙ Models · ⌁ Sensors · ⚙ Settings
+⌂ Dashboard · ✉ Inbox · ⊞ Activities · ✦ Patterns · ⚙ Models · ⌁ Sensors · ☰ Logs · ⚙ Settings
 ```
 
 ## 1. Onboarding wizard (first boot, resumable)
@@ -203,6 +203,16 @@ The closing wizard screen sets the expectation: go live your life, we'll ping yo
 - Appearance: theme — System (default) / Light / Dark (also cyclable from the
   nav); follows docs/DESIGN.md §7.
 - About: version, docs links, anonymized-stats opt-in (default off).
+
+## 9. Logs
+
+Recent backend activity, read from an in-memory ring buffer (the last ~2000
+records since start) so the operator can see what Hearth is doing without
+shelling into the container. Level filter (DEBUG/INFO/WARNING/ERROR), text
+search, pause/resume of the 3-second incremental poll, and copy-to-clipboard.
+Held in memory only — the container's stdout/journald keeps the durable history.
+Backed by `GET /api/logs` (session-only; never exposed to the integration token
+scope).
 
 ## API surface (consumed by the SPA)
 

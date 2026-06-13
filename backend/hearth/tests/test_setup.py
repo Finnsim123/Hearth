@@ -242,6 +242,22 @@ async def test_inventory_sync_stages_new_updates_rooms_keeps_edits(client):
     assert repo.get_setting("discovery.pending") == []
 
 
+def test_logs_endpoint_returns_recent_records(client):
+    import logging
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)        # signs us in
+    logging.getLogger("hearth.test").warning("hello-from-test-42")
+    r = c.get("/api/logs?level=INFO&limit=500")
+    assert r.status_code == 200
+    body = r.json()
+    assert "WARNING" in body["levels"]
+    msgs = [rec["message"] for rec in body["records"]]
+    assert any("hello-from-test-42" in m for m in msgs)
+    # level filter excludes the warning when we ask for ERROR only
+    only_err = c.get("/api/logs?level=ERROR").json()["records"]
+    assert all(rec["levelno"] >= logging.ERROR for rec in only_err)
+
+
 def test_factory_reset_returns_to_first_run(client):
     c, repo = client
     c.post("/api/setup/complete", json=PAYLOAD)

@@ -131,6 +131,21 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"ok": True, "family": fam,
                 "note": "applies on the next training run"}
 
+    # ── recent logs (Logs page) — session-only, never in integration scope ──
+    @api.get("/logs")
+    def get_logs(level: str = "INFO", limit: int = 500,
+                 since_seq: int | None = None) -> dict:
+        buf = deps.get("log_buffer")
+        if buf is None:
+            return {"records": [], "levels": ["DEBUG", "INFO", "WARNING", "ERROR"]}
+        min_level = logging.getLevelName(level.upper())
+        if not isinstance(min_level, int):
+            min_level = logging.INFO
+        records = buf.records(min_level=min_level, limit=max(1, min(limit, 2000)),
+                              since_seq=since_seq)
+        return {"records": records,
+                "levels": ["DEBUG", "INFO", "WARNING", "ERROR"]}
+
     # ── per-person two-way controls (override + questions opt-out) ──────────
     # Read/written by BOTH output channels: the MQTT switch/select and the HA
     # integration's switch/select, so behaviour is identical for every user.

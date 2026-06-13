@@ -53,7 +53,18 @@ def build_deps() -> dict:
 
 def create_app() -> FastAPI:
     logging.basicConfig(level=settings.log_level)
+    # In-memory ring buffer so the Logs page can show recent activity (GET
+    # /api/logs) without docker access. Attached to the root logger once.
+    from .adapters.logbuffer import RingBufferHandler
+    root = logging.getLogger()
+    if not any(isinstance(h, RingBufferHandler) for h in root.handlers):
+        log_buffer = RingBufferHandler()
+        log_buffer.setFormatter(logging.Formatter("%(message)s"))
+        root.addHandler(log_buffer)
+    else:
+        log_buffer = next(h for h in root.handlers if isinstance(h, RingBufferHandler))
     deps = build_deps()
+    deps["log_buffer"] = log_buffer
 
     app = FastAPI(title="Hearth", version="0.1.0")
     app.state.deps = deps
