@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from datetime import timedelta
+
 from hearth.domain.controls import (
-    active_override, apply_command, override_prediction, parse_command,
-    questions_disabled, set_override, set_questions_optout,
+    active_override, apply_command, override_is_labeling, override_prediction,
+    override_set_at, parse_command, questions_disabled, set_override,
+    set_questions_optout,
 )
 from hearth.domain.schemas import Prediction
 
@@ -37,6 +40,21 @@ def test_override_set_clear_validate():
     assert active_override(r, "alice") is None
     set_override(r, "alice", "home", {"movie", "home"})
     assert set_override(r, "alice", "auto", {"movie", "home"}) is None     # auto -> cleared
+
+
+def test_override_labeling_freshness():
+    r = Repo()
+    set_override(r, "alice", "movie", {"movie"})
+    at = override_set_at(r, "alice")
+    assert at is not None
+    # fresh right after setting -> labels; an hour-plus later -> pin only
+    assert override_is_labeling(r, "alice", at + timedelta(minutes=10)) is True
+    assert override_is_labeling(r, "alice", at + timedelta(minutes=90)) is False
+    # a bare-slug override (no timestamp) never labels
+    r.s["override.alice"] = "movie"
+    assert active_override(r, "alice") == "movie"
+    assert override_set_at(r, "alice") is None
+    assert override_is_labeling(r, "alice", at) is False
 
 
 def test_override_prediction():

@@ -104,7 +104,8 @@ def test_on_message_applies_control_command():
         payload = b"movie"
 
     pub._on_message(fake, None, Msg())
-    assert repo.get_setting("override.alice") == "movie"               # command applied
+    from hearth.domain.controls import active_override
+    assert active_override(repo, "alice") == "movie"                   # command applied
     assert (override_state_topic("alice"), "movie", True) in fake.published   # state echoed
 
     fake.published.clear()

@@ -223,17 +223,38 @@ def test_set_model_family_validation(world):
         set_model_family(repo, "neural_net")
 
 
-def test_manual_override_pins_state(world):
-    """The two-way override pins the published prediction to a chosen activity,
-    marked as a manual override (not a model output)."""
+def test_manual_override_pins_and_labels(world):
+    """A fresh override pins the published prediction AND writes confirmed labels
+    (source=override) so the next retrain learns from the correction."""
+    from hearth.domain.controls import set_override
     tsdb, repo, store = world
     train_person("alice", tsdb, repo, store, weeks=2)
-    repo.settings["override.alice"] = "movie"
+    set_override(repo, "alice", "movie", {a.slug for a in repo.activities()})  # stamps set_at=now
     tsdb.predictions.clear()
+    tsdb.labels.clear()
     preds = predict_person("alice", tsdb, repo, store)
     assert preds and all(
         p.predicted == "movie" and p.smoothed == "movie"
         and p.model_version == "override" and p.confidence == 1.0 for p in preds)
+    # confirmed override labels written, one per predicted window
+    assert tsdb.labels and len(tsdb.labels) == len(preds)
+    assert all(lab.label == "movie" and lab.provenance.value == "confirmed"
+               and lab.source == "override" for lab in tsdb.labels)
+
+
+def test_stale_override_pins_without_labeling(world):
+    """An override left set past the freshness window keeps pinning the display
+    but stops writing labels — a forgotten pin can't poison training."""
+    from datetime import datetime, timedelta, timezone
+    tsdb, repo, store = world
+    train_person("alice", tsdb, repo, store, weeks=2)
+    stale = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+    repo.settings["override.alice"] = {"activity": "movie", "set_at": stale}
+    tsdb.predictions.clear()
+    tsdb.labels.clear()
+    preds = predict_person("alice", tsdb, repo, store)
+    assert preds and all(p.predicted == "movie" for p in preds)   # still pinned
+    assert tsdb.labels == []                                      # but no labels written
 
 
 def test_validation_status_threshold():

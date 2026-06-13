@@ -37,11 +37,12 @@ def _rules_predict(repo, feats: pd.DataFrame, person_id: str):
 
 
 def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
-    from ..controls import active_override, override_prediction
+    from ..controls import active_override, override_is_labeling, override_prediction
     fset = active_feature_set_version(repo)
     out_pol = load_output_policy(repo)
     override = active_override(repo, person_id)
     now = datetime.now(timezone.utc)
+    label_override = bool(override) and override_is_labeling(repo, person_id, now)
     feats = tsdb.read_features(person_id, fset, now - timedelta(hours=2), now)
     if feats.empty:
         return []
@@ -141,6 +142,11 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                           parent=parent, coarse_confidence=coarse_confidence)
         if override:                       # manual override pins the published state
             pred = override_prediction(pred, override)
+            if label_override:             # …and teaches the model while it's fresh
+                from ..schemas import LabelEvent, Provenance
+                tsdb.write_label(LabelEvent(
+                    person_id=person_id, window_ts=ts.to_pydatetime(), label=override,
+                    provenance=Provenance.CONFIRMED, source="override"))
         tsdb.write_prediction(pred)
         history.insert(0, pred)
         out.append(pred)

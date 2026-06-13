@@ -13,7 +13,15 @@ policy and the inference path all share one source of truth.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 AUTO = "auto"   # the select's "no override" option
+
+# While an override is this fresh, each predicted window is also written as a
+# CONFIRMED label so the model learns from your correction. After that the
+# override keeps pinning the display but stops writing labels — so a pin you
+# forget to clear can't quietly poison training with hours of wrong "truth".
+OVERRIDE_LABEL_WINDOW_MIN = 60
 
 
 # ── questions opt-out ────────────────────────────────────────────────────────
@@ -31,21 +39,48 @@ def questions_disabled(repo, person_id: str) -> bool:
 # ── manual override ──────────────────────────────────────────────────────────
 def set_override(repo, person_id: str, value: str, valid_slugs) -> str | None:
     """Set the override to a valid activity slug, or clear it (returns the stored
-    slug, or None when cleared). "auto", empty, or an unknown slug all clear it."""
+    slug, or None when cleared). "auto", empty, or an unknown slug all clear it.
+    Stamps the set-time so labeling can be bounded to a freshness window."""
     v = (value or "").strip()
     if not v or v.lower() == AUTO or v not in set(valid_slugs):
         repo.set_setting(f"override.{person_id}", None)
         return None
-    repo.set_setting(f"override.{person_id}", v)
+    repo.set_setting(f"override.{person_id}",
+                     {"activity": v, "set_at": datetime.now(timezone.utc).isoformat()})
     return v
 
 
-def active_override(repo, person_id: str) -> str | None:
+def _override_raw(repo, person_id: str):
     try:
-        v = repo.get_setting(f"override.{person_id}")
-        return v if isinstance(v, str) and v else None
+        return repo.get_setting(f"override.{person_id}")
     except Exception:
         return None
+
+
+def active_override(repo, person_id: str) -> str | None:
+    raw = _override_raw(repo, person_id)
+    if isinstance(raw, dict):                 # {"activity", "set_at"}
+        a = raw.get("activity")
+        return a if isinstance(a, str) and a else None
+    return raw if isinstance(raw, str) and raw else None   # tolerate a bare slug
+
+
+def override_set_at(repo, person_id: str) -> datetime | None:
+    raw = _override_raw(repo, person_id)
+    if isinstance(raw, dict) and raw.get("set_at"):
+        try:
+            dt = datetime.fromisoformat(raw["set_at"])
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def override_is_labeling(repo, person_id: str, now: datetime,
+                         window_min: int = OVERRIDE_LABEL_WINDOW_MIN) -> bool:
+    """True while an active override is fresh enough to write confirmed labels."""
+    at = override_set_at(repo, person_id)
+    return at is not None and (now - at) <= timedelta(minutes=window_min)
 
 
 def override_prediction(pred, slug: str):
