@@ -68,8 +68,10 @@ class HaWebSocketSource:
     async def subscribe(self, entity_ids: list[str]) -> AsyncIterator[EntityState]:
         """Infinite stream with reconnect/backoff. Caller filters nothing —
         only the requested entity_ids are yielded."""
+        from ..domain.health import clear_issue, record_issue
         wanted = set(entity_ids)
         backoff = 1.0
+        fails = 0
         while True:
             try:
                 conn = self._conn()
@@ -79,6 +81,8 @@ class HaWebSocketSource:
                     await ws.send_json({"id": sub_id, "type": "subscribe_events",
                                         "event_type": "state_changed"})
                     backoff = 1.0
+                    fails = 0
+                    clear_issue(self.repo, "ha_unreachable")   # connected → all good
                     log.info("HA WebSocket connected (%d entities watched)", len(wanted))
                     async for msg in ws:
                         if msg.type != aiohttp.WSMsgType.TEXT:
@@ -94,7 +98,14 @@ class HaWebSocketSource:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                fails += 1
                 log.warning("HA WS disconnected (%s) — retry in %.0fs", exc, backoff)
+                if fails >= 2:          # not a one-off blip → tell the user
+                    record_issue(self.repo, "ha_unreachable",
+                                 "I can't reach Home Assistant",
+                                 "Lost the connection and I'm retrying. Check Home Assistant "
+                                 "is running and the URL/token are right.",
+                                 cta={"label": "Settings", "href": "/settings"})
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
 

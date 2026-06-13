@@ -79,6 +79,15 @@ def buddy_state(repo, tsdb) -> dict:
                       ft.get("error") or "Check the logs, then re-run setup.",
                       cta={"label": "Settings", "href": "/settings"})
 
+    # A live incident (can't reach HA, history failing, …) recorded by any
+    # component takes priority — the buddy is where problems must surface.
+    from .health import current_issue
+    issue = current_issue(repo)
+    if issue:
+        return _state(f"issue:{issue.get('kind', 'problem')}", "alert",
+                      issue.get("title", "Something's up"),
+                      issue.get("detail", ""), cta=issue.get("cta"))
+
     # Seeding (scan → sort → map) runs BEFORE fast-track and must be surfaced in
     # order, otherwise the Welcome stepper sees "importing" the whole time and
     # lights up several steps at once. Waiting on the user to approve the triage

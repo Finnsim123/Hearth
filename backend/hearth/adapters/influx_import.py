@@ -124,7 +124,7 @@ RECORDER_DAY_CHUNK = 2          # days per history request (bounds payload size)
 
 async def import_recorder_history(
     events, store: InfluxStore, bindings: list[Binding],
-    start: datetime, end: datetime,
+    start: datetime, end: datetime, repo=None,
     *, entity_batch: int = RECORDER_ENTITY_BATCH, day_chunk: int = RECORDER_DAY_CHUNK,
 ) -> dict[str, int]:
     """Backfill [start, end) from HA's recorder via the history API into
@@ -136,14 +136,17 @@ async def import_recorder_history(
     eids = list(by_eid)
     if not eids:
         return counts
+    batches = fails = 0
     cursor = start
     while cursor < end:
         cstop = min(cursor + timedelta(days=day_chunk), end)
         for i in range(0, len(eids), entity_batch):
             batch = eids[i:i + entity_batch]
+            batches += 1
             try:
                 states = await events.history(batch, cursor, cstop)
             except Exception as exc:
+                fails += 1
                 log.warning("recorder import batch failed (%s…): %s", batch[0], exc)
                 continue
             grouped: dict[str, list] = {}
@@ -159,4 +162,10 @@ async def import_recorder_history(
         cursor = cstop
     total = sum(counts.values())
     log.info("recorder warm-start: imported %d points for %d entities", total, len(eids))
+    # systematic failure (HA unreachable / history API erroring) → tell the user
+    if repo is not None and batches and fails == batches:
+        from ..domain.health import record_issue
+        record_issue(repo, "ha_unreachable", "I can't reach Home Assistant",
+                     "Couldn't read any history — check Home Assistant is up and reachable.",
+                     cta={"label": "Settings", "href": "/settings"})
     return counts

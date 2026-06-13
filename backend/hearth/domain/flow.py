@@ -63,8 +63,14 @@ def flow_state(repo, tsdb) -> dict:
 
     stalled = bool(tsdb and bindings and recent == 0 and first and (now - first) > timedelta(hours=6))
 
+    # Generic "Data source" node — the platform feeding sensors. Today that's
+    # only Home Assistant; resolved from the connection so adding another source
+    # (e.g. Homey) later just changes the name the hover reveals.
+    source_name = "Home Assistant" if _safe(lambda: repo.get_connection("ha")) else None
+
     nodes = {
-        "ha": {"label": "Home Assistant", "value": f"{len(bindings)} sensors",
+        "ha": {"label": "Data source", "source": source_name,
+               "value": f"{len(bindings)} sensors",
                "status": "ok" if bindings else "idle", "href": "/sensors", "step": "sources"},
         "raw": {"label": "Raw store", "value": _per_day(events24),
                 "status": "alert" if stalled else "ok" if events24 else "idle",

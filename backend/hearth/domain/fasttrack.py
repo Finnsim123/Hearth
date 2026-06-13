@@ -61,7 +61,7 @@ async def run_fast_track(repo, tsdb, store, notifier=None, events=None) -> None:
         if recorder:
             if events is None:
                 raise RuntimeError("recorder warm-start needs a Home Assistant connection")
-            results = await import_recorder_history(events, tsdb, bindings, start, end)
+            results = await import_recorder_history(events, tsdb, bindings, start, end, repo)
         else:
             results = await asyncio.to_thread(
                 import_history, tsdb, source_bucket, bindings, start, end)

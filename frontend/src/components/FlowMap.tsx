@@ -8,7 +8,8 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePrefersReducedMotion } from "../useMedia";
 
-type NodeData = { label: string; value: string; status: string; href: string; step: string };
+type NodeData = { label: string; value: string; status: string; href: string; step: string;
+                  source?: string | null };
 type EdgeData = { rate: number; status: string; label?: string };
 type Flow = { phase: string; tone: string; nodes: Record<string, NodeData>; edges: Record<string, EdgeData> };
 
@@ -127,14 +128,17 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
       {hover && !compact && (() => {
         const n = N[hover]; const nd = f.nodes[hover];
         const below = n.y < 100;
+        const HT = 98;   // fits title + 2-line desc + value (72 clipped the last line)
         const tx = Math.max(6, Math.min(712 - 210, cx(hover) - 105));
-        const ty = below ? n.y + n.h + 8 : n.y - 78;
+        const ty = below ? n.y + n.h + 8 : n.y - (HT + 6);
+        // the source node names its actual platform on hover (Home Assistant today)
+        const desc = nd.source ? `Reading from ${nd.source} — every sensor Hearth listens to.` : n.desc;
         return (
-          <foreignObject x={tx} y={ty} width={210} height={72} style={{ pointerEvents: "none" }}>
+          <foreignObject x={tx} y={ty} width={210} height={HT} style={{ pointerEvents: "none" }}>
             <div style={{ background: "var(--surface)", border: "1px solid var(--border)",
                           borderRadius: 10, padding: "8px 10px", boxShadow: "0 6px 20px rgba(0,0,0,0.25)" }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{nd.label}</div>
-              <div style={{ fontSize: 11.5, color: "var(--text-dim)", margin: "1px 0 3px", lineHeight: 1.3 }}>{n.desc}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-dim)", margin: "1px 0 3px", lineHeight: 1.3 }}>{desc}</div>
               <div style={{ fontSize: 11.5, color: "var(--accent)" }}>{nd.value} · open →</div>
             </div>
           </foreignObject>
