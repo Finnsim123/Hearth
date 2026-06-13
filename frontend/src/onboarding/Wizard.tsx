@@ -27,6 +27,7 @@ type WizardData = {
   llmModel: string;
   taxonomyPreset: "minimal" | "standard" | "custom";
   modelFamily: "random_forest" | "gradient_boosting" | "logistic" | "embedding";
+  inventoryCount: number;     // bindable entities from the scan — for the cost estimate
 };
 
 const empty: WizardData = {
@@ -39,6 +40,7 @@ const empty: WizardData = {
   llmModel: "openai/gpt-4o-mini",
   taxonomyPreset: "standard",
   modelFamily: "random_forest",
+  inventoryCount: 0,
 };
 
 
@@ -451,7 +453,7 @@ function StepHousehold({ d, set, next, back }: StepProps) {
   );
 }
 
-function StepInventory({ d, next, back }: StepProps & { back: () => void }) {
+function StepInventory({ d, set, next, back }: StepProps & { back: () => void }) {
   const [state, setState] = useState<"scanning" | "done" | "error">("scanning");
   const [scan, setScan] = useState<{ count: number; bindable: number; domains: number;
                                      inventory: unknown[] } | null>(null);
@@ -460,7 +462,7 @@ function StepInventory({ d, next, back }: StepProps & { back: () => void }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: d.ha.url, token: d.ha.token }) })
       .then((r) => r.json())
-      .then((j) => { setScan(j); setState("done"); })
+      .then((j) => { setScan(j); set("inventoryCount", j.bindable ?? j.count ?? 0); setState("done"); })
       .catch(() => setState("error"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -511,7 +513,24 @@ function StepInventory({ d, next, back }: StepProps & { back: () => void }) {
   );
 }
 
+type CostEst = { est_usd: number; est_total_tokens: number; model: string };
+const fmtUsd = (u: number) => (u < 0.01 ? "<$0.01" : `$${u.toFixed(2)}`);
+
 function StepAiAssist({ d, set, next, back }: StepProps) {
+  const [est, setEst] = useState<CostEst | null>(null);
+  const [estErr, setEstErr] = useState(false);
+  const hasKey = !!d.llmKey;
+  useEffect(() => {
+    if (!hasKey) { setEst(null); setEstErr(false); return; }
+    let live = true;
+    fetch("/api/feature-spec/estimate", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entity_count: d.inventoryCount, model: d.llmModel }) })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((j) => { if (live) { setEst(j); setEstErr(false); } })
+      .catch(() => { if (live) setEstErr(true); });
+    return () => { live = false; };
+  }, [hasKey, d.llmModel, d.inventoryCount]);
   return (
     <>
       <StepShell step={7} total={TOTAL} title="Want an AI to do the boring part?"
@@ -534,6 +553,28 @@ function StepAiAssist({ d, set, next, back }: StepProps) {
         {d.llmKey && (
           <input placeholder="…or type any OpenRouter model id" value={d.llmModel}
                  onChange={(e) => set("llmModel", e.target.value)} />
+        )}
+        {d.llmKey && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px",
+                        borderRadius: 10, background: "var(--surface-2)", border: "1px solid var(--border)",
+                        fontSize: 13.5 }}>
+            <Icon name="patterns" size={16} />
+            {estErr ? (
+              <span style={{ color: "var(--text-dim)" }}>
+                Couldn't estimate the cost right now — it's typically a few cents, one time.
+              </span>
+            ) : est ? (
+              <span>
+                Estimated one-time cost: <strong>~{fmtUsd(est.est_usd)}</strong>
+                <span style={{ color: "var(--text-dim)" }}>
+                  {" "}· ~{est.est_total_tokens.toLocaleString()} tokens across{" "}
+                  {d.inventoryCount.toLocaleString()} useful sensors · charged by your provider, not us
+                </span>
+              </span>
+            ) : (
+              <span style={{ color: "var(--text-dim)" }}>Estimating cost…</span>
+            )}
+          </div>
         )}
         <Callout icon="lock">
           Privacy: the model receives entity names and aggregate stats from the inventory you just

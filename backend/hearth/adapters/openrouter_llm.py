@@ -115,6 +115,26 @@ class OpenRouterAdvisor:
         except Exception:
             pass
 
+    def _add_usage(self, model: str, in_tok, out_tok) -> None:
+        """Accumulate token usage + a rough running cost for the Settings usage
+        counter. Best-effort; a recording failure must never break a call."""
+        try:
+            from ..domain.onboarding.feature_architect import _price_for
+            cur = self.repo.get_setting("llm.usage") or {}
+            pin, pout = _price_for(model)
+            it, ot = int(in_tok or 0), int(out_tok or 0)
+            now = datetime.now(timezone.utc).isoformat()
+            self.repo.set_setting("llm.usage", {
+                "calls": int(cur.get("calls", 0)) + 1,
+                "input_tokens": int(cur.get("input_tokens", 0)) + it,
+                "output_tokens": int(cur.get("output_tokens", 0)) + ot,
+                "est_usd": round(float(cur.get("est_usd", 0.0))
+                                 + it / 1e6 * pin + ot / 1e6 * pout, 6),
+                "since": cur.get("since") or now,
+                "last_at": now})
+        except Exception:
+            pass
+
     async def _chat(self, system: str, user: str, max_tokens: int = 4000,
                     model: str | None = None, task: str | None = None,
                     sent: str | None = None):
@@ -149,6 +169,7 @@ class OpenRouterAdvisor:
         finish = data["choices"][0].get("finish_reason")
         log.info("LLM call: %s in=%s out=%s finish=%s", model,
                  usage.get("prompt_tokens"), usage.get("completion_tokens"), finish)
+        self._add_usage(model, usage.get("prompt_tokens"), usage.get("completion_tokens"))
         if finish == "length":
             log.warning("LLM response TRUNCATED at max_tokens — items may be lost")
         parsed = _extract_json(data["choices"][0]["message"]["content"])

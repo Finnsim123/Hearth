@@ -119,6 +119,43 @@ async def test_chat_emits_sending_then_received_activity(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_accumulates_usage(monkeypatch):
+    """Each successful call adds to llm.usage (calls + tokens + running cost) —
+    the Settings usage counter reads this."""
+    store: dict = {}
+
+    class UsageRepo(FakeRepo):
+        def get_setting(self, key): return store.get(key)
+        def set_setting(self, key, value): store[key] = value
+
+    adv = OpenRouterAdvisor(UsageRepo())
+
+    class FakeResp:
+        status = 200
+        async def text(self):
+            return json.dumps({"choices": [{"message": {"content": "[1]"},
+                                            "finish_reason": "stop"}],
+                               "usage": {"prompt_tokens": 100, "completion_tokens": 50}})
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    class FakeSession:
+        def post(self, *a, **k): return FakeResp()
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    monkeypatch.setattr("hearth.adapters.openrouter_llm.aiohttp.ClientSession",
+                        lambda *a, **k: FakeSession())
+
+    await adv._chat("s", "u", task="t")
+    await adv._chat("s", "u", task="t")
+    u = store["llm.usage"]
+    assert u["calls"] == 2
+    assert u["input_tokens"] == 200 and u["output_tokens"] == 100
+    assert u["est_usd"] > 0 and u["since"] and u["last_at"]
+
+
+@pytest.mark.asyncio
 async def test_chat_failure_degrades_to_empty(monkeypatch):
     adv = OpenRouterAdvisor(FakeRepo())
     async def boom(system, user, max_tokens=4000, **kwargs):

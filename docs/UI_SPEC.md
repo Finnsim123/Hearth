@@ -202,7 +202,10 @@ The closing wizard screen sets the expectation: go live your life, we'll ping yo
 ## 8. Settings
 
 - Connections (HA / MQTT / Influx / LLM advisor) with test buttons and token
-  rotation; per-call cost log for the LLM.
+  rotation. The LLM card shows a running **usage counter** — total calls,
+  tokens, and an estimated running spend (from token counts at approximate
+  prices), with a reset; predictions are local and free, so this only ever
+  reflects setup and maintenance.
 - **API tokens** — mint/revoke scoped tokens for the HA integration (and
   future external consumers); plaintext shown once at mint; last-used
   timestamps; masked everywhere else (docs/SECURITY.md).

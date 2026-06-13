@@ -97,7 +97,13 @@ def build_api_router(deps: dict) -> APIRouter:
         if kind == "llm":
             out["status"] = repo.get_setting("llm.status")
             out["activity"] = repo.get_setting("llm.activity")
+            out["usage"] = repo.get_setting("llm.usage")
         return out
+
+    @api.post("/llm/usage/reset")
+    def reset_llm_usage() -> dict:
+        repo.set_setting("llm.usage", None)
+        return {"ok": True}
 
     # ── feature power mode (conservative vs full whitelist) ────────────────
     @api.get("/feature-power")

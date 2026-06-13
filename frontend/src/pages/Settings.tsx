@@ -241,6 +241,9 @@ const LLM_MODELS = [
   ["google/gemini-flash-1.5", "Gemini Flash"],
 ] as const;
 
+type LlmUsage = { calls: number; input_tokens: number; output_tokens: number;
+                  est_usd: number; since?: string; last_at?: string };
+
 function ConnectionCard({ kind, title, sub, fields }: {
   kind: string; title: string; sub: string;
   fields: { key: string; label: string; hint?: string; fromOptions?: boolean }[];
@@ -250,17 +253,23 @@ function ConnectionCard({ kind, title, sub, fields }: {
   const [state, setState] = useState<SaveState>("idle");
   const [restarting, setRestarting] = useState(false);
   const [llmStatus, setLlmStatus] = useState<{ ok: boolean; code: number } | null>(null);
+  const [usage, setUsage] = useState<LlmUsage | null>(null);
   const needsRestart = kind === "ha" || kind === "influx";
-  useEffect(() => {
-    fetch(`/api/connections/${kind}`).then(j).then((c) => {
-      if (!c.configured) return;
-      const init: Record<string, string> = { url: c.url ?? "" };
-      for (const f of fields) if (f.fromOptions) init[f.key] = c.options?.[f.key] ?? "";
-      setConn(init);
-      setMasked(c.token_masked ?? null);
-      setLlmStatus(c.status ?? null);
-    }).catch(() => {});
-  }, [kind]);
+  const loadConn = () => fetch(`/api/connections/${kind}`).then(j).then((c) => {
+    if (!c.configured) return;
+    const init: Record<string, string> = { url: c.url ?? "" };
+    for (const f of fields) if (f.fromOptions) init[f.key] = c.options?.[f.key] ?? "";
+    setConn(init);
+    setMasked(c.token_masked ?? null);
+    setLlmStatus(c.status ?? null);
+    setUsage(c.usage ?? null);
+  }).catch(() => {});
+  useEffect(() => { loadConn(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [kind]);
+  const resetUsage = async () => {
+    if (!window.confirm("Reset the AI usage counter to zero?")) return;
+    await fetch("/api/llm/usage/reset", { method: "POST" });
+    loadConn();
+  };
   const save = async () => {
     setState("saving");
     const options: Record<string, string> = {};
@@ -309,6 +318,30 @@ function ConnectionCard({ kind, title, sub, fields }: {
           </Row>
         ))}
       </div>
+      {kind === "llm" && usage && usage.calls > 0 && (
+        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12,
+                      display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Usage so far</span>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={resetUsage}>Reset</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))", gap: 10 }}>
+            {[[`~$${usage.est_usd.toFixed(usage.est_usd < 1 ? 3 : 2)}`, "estimated spend"],
+              [usage.calls.toLocaleString(), `AI call${usage.calls !== 1 ? "s" : ""}`],
+              [(usage.input_tokens + usage.output_tokens).toLocaleString(), "tokens"]].map(([n, l]) => (
+              <div key={l} style={{ textAlign: "center", padding: "8px 6px", borderRadius: 8,
+                                    background: "var(--surface-2)" }}>
+                <div style={{ fontSize: 18, fontWeight: 600 }}>{n}</div>
+                <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{l}</div>
+              </div>
+            ))}
+          </div>
+          <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+            Rough estimate from token counts at approximate prices — your provider's bill is the
+            source of truth. Predictions are local and free; this is setup &amp; maintenance only.
+          </span>
+        </div>
+      )}
       <SaveButton state={state} onClick={save} />
       {state === "ok" && needsRestart && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
