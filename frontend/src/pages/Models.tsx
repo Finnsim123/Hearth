@@ -260,6 +260,105 @@ function ModelCard({ m, onAction }: { m: Model; onAction: () => void }) {
   );
 }
 
+function MiniTrend({ accs, aucs }: { accs: (number | null)[]; aucs: (number | null)[] }) {
+  const W = 260, H = 60, pad = 4;
+  const n = accs.length;
+  if (n < 2) return null;
+  const x = (i: number) => pad + (i / (n - 1)) * (W - 2 * pad);
+  const y = (v: number) => H - pad - v * (H - 2 * pad);          // 0..1 -> bottom..top
+  const line = (vals: (number | null)[]) => vals
+    .map((v, i) => (v === null || v === undefined) ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+    .filter(Boolean).join(" ");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
+         style={{ maxWidth: W }} aria-label="metrics across versions">
+      {[0.25, 0.5, 0.75].map((g) => (
+        <line key={g} x1={pad} x2={W - pad} y1={y(g)} y2={y(g)}
+              stroke="var(--border)" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+      ))}
+      <polyline points={line(aucs)} fill="none" stroke="var(--text-dim)" strokeWidth="1.5"
+                strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+      <polyline points={line(accs)} fill="none" stroke="var(--accent)" strokeWidth="2"
+                vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+/** Per-person version history: a trend of confirmed-accuracy + AUC across model
+ *  versions (the honest "drift over time" view) plus a compact compare table. */
+function PersonHistory({ models }: { models: Model[] }) {
+  const [open, setOpen] = useState(false);
+  if (models.length < 2) return null;
+  const series = [...models].reverse();             // oldest -> newest
+  const accs = series.map((m) => m.metrics?.accuracy_confirmed
+    ?? m.metrics?.accuracy_bootstrap ?? null);
+  const aucs = series.map((m) => m.metrics?.auc_macro ?? null);
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+      <button onClick={() => setOpen(!open)}
+              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none",
+                       background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
+                       color: "var(--text)", padding: "10px 14px", textAlign: "left" }}>
+        <Icon name="models" size={15} />
+        <strong style={{ fontSize: 13.5 }}>History &amp; trend</strong>
+        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+          {models.length} versions
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--text-dim)" }}>
+          {open ? "Hide" : "Compare"}
+        </span>
+      </button>
+      {open && (
+        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12,
+                      borderTop: "1px solid var(--border)" }}>
+          <div>
+            <MiniTrend accs={accs} aucs={aucs} />
+            <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 14, height: 2, background: "var(--accent)" }} /> confirmed accuracy
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 14, height: 0, borderTop: "2px dashed var(--text-dim)" }} /> AUC
+              </span>
+              <span>oldest → newest · watch for a downward drift</span>
+            </div>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ borderCollapse: "collapse", fontSize: 12.5, width: "100%" }}>
+              <thead><tr>
+                {["version", "trained", "confirmed", "bootstrap", "AUC", "windows", "status"].map((h) => (
+                  <th key={h} style={{ textAlign: h === "version" || h === "trained" ? "left" : "right",
+                                       padding: 6, color: "var(--text-dim)", fontWeight: 500 }}>{h}</th>))}
+              </tr></thead>
+              <tbody>
+                {models.map((m) => {
+                  const mt = m.metrics ?? {};
+                  const status = m.promoted ? "live" : (mt.validation_status ?? "");
+                  return (
+                    <tr key={m.id} style={{ borderTop: "1px solid var(--border)" }}>
+                      <td style={{ padding: 6 }}><code style={{ fontSize: 11.5 }}>{m.version}</code></td>
+                      <td style={{ padding: 6, color: "var(--text-dim)" }}>
+                        {m.trained_at ? new Date(m.trained_at).toLocaleDateString() : "—"}</td>
+                      <td style={{ padding: 6, textAlign: "right" }}>{pct(mt.accuracy_confirmed)}</td>
+                      <td style={{ padding: 6, textAlign: "right", color: "var(--text-dim)" }}>{pct(mt.accuracy_bootstrap)}</td>
+                      <td style={{ padding: 6, textAlign: "right" }}>{mt.auc_macro ? mt.auc_macro.toFixed(3) : "—"}</td>
+                      <td style={{ padding: 6, textAlign: "right", color: "var(--text-dim)" }}>{mt.n_train ?? "—"}</td>
+                      <td style={{ padding: 6, textAlign: "right",
+                                   color: status === "live" ? "var(--accent)"
+                                     : status === "provisional" ? "var(--danger)" : "var(--text-dim)" }}>
+                        {status}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Models() {
   const [models, setModels] = useState<Model[] | null>(null);
   const [persons, setPersons] = useState<{ id: string; name: string }[]>([]);
@@ -314,6 +413,7 @@ export default function Models() {
                 {training === pid ? "Training…" : "Train now"}
               </button>
             </div>
+            <PersonHistory models={sorted} />
             {sorted.slice(0, 6).map((m) => <ModelCard key={m.id} m={m} onAction={load} />)}
             {sorted.length > 6 && (
               <p style={{ fontSize: 12.5, color: "var(--text-dim)", margin: 0 }}>
