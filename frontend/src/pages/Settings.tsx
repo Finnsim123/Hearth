@@ -7,8 +7,10 @@
  */
 import { useEffect, useRef, useState } from "react";
 import Avatar, { PRESET_HUES } from "../components/Avatar";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import { applyTheme, getTheme, type ThemeMode } from "../theme";
+import Logs from "./Logs";
+import Methodology from "./Methodology";
 
 // ── shared bits ─────────────────────────────────────────────────────────────
 
@@ -801,20 +803,31 @@ function DangerZone() {
   );
 }
 
-export default function Settings() {
-  useEffect(() => {
-    if (window.location.hash) {
-      const el = document.querySelector(window.location.hash);
-      if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
-    }
-  }, []);
+// ── settings hub (tiles → sections) ──────────────────────────────────────────
+
+type SectionKey =
+  | "household" | "model" | "integrations" | "logs" | "account" | "general" | "methodology";
+
+const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }[] = [
+  { key: "household", icon: "household", title: "Household",
+    desc: "People, avatars, notifications and daily question budgets." },
+  { key: "model", icon: "models", title: "Model",
+    desc: "Data sharing, feature power, model family, clock trust and commit threshold." },
+  { key: "integrations", icon: "flow", title: "Integrations",
+    desc: "Home Assistant, InfluxDB, the AI assistant, and API tokens for the HA integration." },
+  { key: "logs", icon: "monitor", title: "Logs",
+    desc: "Recent backend activity, live." },
+  { key: "account", icon: "user", title: "Account",
+    desc: "Your password and sign-in." },
+  { key: "general", icon: "settings", title: "General",
+    desc: "Appearance, system info, updates and the danger zone." },
+  { key: "methodology", icon: "info", title: "How it works",
+    desc: "The Hearth pipeline, end to end." },
+];
+
+function ConnectionsSection() {
   return (
-    <section style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 760 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <Icon name="settings" size={22} />
-        <h2 style={{ margin: 0 }}>Settings</h2>
-      </div>
-      <Household />
+    <>
       <ConnectionCard kind="ha" title="Home Assistant"
         sub="Where Hearth reads sensors and sends notifications."
         fields={[
@@ -836,15 +849,80 @@ export default function Settings() {
           { key: "token", label: "API key", hint: "Leave empty to keep the current one." },
         ]} />
       <ApiTokens />
-      <StatsConsent />
-      <FeaturePower />
-      <ModelFamily />
-      <ModelBehaviour />
-      <OutputPolicy />
-      <Appearance />
-      <div id="account"><Account /></div>
-      <System />
-      <DangerZone />
+    </>
+  );
+}
+
+function SectionBody({ section }: { section: SectionKey }) {
+  switch (section) {
+    case "household": return <Household />;
+    case "model": return (<><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /></>);
+    case "integrations": return <ConnectionsSection />;
+    case "logs": return <Logs />;
+    case "account": return <Account />;
+    case "general": return (<><Appearance /><System /><DangerZone /></>);
+    case "methodology": return <Methodology />;
+  }
+}
+
+const hashToSection = (): SectionKey | null => {
+  const h = window.location.hash.replace(/^#/, "");
+  return SECTIONS.some((s) => s.key === h) ? (h as SectionKey) : null;
+};
+
+export default function Settings() {
+  const [section, setSection] = useState<SectionKey | null>(hashToSection);
+  useEffect(() => {
+    const onHash = () => setSection(hashToSection());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const open = (k: SectionKey) => { window.location.hash = k; setSection(k); };
+  const back = () => { window.location.hash = ""; setSection(null); };
+
+  if (section) {
+    const meta = SECTIONS.find((s) => s.key === section)!;
+    return (
+      <section style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 760 }}>
+        <button onClick={back}
+          style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6,
+                   background: "none", border: "none", cursor: "pointer", padding: "2px 0",
+                   color: "var(--text-dim)", fontSize: 13.5 }}>
+          <Icon name="rollback" size={15} /> All settings
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Icon name={meta.icon} size={22} />
+          <h2 style={{ margin: 0 }}>{meta.title}</h2>
+        </div>
+        {SectionBody({ section })}
+      </section>
+    );
+  }
+
+  return (
+    <section style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 760 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Icon name="settings" size={22} />
+        <h2 style={{ margin: 0 }}>Settings</h2>
+      </div>
+      <div style={{ display: "grid", gap: 14,
+                    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+        {SECTIONS.map((s) => (
+          <button key={s.key} className="card" onClick={() => open(s.key)}
+            style={{ textAlign: "left", cursor: "pointer", padding: 18, display: "flex",
+                     flexDirection: "column", gap: 8, border: "1px solid var(--border)",
+                     background: "var(--surface)" }}>
+            <span style={{ width: 38, height: 38, borderRadius: 10, display: "flex",
+                           alignItems: "center", justifyContent: "center",
+                           background: "color-mix(in srgb, var(--accent) 14%, transparent)",
+                           color: "var(--accent)" }}>
+              <Icon name={s.icon} size={20} />
+            </span>
+            <span style={{ fontSize: 15.5, fontWeight: 600 }}>{s.title}</span>
+            <span style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.45 }}>{s.desc}</span>
+          </button>
+        ))}
+      </div>
     </section>
   );
 }

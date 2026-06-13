@@ -3,7 +3,7 @@
  * Each page is a stub matching docs/UI_SPEC.md; implement in roadmap order.
  */
 import { useEffect, useState } from "react";
-import { Routes, Route, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, NavLink, useLocation, useNavigate } from "react-router-dom";
 import "./theme.css";
 import { applyTheme, getTheme, initTheme, type ThemeMode } from "./theme";
 import { useIsMobile } from "./useMedia";
@@ -142,23 +142,22 @@ function ConnectionLinks({ onClick }: { onClick: () => void }) {
   }, []);
   if (!ha && !influx) return null;
   const tile: React.CSSProperties = {
-    display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
-    borderRadius: 8, textDecoration: "none", color: "var(--text-dim)", fontSize: 13,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    width: 34, height: 34, borderRadius: 8, textDecoration: "none",
+    border: "1px solid var(--border)", background: "var(--surface-2)",
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+    <div style={{ display: "flex", gap: 8, padding: "2px 2px 4px" }}>
       {ha && (
         <a href={ha} target="_blank" rel="noreferrer" style={tile} onClick={onClick}
-           title={`Open your data provider — ${ha}`}>
+           title={`Open Home Assistant — ${ha}`} aria-label="Open Home Assistant">
           <LogoImg src="/logos/home-assistant.svg" alt="Home Assistant" fallback={<HaLogo />} />
-          Home Assistant
         </a>
       )}
       {influx && (
         <a href={influx} target="_blank" rel="noreferrer" style={tile} onClick={onClick}
-           title={`Open InfluxDB — ${influx}`}>
+           title={`Open InfluxDB — ${influx}`} aria-label="Open InfluxDB">
           <LogoImg src="/logos/influxdb.svg" alt="InfluxDB" fallback={<InfluxLogo />} />
-          InfluxDB
         </a>
       )}
     </div>
@@ -306,11 +305,8 @@ export default function App() {
             Update ({update.behind})
           </button>
         )}
-        <ConnectionLinks onClick={closeNav} />
-        <NavLink to="/methodology" style={navLinkStyle} onClick={closeNav}>How it works</NavLink>
-        <NavLink to="/logs" style={navLinkStyle} onClick={closeNav}>Logs</NavLink>
         <NavLink to="/settings" end style={navLinkStyle} onClick={closeNav}>Settings</NavLink>
-        <Link to="/settings#account" style={{ ...navLinkStyle({ isActive: false }) }} onClick={closeNav}>Account</Link>
+        <ConnectionLinks onClick={closeNav} />
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                       gap: 8, marginTop: 8, paddingTop: 10, paddingLeft: 2,

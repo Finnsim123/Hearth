@@ -10,8 +10,13 @@ an explanation of how it was computed.
 ## Navigation
 
 ```
-⌂ Dashboard · ✉ Inbox · ⊞ Activities · ✦ Patterns · ⚙ Models · ⌁ Sensors · ☰ Logs · ⚙ Settings
+⌂ Dashboard · ✉ Inbox · ⊞ Activities · ✦ Patterns · ⚙ Models · ⌁ Sensors · ⚙ Settings
 ```
+
+The sidebar footer is intentionally minimal: **Settings**, the theme toggle,
+**Sign out**, and small clickable **Home Assistant / InfluxDB logos** (icon-only,
+side by side) that open each tool. Everything else — Logs, Account, How it works
+— lives inside Settings as tiles, not as top-level nav items.
 
 ## 1. Onboarding wizard (first boot, resumable)
 
@@ -201,6 +206,22 @@ The closing wizard screen sets the expectation: go live your life, we'll ping yo
 
 ## 8. Settings
 
+Settings is a **hub**: the landing view is a grid of tiles, each opening one
+section (selection tracked in the URL hash, so the browser Back button returns
+to the hub). The tiles are:
+
+- **Household** — the per-person notification controls below.
+- **Model** — data sharing, feature power, model family, clock trust, commit
+  threshold.
+- **Integrations** — Home Assistant, InfluxDB, the AI assistant, and the HA
+  integration's API tokens.
+- **Logs** — §9 below, rendered inline.
+- **Account** — password and sign-in.
+- **General** — appearance, system info, updates, danger zone.
+- **How it works** — the methodology page, rendered inline.
+
+The controls within those sections:
+
 - Connections (HA / MQTT / Influx / LLM advisor) with test buttons and token
   rotation. The LLM card shows a running **usage counter** — total calls,
   tokens, and an estimated running spend (from token counts at approximate
@@ -227,7 +248,7 @@ The closing wizard screen sets the expectation: go live your life, we'll ping yo
   nav); follows docs/DESIGN.md §7.
 - About: version, docs links, anonymized-stats opt-in (default off).
 
-## 9. Logs
+## 9. Logs (a Settings section)
 
 Recent backend activity, read from an in-memory ring buffer (the last ~2000
 records since start) so the operator can see what Hearth is doing without
