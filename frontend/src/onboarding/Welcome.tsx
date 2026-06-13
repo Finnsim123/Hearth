@@ -21,6 +21,9 @@ type Buddy = { phase: string; tone: string; title: string; detail: string;
                progress: number | null };
 type FlowNode = { label: string; value: string; status: string };
 type Flow = { phase: string; nodes: Record<string, FlowNode> };
+type LlmActivity = { phase: "sending" | "received" | "error"; task: string;
+                     model?: string; sent?: string; items?: number };
+type Llm = { configured: boolean; model?: string; activity?: LlmActivity | null };
 type Binding = { id: number; name: string; role: string; room: string | null;
                  person_id: string | null; enabled: boolean };
 
@@ -201,7 +204,7 @@ export default function Welcome() {
   const [buddy, setBuddy] = useState<Buddy | null>(null);
   const [flow, setFlow] = useState<Flow | null>(null);
   const [bindings, setBindings] = useState<Binding[]>([]);
-  const [llm, setLlm] = useState<{ configured: boolean; model?: string } | null>(null);
+  const [llm, setLlm] = useState<Llm | null>(null);
   const [names, setNames] = useState<string[]>(flag.members ?? []);
   const [personMap, setPersonMap] = useState<Record<string, string>>({});
   const sawSetup = useRef(false);
@@ -210,8 +213,6 @@ export default function Welcome() {
     fetch("/api/bindings").then((r) => r.json())
       .then((b: Binding[]) => setBindings((b || []).filter((x) => x.enabled).slice(0, 50)))
       .catch(() => {});
-    fetch("/api/connections/llm").then((r) => r.json())
-      .then((c) => setLlm({ configured: !!c.configured, model: c.options?.model })).catch(() => {});
     fetch("/api/persons").then((r) => r.json())
       .then((ps: { id: string; name: string }[]) => {
         const list = ps || [];
@@ -226,12 +227,16 @@ export default function Welcome() {
       Promise.all([
         fetch("/api/buddy").then((r) => r.json()).catch(() => null),
         fetch("/api/flow").then((r) => r.json()).catch(() => null),
-      ]).then(([b, f]) => {
+        fetch("/api/connections/llm").then((r) => r.json()).catch(() => null),
+      ]).then(([b, f, c]) => {
         if (!alive) return;
         if (b) { setBuddy(b); if (String(b.phase).startsWith("setup:")) sawSetup.current = true; }
         if (f) setFlow(f);
+        if (c) setLlm({ configured: !!c.configured, model: c.options?.model, activity: c.activity });
         const busy = b && String(b.phase).startsWith("setup:");
-        setTimeout(tick, busy ? 2000 : 5000);
+        // poll fast while the LLM is mid-call so "sending → received" is visible
+        const llmBusy = c && c.activity && c.activity.phase === "sending";
+        setTimeout(tick, busy || llmBusy ? 1500 : 5000);
       });
     };
     tick();
@@ -278,6 +283,20 @@ export default function Welcome() {
   const scanActive = scanStatus === "active";
   const scanDone = scanStatus === "done";
 
+  // live narration of the AI calls: "sending off ... now" → "received ... now"
+  const act = llm?.activity;
+  const model = llm?.model && llm.model !== "auto" ? llm.model : "the LLM";
+  const aiDetail = (() => {
+    if (act?.phase === "sending")
+      return `Sending to ${model} now — ${act.task.toLowerCase()}${act.sent ? ` (${act.sent})` : ""}`;
+    if (act?.phase === "received")
+      return `Receiving ${act.task.toLowerCase()} now${act.items != null ? ` — ${act.items} back` : ""}`;
+    if (act?.phase === "error")
+      return "AI call hit a snag — continuing with the built-in fallback";
+    if (inSetup && pos >= 3) return "Done — your AI suggestions are in";
+    return `${model} is naming roles and proposing features`;
+  })();
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
                   alignItems: "center", padding: "48px 18px 80px",
@@ -305,7 +324,7 @@ export default function Welcome() {
 
         {llm?.configured && (
           <StageRow title="Reading your sensors with AI"
-            detail={llm.model ? `${llm.model} is naming roles and proposing features` : "Proposing smarter sensor mappings"}
+            detail={aiDetail}
             status={inSetup ? (pos >= 3 ? "done" : "active") : "done"} />
         )}
 

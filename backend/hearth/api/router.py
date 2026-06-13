@@ -96,6 +96,7 @@ def build_api_router(deps: dict) -> APIRouter:
                "token_masked": security.mask(conn["token"]) if conn["token"] else None}
         if kind == "llm":
             out["status"] = repo.get_setting("llm.status")
+            out["activity"] = repo.get_setting("llm.activity")
         return out
 
     # ── feature power mode (conservative vs full whitelist) ────────────────

@@ -43,7 +43,7 @@ async def test_propose_feature_spec_orchestration(monkeypatch):
     ]
     calls = {"n": 0}
 
-    async def fake_chat(system, user, max_tokens=4000, model=None):
+    async def fake_chat(system, user, max_tokens=4000, model=None, **kwargs):
         out = responses[calls["n"]]
         calls["n"] += 1
         return out
@@ -76,7 +76,7 @@ async def test_revise_feature_spec_applies_delta(monkeypatch):
         features=[FeatureDef(name="old_feat", transform="occupancy_fraction",
                              inputs=["binary_sensor.stove"], info_tier=InfoTier.DISCRETE_EVENT_GATE)])
 
-    async def fake_chat(system, user, max_tokens=4000, model=None):
+    async def fake_chat(system, user, max_tokens=4000, model=None, **kwargs):
         return {"add": [{"name": "stove_on", "transform": "any_active",
                          "inputs": ["binary_sensor.stove"], "info_tier": "T1"}],
                 "drop": ["old_feat"], "reason": "stove separates cooking/eating"}
@@ -98,7 +98,7 @@ async def test_revise_feature_spec_unchanged_on_failure(monkeypatch):
         features=[FeatureDef(name="old_feat", transform="occupancy_fraction",
                              inputs=["binary_sensor.stove"], info_tier=InfoTier.DISCRETE_EVENT_GATE)])
 
-    async def boom(system, user, max_tokens=4000, model=None):
+    async def boom(system, user, max_tokens=4000, model=None, **kwargs):
         raise RuntimeError("down")
 
     monkeypatch.setattr(adv, "_chat", boom)
@@ -110,7 +110,7 @@ async def test_revise_feature_spec_unchanged_on_failure(monkeypatch):
 async def test_propose_feature_spec_degrades_on_chat_failure(monkeypatch):
     adv = OpenRouterAdvisor(FakeRepo())
 
-    async def boom(system, user, max_tokens=4000, model=None):
+    async def boom(system, user, max_tokens=4000, model=None, **kwargs):
         raise RuntimeError("LLM down")
 
     monkeypatch.setattr(adv, "_chat", boom)

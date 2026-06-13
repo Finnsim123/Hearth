@@ -1,6 +1,8 @@
 """LLM advisor: validation is the contract — garbage in, floor out."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from hearth.adapters.openrouter_llm import (
@@ -21,7 +23,7 @@ class FakeRepo:
 
 def _advisor(monkeypatch, canned):
     adv = OpenRouterAdvisor(FakeRepo())
-    async def fake_chat(system, user, max_tokens=4000):
+    async def fake_chat(system, user, max_tokens=4000, **kwargs):
         return canned
     monkeypatch.setattr(adv, "_chat", fake_chat)
     return adv
@@ -79,9 +81,47 @@ async def test_annotate_windows_bounds(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_emits_sending_then_received_activity(monkeypatch):
+    """The live Welcome screen reads llm.activity — _chat must write 'sending'
+    before the request and 'received' (with item count) after the response."""
+    events = []
+
+    class RecRepo(FakeRepo):
+        def set_setting(self, key, value):
+            if key == "llm.activity":
+                events.append(value)
+
+    adv = OpenRouterAdvisor(RecRepo())
+
+    class FakeResp:
+        status = 200
+        async def text(self):
+            return json.dumps({"choices": [{"message": {"content": "[1, 2, 3]"},
+                                            "finish_reason": "stop"}],
+                               "usage": {"completion_tokens": 7}})
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    class FakeSession:
+        def post(self, *a, **k): return FakeResp()
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    monkeypatch.setattr("hearth.adapters.openrouter_llm.aiohttp.ClientSession",
+                        lambda *a, **k: FakeSession())
+
+    out = await adv._chat("sys", "usr", task="Mapping sensors to roles",
+                          sent="3 entities")
+    assert out == [1, 2, 3]
+    assert [e["phase"] for e in events] == ["sending", "received"]
+    assert events[0]["sent"] == "3 entities"
+    assert events[1]["items"] == 3
+
+
+@pytest.mark.asyncio
 async def test_chat_failure_degrades_to_empty(monkeypatch):
     adv = OpenRouterAdvisor(FakeRepo())
-    async def boom(system, user, max_tokens=4000):
+    async def boom(system, user, max_tokens=4000, **kwargs):
         raise RuntimeError("api down")
     monkeypatch.setattr(adv, "_chat", boom)
     assert await adv.propose_rules(BINDINGS, ACTS) == []

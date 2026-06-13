@@ -102,14 +102,29 @@ class OpenRouterAdvisor:
         except Exception:
             pass
 
+    def _set_activity(self, phase: str, task: str | None, **extra) -> None:
+        """Narrate the current LLM call for the live Welcome screen: what we're
+        sending and what we got back. A single last-event setting (llm.activity);
+        no-op when the caller didn't label the task."""
+        if not task:
+            return
+        try:
+            self.repo.set_setting("llm.activity", {
+                "phase": phase, "task": task,
+                "at": datetime.now(timezone.utc).isoformat(), **extra})
+        except Exception:
+            pass
+
     async def _chat(self, system: str, user: str, max_tokens: int = 4000,
-                    model: str | None = None):
+                    model: str | None = None, task: str | None = None,
+                    sent: str | None = None):
         conn = self.repo.get_connection("llm")
         if conn is None:
             raise RuntimeError("LLM connection not configured")
         # user's explicit model wins; else the per-task fallback (model arg) or default
         model = choose_model((conn.get("options") or {}).get("model"),
                              model or DEFAULT_MODEL)
+        self._set_activity("sending", task, model=model, sent=sent)
         url = f"{conn['url'].rstrip('/')}/chat/completions"
         payload = {"model": model, "max_tokens": max_tokens, "temperature": 0,
                    "messages": [{"role": "system", "content": system},
@@ -122,10 +137,12 @@ class OpenRouterAdvisor:
                     text = await r.text()
                     if r.status >= 400:
                         self._set_status(False, r.status, text[:200])
+                        self._set_activity("error", task, model=model)
                         raise RuntimeError(f"LLM HTTP {r.status}: {text[:120]}")
                     data = json.loads(text)
         except aiohttp.ClientError as exc:
             self._set_status(False, 0, str(exc)[:160])
+            self._set_activity("error", task, model=model)
             raise
         self._set_status(True, 200, None)
         usage = data.get("usage", {})
@@ -134,7 +151,11 @@ class OpenRouterAdvisor:
                  usage.get("prompt_tokens"), usage.get("completion_tokens"), finish)
         if finish == "length":
             log.warning("LLM response TRUNCATED at max_tokens — items may be lost")
-        return _extract_json(data["choices"][0]["message"]["content"])
+        parsed = _extract_json(data["choices"][0]["message"]["content"])
+        items = len(parsed) if isinstance(parsed, (list, dict)) else None
+        self._set_activity("received", task, model=model, items=items,
+                           out_tokens=usage.get("completion_tokens"))
+        return parsed
 
     # ── bindings: the name->role brain ──────────────────────────────────────
     async def propose_bindings(self, inventory: list[dict],
@@ -170,8 +191,11 @@ class OpenRouterAdvisor:
         seen: set[str] = set()
         for i in range(0, len(lines), 300):           # chunk large homes
             try:
-                items = await self._chat(system, "\n".join(lines[i:i + 300]),
-                                         max_tokens=8000)
+                chunk = lines[i:i + 300]
+                items = await self._chat(system, "\n".join(chunk),
+                                         max_tokens=8000,
+                                         task="Mapping sensors to roles",
+                                         sent=f"{len(chunk)} entities")
             except Exception as exc:
                 log.warning("propose_bindings chunk failed: %s", exc)
                 continue
@@ -232,7 +256,9 @@ class OpenRouterAdvisor:
             "candidates": [{"entity_id": e["entity_id"],
                             "name": e.get("friendly_name") or ""} for e in cands]})
         try:
-            res = await self._chat(system, user, max_tokens=1500)
+            res = await self._chat(system, user, max_tokens=1500,
+                                   task="Matching people to their trackers",
+                                   sent=f"{len(members)} member{'s' if len(members) != 1 else ''}")
         except Exception as exc:
             log.warning("match_person_entities failed: %s", exc)
             return {}
@@ -259,7 +285,9 @@ class OpenRouterAdvisor:
             "object mapping every input string to its canonical name: "
             "{\"input\": \"Canonical\"}.")
         try:
-            res = await self._chat(system, json.dumps(rooms), max_tokens=2000)
+            res = await self._chat(system, json.dumps(rooms), max_tokens=2000,
+                                   task="Tidying room names",
+                                   sent=f"{len(rooms)} rooms")
         except Exception as exc:
             log.warning("propose_room_canon failed: %s", exc)
             return {}
@@ -277,7 +305,8 @@ class OpenRouterAdvisor:
             "sleeping, away, home. Reply ONLY JSON: [{\"slug\": snake_case, "
             "\"name\": str, \"phrase\": verb_phrase_for_notifications}]")
         try:
-            items = await self._chat(system, f"domains: {', '.join(domains)}")
+            items = await self._chat(system, f"domains: {', '.join(domains)}",
+                                     task="Proposing activities to recognise")
         except Exception as exc:
             log.warning("propose_taxonomy failed: %s", exc)
             return []
@@ -314,7 +343,9 @@ class OpenRouterAdvisor:
         user = (f"Activities: {act_desc}\n\nBindings:\n{binding_desc}\n\n"
                 f"Allowed features:\n{', '.join(sorted(feats))}")
         try:
-            items = await self._chat(system, user)
+            items = await self._chat(system, user,
+                                     task="Writing labeling rules",
+                                     sent=f"{len(bindings)} sensors")
         except Exception as exc:
             log.warning("propose_rules failed: %s", exc)
             return []
@@ -347,7 +378,9 @@ class OpenRouterAdvisor:
             chunk = window_summaries[i:i + 200]
             user = "\n".join(f"{i + j}: {json.dumps(w)}" for j, w in enumerate(chunk))
             try:
-                items = await self._chat(system, user)
+                items = await self._chat(system, user,
+                                         task="Labeling history windows",
+                                         sent=f"{len(chunk)} windows")
             except Exception as exc:
                 log.warning("annotate chunk failed: %s", exc)
                 continue
@@ -397,7 +430,9 @@ class OpenRouterAdvisor:
             try:
                 raw = await self._chat(SYSTEM_PROMPT,
                                        selection_prompt(batch, activities, member_ids),
-                                       max_tokens=8000, model=ARCHITECT_MODEL_DEFAULT)
+                                       max_tokens=8000, model=ARCHITECT_MODEL_DEFAULT,
+                                       task="Choosing useful sensors",
+                                       sent=f"{len(batch)} entities")
                 selections.extend(parse_selections(raw, catalog=batch,
                                                    member_ids=member_ids))
             except Exception as exc:
@@ -410,7 +445,8 @@ class OpenRouterAdvisor:
         if kept:
             try:
                 features = parse_features(await self._chat(
-                    SYSTEM_PROMPT, feature_prompt(kept, mode), model=ARCHITECT_MODEL_DEFAULT))
+                    SYSTEM_PROMPT, feature_prompt(kept, mode), model=ARCHITECT_MODEL_DEFAULT,
+                    task="Designing features", sent=f"{len(kept)} sensors"))
             except Exception as exc:
                 log.warning("feature_spec feature pass failed: %s", exc)
         if kept and features:
@@ -418,7 +454,8 @@ class OpenRouterAdvisor:
                 names = [f.name for f in features]
                 features += parse_features(await self._chat(
                     SYSTEM_PROMPT, composite_prompt(kept, names, mode),
-                    model=ARCHITECT_MODEL_DEFAULT))
+                    model=ARCHITECT_MODEL_DEFAULT,
+                    task="Combining features", sent=f"{len(names)} features"))
             except Exception as exc:
                 log.warning("feature_spec composite pass failed: %s", exc)
 
