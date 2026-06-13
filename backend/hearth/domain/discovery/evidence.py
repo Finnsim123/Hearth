@@ -67,6 +67,30 @@ def _cadence(windows: list[datetime], tz: str) -> dict | None:
     return {"weekday_frac": round(frac, 2), "phrase": phrase}
 
 
+def _examples(windows: list[datetime], tz: str, k: int = 4) -> list[dict]:
+    """A few concrete moments, spread across the cluster, formatted in local time
+    ("Tue 2 Jun, 15:10"). Recognition beats abstraction — naming "what were you
+    doing here" is far easier than naming a statistical blob."""
+    if not windows:
+        return []
+    try:
+        zone = ZoneInfo(tz)
+    except Exception:
+        zone = timezone.utc
+    ordered = sorted(windows)
+    if len(ordered) <= k:
+        picks = ordered
+    else:                                  # evenly spaced across the span
+        step = (len(ordered) - 1) / (k - 1)
+        picks = [ordered[round(i * step)] for i in range(k)]
+    out = []
+    for w in picks:
+        local = w.astimezone(zone) if w.tzinfo else w.replace(tzinfo=timezone.utc).astimezone(zone)
+        out.append({"ts": w.isoformat(),
+                    "when": local.strftime("%a %-d %b, %H:%M")})
+    return out
+
+
 def _adjacency(card: ClusterCard, tsdb, names: dict[str, str]) -> dict | None:
     """What named activity tends to sit just before / just after this pattern."""
     if not card.example_windows or tsdb is None:
@@ -167,5 +191,6 @@ def build_evidence(card: ClusterCard, repo, tsdb) -> dict:
         "cadence": cadence,
         "adjacency": _adjacency(card, tsdb, act_names),
         "contrast": _contrast(card, repo),
+        "examples": _examples(card.example_windows, tz),
         "summary": _summary(plain, when, where, cadence),
     }

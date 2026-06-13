@@ -27,6 +27,7 @@ type Evidence = {
   cadence: { weekday_frac: number; phrase: string } | null;
   adjacency: { before?: string; after?: string } | null;
   contrast: { slug: string; name: string; shared: number } | null;
+  examples: { ts: string; when: string }[];
   summary: string;
 };
 
@@ -70,6 +71,29 @@ function EvidenceBlock({ ev }: { ev: Evidence }) {
           {ev.contrast && <>Looks a lot like <strong>{ev.contrast.name}</strong> — maybe the same thing.</>}
         </p>
       )}
+    </div>
+  );
+}
+
+/** Concrete moments this pattern happened — recognition beats abstraction.
+ * "What were YOU doing on Tue at 15:10?" is far easier to answer than "name
+ * this statistical cluster". */
+function ExampleMoments({ examples }: { examples: { ts: string; when: string }[] }) {
+  if (!examples.length) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={{ fontSize: 13, color: "var(--text)" }}>
+        A few times this happened — what were you up to?
+      </span>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {examples.map((e) => (
+          <span key={e.ts} style={{ fontSize: 12.5, padding: "3px 10px", borderRadius: 8,
+                       background: "var(--surface-2)", border: "1px solid var(--border)",
+                       color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+            {e.when}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -152,12 +176,15 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
         </span>
       </div>
       {ev && <EvidenceBlock ev={ev} />}
+      {ev && ev.examples.length > 0 && <ExampleMoments examples={ev.examples} />}
       <SignatureLine plain={ev?.plain} raw={c.signature} />
       <HourHistogram hist={c.hour_histogram} />
+
+      {/* Suggestions first — one tap to accept the AI's read of the moments above */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         {suggestions.length > 0 ? (
           <>
-            <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>Sound right?</span>
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>Was it…</span>
             {suggestions.map((s, i) => (
               <button key={i} disabled={busy} onClick={() => acceptSuggestion(s)}
                       title={`${s.rationale}${s.slug ? "" : " (new activity)"} · ${Math.round(s.confidence * 100)}% sure`}
@@ -176,9 +203,11 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
           </button>
         )}
       </div>
+
+      {/* …or say it yourself */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <select value={choice} onChange={(e) => setChoice(e.target.value)}>
-          <option value="">What is this?</option>
+        <select value={choice} onChange={(e) => setChoice(e.target.value)} aria-label="Activity">
+          <option value="">Pick an activity…</option>
           {activities.map((a) => <option key={a.slug} value={a.slug}>{a.name}</option>)}
           <option value="__new__">+ New activity…</option>
         </select>
@@ -187,28 +216,41 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
                  onChange={(e) => setNewName(e.target.value)} style={{ maxWidth: 180 }} />
         )}
         <button className="btn btn-primary" disabled={!ready || busy} onClick={name}>
-          {busy ? "Labeling…" : "Name it"}
+          {busy ? "Labeling…" : "That's it — name it"}
         </button>
-        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}
-                style={{ color: "var(--text-dim)" }}>
-          Not a thing — dismiss
-        </button>
+      </div>
+
+      {/* Not-an-activity and merge are first-class outcomes, not afterthoughts:
+          many clusters are everyday downtime, or a variant of something named. */}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center",
+                    paddingTop: 4, borderTop: "1px solid var(--border)" }}>
         {siblings.length > 0 && (
-          <select defaultValue="" disabled={busy} title="Fold this pattern into another one"
-                  onChange={async (e) => {
-                    if (!e.target.value) return;
-                    setBusy(true);
-                    await post(`/api/clusters/${c.id}/merge`, { into: Number(e.target.value) });
-                    onChange();
-                  }}>
-            <option value="">Same as…</option>
-            {siblings.map((s2) => (
-              <option key={s2.id} value={s2.id}>
-                #{s2.id} — {s2.signature.slice(0, 2).map(([f]) => f).join(" + ")}
-              </option>
-            ))}
-          </select>
+          <label style={{ display: "flex", alignItems: "center", gap: 6,
+                          fontSize: 12.5, color: "var(--text-dim)" }}>
+            Part of:
+            <select defaultValue="" disabled={busy} title="Fold this pattern into another one"
+                    onChange={async (e) => {
+                      if (!e.target.value) return;
+                      setBusy(true);
+                      await post(`/api/clusters/${c.id}/merge`, { into: Number(e.target.value) });
+                      onChange();
+                    }}>
+              <option value="">another pattern…</option>
+              {siblings.map((s2) => (
+                <option key={s2.id} value={s2.id}>
+                  {s2.suggestions?.[0]?.name
+                    ?? s2.signature.slice(0, 2).map(([f]) => f).join(" + ")}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
+        <button disabled={busy} onClick={dismiss}
+                style={{ fontSize: 12.5, color: "var(--text-dim)", background: "none",
+                         border: "none", cursor: "pointer", padding: 0,
+                         textDecoration: "underline", marginLeft: siblings.length ? 0 : "auto" }}>
+          Not an activity — dismiss
+        </button>
       </div>
       {msg && <p style={{ margin: 0, fontSize: 13, color: "var(--accent)" }}>{msg}</p>}
     </div>
@@ -252,10 +294,11 @@ export default function Patterns() {
         </button>
       </div>
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)", maxWidth: 640 }}>
-        Hearth clusters recent sensor windows it can't explain and shows you the recurring shapes
-        it found — when they happen and which sensors define them. Naming one labels all its
-        windows at once (your confirmed answers still outrank these). Runs automatically every
-        Saturday night, right before Sunday's retrain.
+        Hearth clusters recent sensor windows it can't explain into recurring shapes. For each, it
+        shows when and where it happened and a few concrete moments — so you can recognise what you
+        were doing and name it (or pick one of the AI's guesses). Naming one labels all its windows
+        at once; not everything is an activity, so dismissing is fine too. Confirmed answers always
+        outrank these. Runs automatically every Saturday night, right before Sunday's retrain.
       </p>
       {runMsg && <p style={{ margin: 0, fontSize: 13.5, color: "var(--accent)" }}>{runMsg}</p>}
       {clusters === null && <p style={{ color: "var(--text-dim)" }}>Loading…</p>}

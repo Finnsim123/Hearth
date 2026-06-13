@@ -102,6 +102,10 @@ def test_build_evidence_when_where_cadence_adjacency():
     assert ev["adjacency"]["before"] == "Lunch"
     assert ev["adjacency"]["after"] == "Cooking"
     assert "afternoon" in ev["summary"].lower()
+    # concrete moments, spread across the cluster, in local time
+    assert 1 <= len(ev["examples"]) <= 4
+    assert all("when" in e and "ts" in e for e in ev["examples"])
+    assert ev["examples"][0]["ts"] < ev["examples"][-1]["ts"]    # ordered + spread
 
 
 def test_contrast_points_at_named_sibling():
