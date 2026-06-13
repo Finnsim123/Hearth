@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Icon, type IconName } from "../icons";
+import { cheerBuddy } from "../components/buddyBus";
 
 type Question = { id: number; person_id: string; window_ts: string; predicted: string;
                   confidence: number; alternatives: string[] };
@@ -24,7 +25,11 @@ function QuestionCard({ q, activities, onDone }: {
       fetch(`/api/inbox/${q.id}/answer`, { method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answer: slug }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["inbox"] }); onDone(); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["inbox"] });
+      onDone();
+      cheerBuddy({ title: "Thanks — now I know more", detail: "That sharpens your model." });
+    },
   });
   const skip = useMutation({
     mutationFn: () => fetch(`/api/inbox/${q.id}/skip`, { method: "POST" }),
@@ -78,6 +83,7 @@ function BulkLabeler({ activities, persons }: { activities: Activity[]; persons:
         start: `${date}T${from}:00`, end: `${date}T${to}:00` }) });
     const j = await r.json();
     setResult(r.ok ? `Labeled ${j.labeled_windows} windows as ${activity}.` : "Failed — is InfluxDB connected?");
+    if (r.ok) cheerBuddy({ title: "Got it — that's a lot of labels", detail: `${j.labeled_windows} windows marked ${activity}.` });
   };
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>

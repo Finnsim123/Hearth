@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons";
 import { useIsMobile } from "../useMedia";
+import { cheerBuddy } from "../components/buddyBus";
 
 type Binding = {
   id: number; entity_id: string; role: string; name: string;
@@ -426,7 +427,13 @@ function PendingSensors({ nonce, onChange }: { nonce: number; onChange: () => vo
   if (!pending || pending.length === 0) return null;
   const act = async (path: string, ids: string[] | undefined, key: string) => {
     setBusy(key);
-    try { await postJSON(path, ids ? { entity_ids: ids } : {}).then(j); } catch { /* refresh */ }
+    const n = ids ? ids.length : (pending?.length ?? 0);
+    try {
+      await postJSON(path, ids ? { entity_ids: ids } : {}).then(j);
+      if (path.includes("approve"))
+        cheerBuddy({ title: "On it — folding those in",
+                     detail: `Analysing ${n} new sensor${n !== 1 ? "s" : ""} and retraining.` });
+    } catch { /* refresh */ }
     await load(); onChange(); setBusy("");
   };
   const allIds = pending.map((p) => p.entity_id);

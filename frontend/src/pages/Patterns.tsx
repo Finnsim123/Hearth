@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from "react";
 import { Icon } from "../icons";
+import { cheerBuddy } from "../components/buddyBus";
 
 type Cluster = {
   id: number; person_id: string; run_at: string | null; algo: string;
@@ -69,6 +70,7 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
     try {
       const r = await post(`/api/clusters/${c.id}/name`, body).then(j);
       setMsg(`Labeled ${r.labeled_windows} windows as “${r.activity}” — next training run learns from them.`);
+      cheerBuddy({ title: `“${r.activity}” — that has a name now`, detail: `${r.labeled_windows} windows labeled for the next run.` });
       setTimeout(onChange, 1600);
     } catch { setMsg("Couldn't name this pattern — check logs."); }
     setBusy(false);

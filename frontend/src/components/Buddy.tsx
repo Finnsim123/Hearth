@@ -4,10 +4,16 @@
  * training, then resting as "watching & predicting". Driven by GET /api/buddy
  * (one source of truth, shared with the dashboard). Collapses to just the orb
  * in steady state; expands during setup or when it needs you.
+ *
+ * Responsiveness: besides polling, it listens on buddyBus — when you complete an
+ * action (answer a question, approve sensors, name a pattern), the page fires a
+ * cheer and the buddy immediately acknowledges it ("Thanks — now I know more")
+ * and re-polls, instead of sitting on the stale prompt until the next tick.
  */
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useIsMobile } from "../useMedia";
+import { onBuddyCheer, type BuddyCheer } from "./buddyBus";
 
 type State = {
   phase: string; tone: string; title: string; detail: string;
@@ -32,6 +38,7 @@ function Flame({ color }: { color: string }) {
 
 export default function Buddy() {
   const [s, setS] = useState<State | null>(null);
+  const [cheer, setCheer] = useState<BuddyCheer | null>(null);
   const [override, setOverride] = useState<boolean | null>(() => {
     const v = localStorage.getItem("hearth.buddy.collapsed");
     return v === null ? null : v === "1";
@@ -39,6 +46,8 @@ export default function Buddy() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const timer = useRef<number>();
+  const cheerTimer = useRef<number>();
+  const tickRef = useRef<() => void>();
 
   useEffect(() => {
     let alive = true;
@@ -51,20 +60,38 @@ export default function Buddy() {
         timer.current = window.setTimeout(tick, next);
       }).catch(() => { timer.current = window.setTimeout(tick, 20000); });
     };
+    tickRef.current = tick;
     tick();
     return () => { alive = false; window.clearTimeout(timer.current); };
   }, []);
 
-  if (!s) return null;
-  const color = TONE[s.tone] ?? "var(--accent)";
-  const working = s.tone === "work" || s.tone === "ask";
-  const collapsed = override ?? (s.tone === "live");      // rest = just the orb
+  // React immediately to user actions (see buddyBus): show a warm ack, then
+  // re-poll so the real state is fresh by the time the ack fades.
+  useEffect(() => onBuddyCheer((c) => {
+    setCheer(c);
+    window.clearTimeout(cheerTimer.current);
+    window.setTimeout(() => {        // let the backend settle, then refresh
+      window.clearTimeout(timer.current);
+      tickRef.current?.();
+    }, 1200);
+    cheerTimer.current = window.setTimeout(() => setCheer(null), 4200);
+  }), []);
+
+  if (!s && !cheer) return null;
+  // a cheer takes over the bubble briefly, forcing it open
+  const d: State = cheer
+    ? { phase: "cheer", tone: "live", title: cheer.title, detail: cheer.detail ?? "",
+        progress: null, cta: null }
+    : (s as State);
+  const color = TONE[d.tone] ?? "var(--accent)";
+  const working = d.tone === "work" || d.tone === "ask";
+  const collapsed = cheer ? false : (override ?? (d.tone === "live"));   // rest = just the orb
   const toggle = () => {
     const next = !collapsed;
     setOverride(next);
     localStorage.setItem("hearth.buddy.collapsed", next ? "1" : "0");
   };
-  const attention = s.tone === "ask" || s.tone === "alert" || s.tone === "error";
+  const attention = d.tone === "ask" || d.tone === "alert" || d.tone === "error";
 
   const orb = (
     <span className={`buddy-orb${working ? " anim" : ""}`}
@@ -85,7 +112,7 @@ export default function Buddy() {
   if (collapsed) {
     return (
       <div style={wrap}>
-        <button onClick={toggle} aria-label={`Hearth: ${s.title}`} title={s.title}
+        <button onClick={toggle} aria-label={`Hearth: ${d.title}`} title={d.title}
                 style={{ background: "none", border: "none", padding: 0, cursor: "pointer",
                          position: "relative" }}>
           {orb}
@@ -106,26 +133,26 @@ export default function Buddy() {
                     borderRadius: 14, boxShadow: "0 6px 24px rgba(0,0,0,0.22)" }}>
         {orb}
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600 }}>{s.title}</div>
-          {s.detail && (
-            <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginTop: 1 }}>{s.detail}</div>
+          <div style={{ fontSize: 13.5, fontWeight: 600 }}>{d.title}</div>
+          {d.detail && (
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginTop: 1 }}>{d.detail}</div>
           )}
-          {typeof s.progress === "number" && (
+          {typeof d.progress === "number" && (
             <div style={{ height: 5, borderRadius: 99, background: "var(--surface-2)",
                           marginTop: 7, overflow: "hidden" }}>
               <div style={{ height: "100%", borderRadius: 99, background: color,
-                            width: `${Math.round(s.progress * 100)}%`, transition: "width .5s ease" }} />
+                            width: `${Math.round(d.progress * 100)}%`, transition: "width .5s ease" }} />
             </div>
           )}
-          {s.cta && (
+          {d.cta && (
             <button className="btn btn-secondary"
                     style={{ marginTop: 9, fontSize: 12.5, minHeight: 30, padding: "4px 10px" }}
                     onClick={() => {
-                      const h = s.cta!.href;
+                      const h = d.cta!.href;
                       if (/^https?:\/\//.test(h)) window.open(h, "_blank", "noopener");
                       else navigate(h);
                     }}>
-              {s.cta.label}
+              {d.cta.label}
             </button>
           )}
         </div>
