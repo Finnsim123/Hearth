@@ -215,6 +215,20 @@ def build_api_router(deps: dict) -> APIRouter:
         remaining = dismiss_pending_sensors(repo, body.get("entity_ids"))
         return {"ok": True, "pending": remaining}
 
+    # ── the active feature spec (AI's design work, for transparency) ───────
+    @api.get("/feature-spec")
+    def get_feature_spec() -> dict:
+        from ..domain.features.spec_builder import load_active_spec
+        spec = load_active_spec(repo)
+        if spec is None:
+            raw = repo.get_setting("feature_spec")
+            return {"active": False,
+                    "created_by": raw.get("created_by") if isinstance(raw, dict) else None}
+        d = spec.model_dump(mode="json")
+        return {"active": True, "spec_version": d["spec_version"],
+                "created_by": d["created_by"], "llm_model": d.get("llm_model"),
+                "selections": d["selections"], "features": d["features"]}
+
     # ── pre-run cost estimate for an AI feature-spec analysis ──────────────
     @api.post("/feature-spec/estimate")
     def feature_spec_estimate(body: dict) -> dict:

@@ -477,6 +477,150 @@ function PendingSensors({ nonce, onChange }: { nonce: number; onChange: () => vo
   );
 }
 
+type Selection = { entity_id: string; keep: boolean; role: string | null;
+                   info_tier: string | null; reliability: string; reason: string };
+type FeatureDef = { name: string; transform: string; inputs: string[];
+                    info_tier: string | null; rationale: string; expected_separates: string[] };
+type SpecResp = { active: boolean; created_by?: string | null; llm_model?: string | null;
+                  spec_version?: string; selections?: Selection[]; features?: FeatureDef[] };
+
+const TIER_LABEL: Record<string, string> = {
+  T0: "low info", T1: "event gate", T2: "state", T3: "measurement",
+  T4: "counter", T5: "slow state",
+};
+const RELIABILITY_COLOR: Record<string, string> = {
+  suspect: "var(--accent)", unusable: "var(--danger)",
+};
+
+function TierBadge({ tier }: { tier: string | null }) {
+  if (!tier) return null;
+  return (
+    <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 99, fontWeight: 600,
+                   border: "1px solid var(--border)", color: "var(--text-dim)" }}>
+      {TIER_LABEL[tier] ?? tier}
+    </span>
+  );
+}
+
+/** The AI feature architect's design work — what it kept, the information tier it
+ *  assigned, any reliability flags, and the executable features with rationales.
+ *  Read-only transparency; absent (= default recipes) renders nothing. */
+function FeatureSpecPanel({ nonce }: { nonce: number }) {
+  const [spec, setSpec] = useState<SpecResp | null>(null);
+  const [open, setOpen] = useState(false);
+  const [showSel, setShowSel] = useState(false);
+  useEffect(() => {
+    fetch("/api/feature-spec").then(j).then(setSpec).catch(() => setSpec({ active: false }));
+  }, [nonce]);
+  if (!spec || !spec.active) return null;
+  const feats = spec.features ?? [];
+  const sels = spec.selections ?? [];
+  const flagged = sels.filter((s) => s.reliability && s.reliability !== "ok");
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+      <button onClick={() => setOpen(!open)}
+              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none",
+                       background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
+                       color: "var(--text)", padding: "12px 14px", textAlign: "left" }}>
+        <Icon name="activities" size={16} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          <strong style={{ fontSize: 14 }}>AI feature design</strong>
+          <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+            {feats.length} feature{feats.length === 1 ? "" : "s"} · {sels.length} sensor decision{sels.length === 1 ? "" : "s"}
+            {flagged.length > 0 && ` · ${flagged.length} flagged`}
+            {spec.llm_model ? ` · ${spec.llm_model}` : ""}
+          </span>
+        </div>
+        <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--text-dim)" }}>
+          {open ? "Hide" : "Show"}
+        </span>
+      </button>
+      {open && (
+        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14,
+                      borderTop: "1px solid var(--border)" }}>
+          {flagged.length > 0 && (
+            <div style={{ fontSize: 13 }}>
+              <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>Reliability flags</h4>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {flagged.map((s) => (
+                  <div key={s.entity_id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 99, fontWeight: 600,
+                                   color: RELIABILITY_COLOR[s.reliability] ?? "var(--text-dim)",
+                                   background: `color-mix(in srgb, ${RELIABILITY_COLOR[s.reliability] ?? "var(--text-dim)"} 14%, transparent)` }}>
+                      {s.reliability}
+                    </span>
+                    <code style={{ fontSize: 12 }}>{s.entity_id}</code>
+                    {s.reason && <span style={{ fontSize: 12, color: "var(--text-dim)" }}>— {s.reason}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div>
+            <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>Features the AI designed</h4>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {feats.map((f) => (
+                <div key={f.name} style={{ display: "flex", flexDirection: "column", gap: 2,
+                             padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 8 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <code style={{ fontSize: 12.5, fontWeight: 600 }}>{f.name}</code>
+                    <TierBadge tier={f.info_tier} />
+                    <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{f.transform}</span>
+                    {f.expected_separates?.length > 0 && (
+                      <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+                        → {f.expected_separates.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                  {f.rationale && (
+                    <span style={{ fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>
+                      “{f.rationale}”
+                    </span>
+                  )}
+                </div>
+              ))}
+              {feats.length === 0 && (
+                <p style={{ fontSize: 12.5, color: "var(--text-dim)", margin: 0 }}>
+                  No custom features yet — using the default sensor recipes.
+                </p>
+              )}
+            </div>
+          </div>
+          <button className="btn btn-ghost" style={{ alignSelf: "flex-start", fontSize: 12.5 }}
+                  onClick={() => setShowSel(!showSel)}>
+            {showSel ? "Hide" : "Show"} all {sels.length} sensor decisions
+          </button>
+          {showSel && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", fontSize: 12.5, width: "100%" }}>
+                <thead><tr>
+                  {["sensor", "role", "tier", "reliability", "why"].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: 6, color: "var(--text-dim)",
+                                         fontWeight: 500 }}>{h}</th>))}
+                </tr></thead>
+                <tbody>
+                  {sels.map((s) => (
+                    <tr key={s.entity_id} style={{ borderTop: "1px solid var(--border)",
+                                                   opacity: s.keep ? 1 : 0.5 }}>
+                      <td style={{ padding: 6 }}><code style={{ fontSize: 11.5 }}>{s.entity_id}</code></td>
+                      <td style={{ padding: 6 }}>{s.role ?? "—"}</td>
+                      <td style={{ padding: 6 }}>{s.info_tier ? (TIER_LABEL[s.info_tier] ?? s.info_tier) : "—"}</td>
+                      <td style={{ padding: 6, color: RELIABILITY_COLOR[s.reliability] ?? "var(--text-dim)" }}>
+                        {s.reliability}
+                      </td>
+                      <td style={{ padding: 6, color: "var(--text-dim)" }}>{s.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Sensors() {
   const [bindings, setBindings] = useState<Binding[] | null>(null);
   const [health, setHealth] = useState<Record<string, Health>>({});
@@ -630,6 +774,7 @@ export default function Sensors() {
         );
       })()}
       <PendingSensors nonce={pendingNonce} onChange={reload} />
+      <FeatureSpecPanel nonce={pendingNonce} />
       {adding && <AddSensor members={members} initialPeople={adding === "people"}
                             onClose={() => setAdding(false)} onAdded={reload} />}
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)", maxWidth: 640 }}>
