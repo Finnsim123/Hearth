@@ -267,11 +267,14 @@ from(bucket: "{RAW_BUCKET}")
 
     def read_features(self, person: str, feature_set: str,
                       start: datetime, end: datetime) -> pd.DataFrame:
+        # drop tag/system columns BEFORE the pivot: smaller payload over the wire
+        # and a narrower pivot (these aren't needed — we filtered on them already).
         flux = f'''
 from(bucket: "{FEAT_BUCKET}")
   |> range(start: {start.isoformat()}, stop: {end.isoformat()})
   |> filter(fn: (r) => r._measurement == "features" and r.person == "{_flux_tag(person)}"
                        and r.feature_set == "{_flux_tag(feature_set)}")
+  |> drop(columns: ["_start", "_stop", "_measurement", "person", "feature_set", "window"])
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
         df = self.query_api.query_data_frame(flux)
@@ -285,9 +288,36 @@ from(bucket: "{FEAT_BUCKET}")
         return df.drop(columns=drop).set_index("_time").sort_index()
 
     def last_feature_time(self, person: str, feature_set: str) -> datetime | None:
+        """Latest feature-window timestamp for (person, feature_set).
+
+        This runs every 5 minutes per person, so it must be cheap. It asks Influx
+        for ONE timestamp — no pivot (the costliest Flux op), no value transfer —
+        and probes a short window first (the builder keeps features minutes-fresh),
+        widening only after downtime. The old implementation read 7 days of every
+        feature column and pivoted it just to take the last index, which on a
+        large home dominated DB load and timed out."""
         end = datetime.now(timezone.utc)
-        df = self.read_features(person, feature_set, end - timedelta(days=7), end)
-        return None if df.empty else df.index[-1].to_pydatetime()
+        for days in (1, 7, 90):
+            start = end - timedelta(days=days)
+            flux = f'''
+from(bucket: "{FEAT_BUCKET}")
+  |> range(start: {start.isoformat()}, stop: {end.isoformat()})
+  |> filter(fn: (r) => r._measurement == "features" and r.person == "{_flux_tag(person)}"
+                       and r.feature_set == "{_flux_tag(feature_set)}")
+  |> keep(columns: ["_time"])
+  |> group()
+  |> max(column: "_time")
+'''
+            try:
+                df = self.query_api.query_data_frame(flux)
+            except Exception:
+                log.warning("last_feature_time probe failed", exc_info=True)
+                return None
+            if isinstance(df, list):
+                df = pd.concat(df, ignore_index=True) if df else pd.DataFrame()
+            if not df.empty and "_time" in df.columns and pd.notna(df["_time"].iloc[0]):
+                return pd.to_datetime(df["_time"].iloc[0], utc=True).to_pydatetime()
+        return None
 
     # ── ml ─────────────────────────────────────────────────────────────────
     def write_prediction(self, pred: Prediction) -> None:

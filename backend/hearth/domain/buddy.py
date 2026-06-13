@@ -50,9 +50,9 @@ def _span_phrase(days: int) -> str:
     return f"~{years:.0f} years" if years >= 1.95 else "~1 year"
 
 
-def _state(phase, tone, title, detail, progress=None, cta=None) -> dict:
+def _state(phase, tone, title, detail, progress=None, cta=None, ack=None) -> dict:
     return {"phase": phase, "tone": tone, "title": title, "detail": detail,
-            "progress": progress, "cta": cta}
+            "progress": progress, "cta": cta, "ack": ack}
 
 
 def _fasttrack(ft: dict) -> dict:
@@ -183,6 +183,20 @@ def buddy_state(repo, tsdb) -> dict:
     if ts.get("running"):
         return _state("retraining", "work", "Refreshing what I know",
                       "Re-learning from your latest confirmations", None)
+
+    # an in-app update just landed — celebrate it once and say what changed
+    # (from the deployed commit message). Below real problems, above routine
+    # nudges. Dismissing (ack) marks this build seen.
+    from .whatsnew import pending_news
+    news = _safe(lambda: pending_news(repo))
+    if news:
+        detail = news["subject"]
+        if news.get("body"):
+            first = news["body"].splitlines()[0].strip()
+            if first and first.lower() != news["subject"].lower():
+                detail = f"{detail} — {first}"
+        return _state("whatsnew", "news", "Updated — here's what's new", detail,
+                      ack="/api/system/whats-new/seen")
 
     # questions waiting — a gentle nudge
     open_q = _safe(lambda: repo.open_questions(), [])
