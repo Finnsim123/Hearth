@@ -1,18 +1,15 @@
 # Hearth stack
 #
-#   docker compose up -d                          -> Hearth only (BYO InfluxDB,
-#                                                    connect it in the wizard)
-#   docker compose --profile influxdb up -d       -> Hearth + bundled InfluxDB
+#   docker compose up -d   -> Hearth + bundled InfluxDB (always included). In the
+#                             onboarding wizard you choose whether to USE the
+#                             bundled InfluxDB or point Hearth at your own — bring
+#                             your own and the bundled one simply stays idle.
 #   --profile mqtt      adds Mosquitto (skip if reusing HA's broker)
 #   --profile grafana   adds Grafana with provisioned dashboards
-#
-# The onboarding wizard asks which mode you're in; "bundled" requires the
-# influxdb profile (the wizard detects it and shows the exact command if not).
 
 services:
   influxdb:
     image: influxdb:2.7
-    profiles: ["influxdb"]
     restart: unless-stopped
     volumes:
       - influxdb-data:/var/lib/influxdb2
@@ -47,9 +44,9 @@ services:
     environment:
       HEARTH_SECRET: ${HEARTH_SECRET:?set in .env}   # encrypts tokens at rest
       HEARTH_DATA_DIR: /data
-      # Pre-fill for the BUNDLED influxdb profile only; for an external
-      # InfluxDB leave these unset and enter details in the wizard instead.
-      HEARTH_INFLUX_URL: ${HEARTH_INFLUX_URL:-}
+      # Default to the bundled InfluxDB (always running). Choosing your own in
+      # the wizard saves that connection instead (restart to apply).
+      HEARTH_INFLUX_URL: ${HEARTH_INFLUX_URL:-http://influxdb:8086}
       HEARTH_INFLUX_ORG: ${HEARTH_INFLUX_ORG:-hearth}
       HEARTH_INFLUX_TOKEN: ${INFLUX_TOKEN:-}
       HEARTH_LOG_LEVEL: ${HEARTH_LOG_LEVEL:-INFO}

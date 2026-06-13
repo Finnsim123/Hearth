@@ -63,13 +63,12 @@ research bets).
 
 ```bash
 git clone https://github.com/Finnsim123/Hearth && cd Hearth
-
-# Already running InfluxDB somewhere? (the wizard will ask for URL + token)
 bash install.sh
-
-# No InfluxDB yet? Include the bundled one:
-bash install.sh --with-influxdb
 ```
+
+Hearth comes with InfluxDB built in, so there's nothing to decide up front — the
+setup wizard lets you use the bundled InfluxDB (one click, zero config) or point
+Hearth at an existing instance. Bring your own and the bundled one just stays idle.
 
 The installer generates secrets, builds the stack, waits for it to come up,
 and prints exactly where to go:

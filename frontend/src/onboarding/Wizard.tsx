@@ -226,9 +226,30 @@ function Stage({ ok, okText, failText }: { ok: boolean; okText: string; failText
 function StepInflux({ d, set, next, back }: StepProps) {
   const [test, setTest] = useState<TestState>("idle");
   const [inspect, setInspect] = useState<Inspect | null>(null);
-  const [bundled, setBundled] = useState<"checking" | "found" | "missing">("missing");
+  const [bundled, setBundled] = useState<"checking" | "found" | "missing">("checking");
+  const [recheck, setRecheck] = useState(0);
   const i = d.influx;
-  const cmd = "docker compose --profile influxdb up -d";
+  // The bundled InfluxDB ships with the stack and is always running — auto-connect
+  // to it, polling a few times in case it's still starting on first boot.
+  useEffect(() => {
+    if (i.mode !== "bundled") return;
+    let alive = true, tries = 0;
+    const check = async () => {
+      setBundled("checking");
+      try {
+        const r = await fetch("/api/influx/inspect", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "bundled" }) }).then((x) => x.json());
+        if (!alive) return;
+        if (r.reachable && r.authed) { setBundled("found"); return; }
+      } catch { /* retry below */ }
+      if (!alive) return;
+      if (tries++ < 8) setTimeout(check, 2500);
+      else setBundled("missing");
+    };
+    check();
+    return () => { alive = false; };
+  }, [i.mode, recheck]);
   return (
     <>
       <StepShell step={3} total={TOTAL} title="Where should sensor history live?"
@@ -237,7 +258,7 @@ function StepInflux({ d, set, next, back }: StepProps) {
           description="Connect your existing instance. Hearth creates its own three buckets — nothing else is touched, and any HA history already in there can be imported."
           selected={i.mode === "external"} onSelect={() => set("influx", { ...i, mode: "external" })} />
         <ChoiceCard icon="download" title="Set it up for me"
-          description="Use the InfluxDB bundled with this stack. One command, runs alongside Hearth, zero configuration."
+          description="Use the InfluxDB that comes with Hearth — already running alongside it, connects in one click, zero configuration."
           selected={i.mode === "bundled"} onSelect={() => set("influx", { ...i, mode: "bundled" })} />
 
         {i.mode === "external" && (
@@ -307,33 +328,21 @@ function StepInflux({ d, set, next, back }: StepProps) {
         )}
 
         {i.mode === "bundled" && (
-          <>
-            {bundled === "found" ? (
-              <Callout icon="check">Bundled InfluxDB detected and connected. Nothing else to do here.</Callout>
-            ) : (
-              <>
-                <Callout icon="warning">
-                  The bundled InfluxDB isn't running yet. Run this once on the machine hosting Hearth,
-                  then come back — this page re-checks automatically.
-                </Callout>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <code style={{ flex: 1, padding: "10px 12px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-ctl)", fontSize: 13 }}>{cmd}</code>
-                  <button className="btn btn-secondary" onClick={() => navigator.clipboard.writeText(cmd)} aria-label="Copy command"><Icon name="copy" size={16} /></button>
-                  <button className="btn btn-secondary" onClick={async () => {
-                    setBundled("checking");
-                    try {
-                      const r = await fetch("/api/influx/inspect", { method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ mode: "bundled" }) }).then((x) => x.json());
-                      setBundled(r.reachable && r.authed ? "found" : "missing");
-                    } catch { setBundled("missing"); }
-                  }}>
-                    {bundled === "checking" ? "Checking…" : "Re-check"}
-                  </button>
-                </div>
-              </>
-            )}
-          </>
+          bundled === "found" ? (
+            <Callout icon="check">InfluxDB is ready and connected — nothing to configure.</Callout>
+          ) : bundled === "missing" ? (
+            <>
+              <Callout icon="warning">
+                The bundled InfluxDB hasn't come up. It ships with Hearth and starts
+                automatically, so this is rare — give it a moment, or check
+                <code> docker compose logs influxdb</code> on the host.
+              </Callout>
+              <button className="btn btn-secondary" style={{ alignSelf: "flex-start" }}
+                      onClick={() => setRecheck((n) => n + 1)}>Re-check</button>
+            </>
+          ) : (
+            <Callout icon="refresh">Connecting to the bundled InfluxDB…</Callout>
+          )
         )}
       </StepShell>
       <FooterNav onBack={back} onNext={next}
