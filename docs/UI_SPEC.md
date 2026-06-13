@@ -158,6 +158,12 @@ The closing wizard screen sets the expectation: go live your life, we'll ping yo
 - **Today ribbon** per person (smoothed, opacity = confidence), tap a segment
   to correct → highest-volume labeling surface. Badged "rule-based until
   trained" while inference runs on bootstrap rules (model_version rules-*).
+- **Sensor coverage map** (`/api/bindings/health`, auto-refreshing): a packed
+  bubble cloud — each disc a room, each dot a live sensor (size = fire rate,
+  colour = evidence tier, or toggle to colour by role). It's **live**: dots that
+  fired in the last ~15 min pulse green and their room gets a halo. HA areas with
+  no usable sensor show as dashed **ghost** bubbles ("where am I blind?"). Click a
+  room to list its sensors; legend doubles as the value/role colour toggle.
 - **Needs you** (max 3, hidden when empty): top open questions answered inline.
 - **Trust strip** (Phase 2): confirmed accuracy ± CI, labels this week, next
   retrain, drift dot.

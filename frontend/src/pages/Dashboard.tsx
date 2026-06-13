@@ -379,11 +379,20 @@ type Health = { name: string; status: string; role: string; room: string | null;
                 tier: number; per_day?: number; recent?: boolean };
 
 const TIER_META: Record<number, [string, string]> = {
-  1: ["direct", "#34D399"],      // bed, presence, person, media, door
-  2: ["behavioral", "#F59E0B"],  // power, lights, steps  (ember/amber)
-  3: ["ambient", "#F472B6"],     // temp, CO2, humidity, battery
+  1: ["Senses people", "#34D399"],   // bed, presence, person, media, door
+  2: ["Behavioural", "#F59E0B"],     // power, lights, steps  (ember/amber)
+  3: ["Ambient", "#F472B6"],         // temp, CO2, humidity, battery
 };
 const tierColor = (t: number) => TIER_META[t]?.[1] ?? TIER_META[2][1];
+
+// optional second lens: colour dots by role instead of evidence tier
+const ROLE_COLORS: Record<string, string> = {
+  presence: "#34D399", person: "#22D3EE", bed: "#A78BFA", media: "#2DD4BF",
+  power: "#F59E0B", light: "#FBBF24", door: "#60A5FA", env: "#F472B6",
+  focus: "#C084FC", steps: "#FB923C", battery: "#94A3B8", alarm_time: "#818CF8",
+  custom: "#64748B",
+};
+const roleColor = (r: string) => ROLE_COLORS[r] ?? ROLE_COLORS.custom;
 
 type Leaf = C & { tier: number; name: string; role: string; per_day: number; recent: boolean };
 type Room = { x: number; y: number; r: number; key: string; label: string;
@@ -487,6 +496,7 @@ function SensorCoverage() {
   const [known, setKnown] = useState<string[]>([]);
   const [sel, setSel] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
+  const [colorBy, setColorBy] = useState<"value" | "role">("value");
   const isMobile = useIsMobile();
   useEffect(() => {
     const load = () => fetch("/api/bindings/health").then((r) => r.json())
@@ -523,15 +533,20 @@ function SensorCoverage() {
            style={{ width: "100%", display: "block" }}>
         <style>{`
           @keyframes hearth-pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+          @keyframes hearth-in { from { transform: scale(.9) } to { transform: scale(1) } }
           .hearth-live { animation: hearth-pulse 1.8s ease-in-out infinite; }
+          .hearth-room { transform-box: fill-box; transform-origin: center;
+                         animation: hearth-in .45s cubic-bezier(.2,.8,.2,1) both; }
         `}</style>
-        {rooms.map((rm) => {
+        {rooms.map((rm, i) => {
           const active = rm.key === sel || rm.key === hover;
           const dim = (sel || hover) && !active;
+          const inDelay = `${Math.min(i * 25, 350)}ms`;
           if (rm.blind) {
             // a room HA knows about but Hearth has no usable sensor in
             return (
-              <g key={rm.key} style={{ opacity: dim ? 0.4 : 0.8 }}>
+              <g key={rm.key} className="hearth-room" style={{ opacity: dim ? 0.4 : 0.8,
+                                                               animationDelay: inDelay }}>
                 <title>{rm.label} — no sensors Hearth can use here. Add one in Home Assistant, then Rescan.</title>
                 <circle cx={rm.x} cy={rm.y} r={rm.r} fill="none"
                         stroke="var(--text-dim)" strokeWidth={1.2} strokeDasharray="3 3" opacity={0.6} />
@@ -543,9 +558,11 @@ function SensorCoverage() {
             );
           }
           return (
-            <g key={rm.key} onClick={() => setSel(sel === rm.key ? null : rm.key)}
+            <g key={rm.key} className="hearth-room"
+               onClick={() => setSel(sel === rm.key ? null : rm.key)}
                onMouseEnter={() => setHover(rm.key)} onMouseLeave={() => setHover(null)}
-               style={{ cursor: "pointer", opacity: dim ? 0.45 : 1, transition: "opacity .12s" }}>
+               style={{ cursor: "pointer", opacity: dim ? 0.45 : 1, transition: "opacity .12s",
+                        animationDelay: inDelay }}>
               <title>{rm.label} — {rm.total} sensor{rm.total === 1 ? "" : "s"}
                 {rm.live ? ` · ${rm.live} active now` : ""}</title>
               {/* a soft halo around rooms with live activity right now */}
@@ -562,7 +579,8 @@ function SensorCoverage() {
               {rm.leaves.map((l, i) => (
                 <circle key={i} cx={rm.x + l.x} cy={rm.y + l.y} r={l.r}
                         className={l.recent ? "hearth-live" : undefined}
-                        fill={tierColor(l.tier)} fillOpacity={l.recent ? 1 : 0.92}
+                        fill={colorBy === "role" ? roleColor(l.role) : tierColor(l.tier)}
+                        fillOpacity={l.recent ? 1 : 0.92}
                         stroke={l.recent ? "var(--ok, #34D399)" : "var(--surface)"}
                         strokeWidth={l.recent ? 1.2 : 0.6} />
               ))}
@@ -593,7 +611,8 @@ function SensorCoverage() {
                     style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
                              padding: "3px 9px", borderRadius: 99, background: "var(--surface)",
                              border: "1px solid var(--border)" }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: tierColor(l.tier) }} />
+                <span style={{ width: 8, height: 8, borderRadius: "50%",
+                      background: colorBy === "role" ? roleColor(l.role) : tierColor(l.tier) }} />
                 {l.name}
                 <span style={{ color: "var(--text-dim)" }}>{l.role}</span>
               </span>
@@ -601,14 +620,35 @@ function SensorCoverage() {
           </div>
         </div>
       )}
-      <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 12, color: "var(--text-dim)",
-                    justifyContent: "center" }}>
-        {[1, 2, 3].map((tier) => (
-          <span key={tier} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-            <span style={{ width: 9, height: 9, borderRadius: "50%", background: tierColor(tier) }} />
-            {TIER_META[tier][0]}
-          </span>
-        ))}
+      <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 12, color: "var(--text-dim)",
+                    justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", border: "1px solid var(--border)",
+                       borderRadius: 999, overflow: "hidden" }}>
+          {(["value", "role"] as const).map((m) => (
+            <button key={m} onClick={() => setColorBy(m)}
+              style={{ border: "none", cursor: "pointer", padding: "3px 10px", fontSize: 11.5,
+                       fontWeight: 600, background: colorBy === m ? "var(--accent)" : "transparent",
+                       color: colorBy === m ? "#fff" : "var(--text-dim)" }}>
+              {m === "value" ? "By value" : "By role"}
+            </button>
+          ))}
+        </span>
+        {colorBy === "value"
+          ? [1, 2, 3].map((tier) => (
+              <span key={tier} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: tierColor(tier) }} />
+                {TIER_META[tier][0]}
+              </span>))
+          : [...new Set(rows.map((r) => r.role))].sort().map((role) => (
+              <span key={role} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: roleColor(role) }} />
+                {role}
+              </span>))}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <span className="hearth-live" style={{ width: 9, height: 9, borderRadius: "50%",
+                background: "var(--ok, #34D399)" }} />
+          active now
+        </span>
       </div>
     </Card>
   );
