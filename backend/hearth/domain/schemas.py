@@ -33,6 +33,20 @@ class Role(str, Enum):
     CUSTOM = "custom"
 
 
+class InfoTier(str, Enum):
+    """Information tier the feature architect assigns per entity (llm_layer_design
+    §b). Orthogonal to Role (what kind of sensor) and to the evidence tier (how
+    much to trust a prediction): the info tier says what KIND of feature to build.
+    """
+
+    LOW_INFORMATION = "T0"        # constant / stuck / diagnostic — selected out
+    DISCRETE_EVENT_GATE = "T1"    # boolean state whose transitions are the signal
+    STATE_MACHINE = "T2"          # small enumerated categorical (media states)
+    CONTINUOUS_MEASUREMENT = "T3" # continuously varying quantity (temp, CO2, watts)
+    CUMULATIVE_COUNTER = "T4"     # monotonic total; only its rate matters (kWh, steps)
+    SLOW_STATE = "T5"             # rarely-changing, long-valid state (home/away)
+
+
 class User(BaseModel):
     """An account (login), distinct from Person (a household member being
     modeled). They can link: a member with a login labels their own inbox.
@@ -122,6 +136,51 @@ class Rule(BaseModel):
     priority: int = 100  # lower wins
     origin: Literal["user", "discovered"] = "user"
     enabled: bool = True
+
+
+class EntitySelection(BaseModel):
+    """Per-entity keep / role / tier / reliability decision from the feature
+    architect (llm_layer_design §c task 1). `keep=False` entities carry only a
+    reason; everything else is optional for them."""
+
+    entity_id: str
+    keep: bool
+    role: Role | None = None
+    info_tier: InfoTier | None = None
+    person_id: str | None = None
+    reliability: Literal["ok", "suspect", "unusable"] = "ok"
+    reason: str = ""
+
+
+class FeatureDef(BaseModel):
+    """One executable feature definition. A deterministic builder runs `transform`
+    (a whitelist id) over `inputs` (entity ids for per-entity transforms, or
+    existing feature names for composites) with `params` — no LLM, no eval
+    (llm_layer_design §d)."""
+
+    name: str  # snake_case feature column, e.g. "sofa_occupancy_fraction"
+    transform: str  # whitelist transform id (validated against the active whitelist)
+    inputs: list[str] = Field(default_factory=list)
+    params: dict[str, Any] = Field(default_factory=dict)
+    window_min: int | None = None  # per-feature lookback; None = role/window default
+    info_tier: InfoTier | None = None
+    rationale: str = ""
+    expected_separates: list[str] = Field(default_factory=list)  # activity slugs
+    origin: Literal["llm", "heuristic", "human"] = "llm"
+
+
+class FeatureSpec(BaseModel):
+    """The whole output contract of the LLM data-analytics layer: a versioned,
+    human-approvable, deterministically executable feature specification
+    (llm_layer_design §d). Hashed into feature_set_version once a builder
+    consumes it, so a spec change forces a clean retrain (ADR-7)."""
+
+    spec_version: Literal["v1"] = "v1"
+    created_at: datetime | None = None
+    created_by: Literal["llm", "heuristic", "human", "llm+human"] = "llm"
+    llm_model: str | None = None
+    selections: list[EntitySelection] = Field(default_factory=list)
+    features: list[FeatureDef] = Field(default_factory=list)
 
 
 class Provenance(str, Enum):
