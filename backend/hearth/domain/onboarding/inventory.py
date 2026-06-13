@@ -118,3 +118,104 @@ def entity_stats(series, days: int, end=None) -> dict:
         out["top_states"] = [{"value": str(k), "frac": round(float(v), 4)}
                              for k, v in vc.head(8).items()]
     return out
+
+
+# ── aggregate-stats consent (the explicit yes/no privacy lever) ──────────────
+# The user decides whether the LLM may see per-entity aggregate statistics and a
+# few sample states. With consent off it sees metadata only (names/types/units),
+# the reliability auditor can't run, and feature choices are guessed from names.
+# Default is "undecided" -> treated as NO until the user chooses (forced in the
+# wizard). (llm_layer_design §e; user requirement: explicit yes/no with implications)
+
+def stats_consent(repo) -> bool:
+    """True only when the user has explicitly opted IN to sharing aggregate stats."""
+    try:
+        return repo.get_setting("llm.share_stats") == "yes"
+    except Exception:
+        return False
+
+
+def stats_consent_decided(repo) -> bool:
+    """True once the user has made an explicit yes/no choice (drives the forced
+    wizard prompt: ask until decided)."""
+    try:
+        return repo.get_setting("llm.share_stats") in ("yes", "no")
+    except Exception:
+        return False
+
+
+def set_stats_consent(repo, value) -> bool:
+    """Persist the consent choice. Accepts a bool or a yes/no-ish string; raises
+    ValueError on anything else (the API maps that to a 400)."""
+    if isinstance(value, bool):
+        share = value
+    elif isinstance(value, str) and value.strip().lower() in ("yes", "true", "1", "on"):
+        share = True
+    elif isinstance(value, str) and value.strip().lower() in ("no", "false", "0", "off"):
+        share = False
+    else:
+        raise ValueError(f"share must be a yes/no choice, got {value!r}")
+    repo.set_setting("llm.share_stats", "yes" if share else "no")
+    return share
+
+
+def recent_samples(series, n: int = 5) -> list[dict]:
+    """Up to `n` recent (timestamp, state) pairs to GROUND the LLM in what a real
+    value looks like (e.g. 'playing' not '1'). Strings truncated. Only included
+    in a catalog record when the user consented to stats sharing."""
+    if series is None or len(series) == 0:
+        return []
+    out = []
+    for ts, val in series.dropna().tail(n).items():
+        if isinstance(val, str):
+            val = val[:32]
+        try:
+            tss = ts.isoformat()
+        except Exception:
+            tss = str(ts)
+        out.append({"ts_local": tss, "state": val})
+    return out
+
+
+def catalog_record(meta: dict, *, series=None, days: int = 14, end=None,
+                   current_binding: dict | None = None,
+                   share_stats: bool = False) -> dict:
+    """Assemble one entity-catalog record (llm_layer_design §a). Metadata is
+    always present; the `stats` and `samples` blocks are populated only when the
+    user consented AND history is available, else None."""
+    eid = meta.get("entity_id")
+    md = {
+        "domain": meta.get("domain") or (eid.split(".")[0] if eid else None),
+        "friendly_name": meta.get("friendly_name"),
+        "device_class": meta.get("device_class"),
+        "state_class": meta.get("state_class"),
+        "unit_of_measurement": meta.get("unit") or meta.get("unit_of_measurement"),
+        "area": meta.get("area"),
+        "device": meta.get("device"),
+        "entity_category": meta.get("entity_category"),
+        "disabled": bool(meta.get("disabled", False)),
+        "hidden": bool(meta.get("hidden", False)),
+    }
+    rec = {"entity_id": eid, "metadata": md, "stats": None, "samples": None,
+           "current_binding": current_binding}
+    if share_stats and series is not None and len(series) > 0:
+        rec["stats"] = entity_stats(series, days, end=end)
+        rec["samples"] = recent_samples(series)
+    return rec
+
+
+def build_catalog(inventory: list[dict], *, share_stats: bool = False,
+                  series_by_entity: dict | None = None, days: int = 14, end=None,
+                  bindings_by_entity: dict | None = None) -> list[dict]:
+    """Build the entity catalog the LLM reads from the discovered inventory.
+    `series_by_entity` and `bindings_by_entity` are optional maps keyed on
+    entity id. Honours the stats-sharing consent (`share_stats`)."""
+    series_by_entity = series_by_entity or {}
+    bindings_by_entity = bindings_by_entity or {}
+    return [
+        catalog_record(meta, series=series_by_entity.get(meta.get("entity_id")),
+                       days=days, end=end,
+                       current_binding=bindings_by_entity.get(meta.get("entity_id")),
+                       share_stats=share_stats)
+        for meta in inventory
+    ]

@@ -113,6 +113,23 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(400, str(exc))
         return {"ok": True, "mode": mode}
 
+    # ── aggregate-stats consent (privacy lever for the AI assistant) ───────
+    @api.get("/stats-consent")
+    def get_stats_consent() -> dict:
+        from ..domain.onboarding.inventory import stats_consent, stats_consent_decided
+        return {"share_stats": stats_consent(repo), "decided": stats_consent_decided(repo)}
+
+    @api.post("/stats-consent")
+    def set_stats_consent_ep(body: dict) -> dict:
+        from ..domain.onboarding.inventory import set_stats_consent
+        if "share" not in body:
+            raise HTTPException(400, "missing 'share' (true/false)")
+        try:
+            share = set_stats_consent(repo, body["share"])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "share_stats": share}
+
     # ── setup completion: persist EVERYTHING the wizard collected ──────────
     TAXONOMY_PRESETS = {
         "minimal": [("sleeping", "Sleeping", "sleeping"), ("away", "Away", "out of the house"),
