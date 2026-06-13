@@ -27,6 +27,8 @@ type LlmActivity = { phase: "sending" | "received" | "error"; task: string;
                      model?: string; sent?: string; items?: number; at?: string;
                      prompt?: string; reply?: string };
 type Feat = { name: string; transform: string };
+type Cluster = { label: string; relevant: boolean; why: string; count: number; kept: number };
+type Triage = { by: string | null; total: number; kept_count: number; clusters: Cluster[] };
 type Llm = { configured: boolean; model?: string; activity?: LlmActivity | null };
 type Binding = { id: number; name: string; role: string; room: string | null;
                  person_id: string | null; enabled: boolean };

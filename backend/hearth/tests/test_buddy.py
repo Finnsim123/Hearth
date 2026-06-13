@@ -54,3 +54,13 @@ def test_llm_credit_error_surfaces_with_link():
     assert out["cta"] and out["cta"]["href"]
     # a healthy/absent status must NOT raise the warning
     assert buddy_state(_Repo({"llm.status": {"ok": True, "code": 200}}), None)["phase"] != "llm_error"
+
+
+def test_remap_after_retry_wins_over_stale_llm_error():
+    # user clicked "Try again": seed re-runs while llm.status is still the old
+    # failure. Buddy must narrate the live remap, not the stale credit warning.
+    out = buddy_state(_Repo({"seed.status": {"stage": "mapping"},
+                             "llm.status": {"ok": False, "code": 402}}), None)
+    assert out["phase"] == "remap:mapping" and out["tone"] == "work"
+    # a finished remap goes quiet (no lingering remap state)
+    assert buddy_state(_Repo({"seed.status": {"stage": "done"}}), None)["phase"] != "remap:done"
