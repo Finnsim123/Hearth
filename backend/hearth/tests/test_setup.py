@@ -197,7 +197,7 @@ def test_prune_empty_disables_zero_obs_but_keeps_person(client):
 
 
 @pytest.mark.asyncio
-async def test_inventory_sync_adds_new_updates_rooms_keeps_edits(client):
+async def test_inventory_sync_stages_new_updates_rooms_keeps_edits(client):
     c, repo = client
     c.post("/api/setup/complete", json=PAYLOAD)
     from hearth.domain.schemas import Binding, Role
@@ -212,7 +212,7 @@ async def test_inventory_sync_adds_new_updates_rooms_keeps_edits(client):
                 {"entity_id": "binary_sensor.sofa", "domain": "binary_sensor",
                  "device_class": "occupancy", "unit": None, "area": "Lounge",
                  "disabled": False, "state": "off"},
-                # brand-new bindable sensor → added
+                # brand-new bindable sensor → STAGED for approval, not bound
                 {"entity_id": "sensor.kitchen_co2", "domain": "sensor",
                  "device_class": "carbon_dioxide", "unit": "ppm", "area": "Kitchen",
                  "disabled": False, "state": "600"},
@@ -222,13 +222,20 @@ async def test_inventory_sync_adds_new_updates_rooms_keeps_edits(client):
                  "disabled": False, "state": "unknown"},
             ]
 
-    from hearth.domain.onboarding.inventory_sync import sync_inventory
+    from hearth.domain.onboarding.inventory_sync import (
+        approve_pending_sensors, sync_inventory)
     res = await sync_inventory(repo, FakeEvents(), use_llm=False)
-    assert res["added"] == 1 and res["rooms_updated"] == 1
+    assert res["pending"] == 1 and res["added"] == 0 and res["rooms_updated"] == 1
     by_eid = {b.entity_id: b for b in repo.bindings()}
     assert by_eid["binary_sensor.sofa"].room == "Lounge"       # area synced
-    assert "sensor.kitchen_co2" in by_eid                       # new picked up
-    assert "button.restart" not in by_eid                       # junk skipped
+    assert "sensor.kitchen_co2" not in by_eid                   # NOT auto-added
+    pending = repo.get_setting("discovery.pending")
+    assert [p["entity_id"] for p in pending] == ["sensor.kitchen_co2"]
+
+    # approving binds it and clears the pending queue
+    assert approve_pending_sensors(repo, ["sensor.kitchen_co2"]) == 1
+    assert "sensor.kitchen_co2" in {b.entity_id for b in repo.bindings()}
+    assert repo.get_setting("discovery.pending") == []
 
 
 def test_factory_reset_returns_to_first_run(client):

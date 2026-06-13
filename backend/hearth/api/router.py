@@ -130,6 +130,24 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(400, str(exc))
         return {"ok": True, "share_stats": share}
 
+    # ── newly-discovered sensors awaiting approval (detect-then-ask) ───────
+    @api.get("/sensors/pending")
+    def list_pending_sensors() -> dict:
+        return {"pending": repo.get_setting("discovery.pending") or []}
+
+    @api.post("/sensors/pending/approve")
+    def approve_pending(body: dict) -> dict:
+        from ..domain.onboarding.inventory_sync import approve_pending_sensors
+        added = approve_pending_sensors(repo, body.get("entity_ids"))
+        return {"ok": True, "added": added,
+                "pending": len(repo.get_setting("discovery.pending") or [])}
+
+    @api.post("/sensors/pending/dismiss")
+    def dismiss_pending(body: dict) -> dict:
+        from ..domain.onboarding.inventory_sync import dismiss_pending_sensors
+        remaining = dismiss_pending_sensors(repo, body.get("entity_ids"))
+        return {"ok": True, "pending": remaining}
+
     # ── pre-run cost estimate for an AI feature-spec analysis ──────────────
     @api.post("/feature-spec/estimate")
     def feature_spec_estimate(body: dict) -> dict:

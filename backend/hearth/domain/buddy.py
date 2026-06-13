@@ -123,6 +123,16 @@ def buddy_state(repo, tsdb) -> dict:
                       "A minute of your time sharpens the model",
                       cta={"label": "Open inbox", "href": "/inbox"})
 
+    # new sensors found by the daily scan, waiting for the user to approve them
+    # into the model (detect-then-ask: never auto-added). A gentle, actionable nudge.
+    pending = _get(repo, "discovery.pending") or []
+    if isinstance(pending, list) and pending:
+        n = len(pending)
+        return _state("new_sensors", "ask",
+                      f"I found {n} new sensor{'s' if n != 1 else ''}",
+                      "Want them in your model? Review and approve when you're ready.",
+                      cta={"label": "Review sensors", "href": "/sensors"})
+
     # live — a model is promoted and predicting
     if promoted and tsdb is not None:
         states = []
