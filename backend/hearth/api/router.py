@@ -762,6 +762,8 @@ def build_api_router(deps: dict) -> APIRouter:
             return [round((v - lo) / rng, 3) if rng > 1e-9 else 0.0 for v in vals]
 
         counts = tsdb.raw_event_counts([b.name for b in bindings], days=7)
+        # live heartbeat for the coverage map — who fired in the last 15 min
+        recent = tsdb.recent_active_names(15) if hasattr(tsdb, "recent_active_names") else set()
         from ..domain.features.evidence import binding_tiers
         tiers = binding_tiers(bindings)
         # per-binding model reliance: max over promoted models of the summed
@@ -808,7 +810,8 @@ def build_api_router(deps: dict) -> APIRouter:
                         "obs": int(counts.get(b.name, 0)),
                         "per_day": round(counts.get(b.name, 0) / 7, 1),
                         "feature": feature, "model_use": model_use,
-                        "room": b.room, "tier": tiers.get(b.name, 2)})
+                        "room": b.room, "tier": tiers.get(b.name, 2),
+                        "recent": b.name in recent})
         # class balance from confirmed + bootstrap labels (stable 7-day window)
         classes: dict[str, int] = {}
         label_start = end - timedelta(days=7)

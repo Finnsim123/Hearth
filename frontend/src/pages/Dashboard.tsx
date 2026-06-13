@@ -376,7 +376,7 @@ function Pulse({ j, hasTsdb }: { j?: Journey; hasTsdb: boolean }) {
 }
 
 type Health = { name: string; status: string; role: string; room: string | null;
-                tier: number; per_day?: number };
+                tier: number; per_day?: number; recent?: boolean };
 
 const TIER_META: Record<number, [string, string]> = {
   1: ["direct", "#34D399"],      // bed, presence, person, media, door
@@ -385,9 +385,10 @@ const TIER_META: Record<number, [string, string]> = {
 };
 const tierColor = (t: number) => TIER_META[t]?.[1] ?? TIER_META[2][1];
 
-type Leaf = C & { tier: number; name: string; role: string; per_day: number };
+type Leaf = C & { tier: number; name: string; role: string; per_day: number; recent: boolean };
 type Room = { x: number; y: number; r: number; key: string; label: string;
-              leaves: Leaf[]; total: number; sparse: boolean; tiers: Record<number, number> };
+              leaves: Leaf[]; total: number; sparse: boolean; tiers: Record<number, number>;
+              live: number };
 
 // Merge key for case / separator variants ("Living_room" == "livingroom").
 const roomKey = (room: string | null) =>
@@ -421,14 +422,15 @@ function layoutRooms(rows: Health[], W: number): { rooms: Room[]; width: number;
   const rooms: Room[] = Object.entries(groups).map(([key, g]) => {
     const leaves: Leaf[] = g.list.map((b) => ({
       x: 0, y: 0, r: leafR(b), tier: b.tier || 2, name: b.name,
-      role: b.role, per_day: b.per_day ?? 0 }));
+      role: b.role, per_day: b.per_day ?? 0, recent: !!b.recent }));
     packSiblings(leaves);
     const e = enclose(leaves);
     for (const l of leaves) { l.x -= e.x; l.y -= e.y; }
     const tiers: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
     for (const l of leaves) tiers[l.tier] = (tiers[l.tier] || 0) + 1;
     return { x: 0, y: 0, r: e.r + 7, key, label: prettyRoom([...g.originals]),
-             leaves, total: leaves.length, sparse: leaves.length <= 1, tiers };
+             leaves, total: leaves.length, sparse: leaves.length <= 1, tiers,
+             live: leaves.filter((l) => l.recent).length };
   }).sort((a, b) => b.r - a.r);
 
   // A wide 2D cloud, not a row. Seed on a phyllotaxis spiral stretched to fill
@@ -479,9 +481,12 @@ function SensorCoverage() {
   const [hover, setHover] = useState<string | null>(null);
   const isMobile = useIsMobile();
   useEffect(() => {
-    fetch("/api/bindings/health").then((r) => r.json())
+    const load = () => fetch("/api/bindings/health").then((r) => r.json())
       .then((h) => setRows((h.bindings ?? []).filter((b: Health) => b.status === "alive")))
       .catch(() => setRows([]));
+    load();
+    const id = setInterval(load, 30_000);   // live heartbeat: refresh recent-activity
+    return () => clearInterval(id);
   }, []);
   if (!rows || rows.length === 0) return null;
 
@@ -499,9 +504,13 @@ function SensorCoverage() {
 
   return (
     <Card icon="sensors" title="Sensor coverage"
-          sub="Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Click a room to see its sensors.">
+          sub="Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Dots pulsing green fired in the last few minutes. Click a room to see its sensors.">
       <svg viewBox={`${minX} ${minY} ${vbW} ${vbH}`} role="img"
            style={{ width: "100%", display: "block" }}>
+        <style>{`
+          @keyframes hearth-pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+          .hearth-live { animation: hearth-pulse 1.8s ease-in-out infinite; }
+        `}</style>
         {rooms.map((rm) => {
           const active = rm.key === sel || rm.key === hover;
           const dim = (sel || hover) && !active;
@@ -509,15 +518,25 @@ function SensorCoverage() {
             <g key={rm.key} onClick={() => setSel(sel === rm.key ? null : rm.key)}
                onMouseEnter={() => setHover(rm.key)} onMouseLeave={() => setHover(null)}
                style={{ cursor: "pointer", opacity: dim ? 0.45 : 1, transition: "opacity .12s" }}>
-              <title>{rm.label} — {rm.total} sensor{rm.total === 1 ? "" : "s"}</title>
+              <title>{rm.label} — {rm.total} sensor{rm.total === 1 ? "" : "s"}
+                {rm.live ? ` · ${rm.live} active now` : ""}</title>
+              {/* a soft halo around rooms with live activity right now */}
+              {rm.live > 0 && (
+                <circle cx={rm.x} cy={rm.y} r={rm.r + 3} fill="none"
+                        stroke="var(--ok, #34D399)" strokeWidth={1.5} opacity={0.5}
+                        className="hearth-live" />
+              )}
               <circle cx={rm.x} cy={rm.y} r={rm.r}
                       fill="var(--surface-2)" fillOpacity={active ? 0.55 : 0.32}
-                      stroke={rm.sparse ? "var(--danger)" : active ? "var(--accent)" : "var(--border)"}
+                      stroke={rm.sparse ? "var(--danger)" : active ? "var(--accent)"
+                              : rm.live > 0 ? "var(--ok, #34D399)" : "var(--border)"}
                       strokeWidth={active ? 2 : rm.sparse ? 1.8 : 1} />
               {rm.leaves.map((l, i) => (
                 <circle key={i} cx={rm.x + l.x} cy={rm.y + l.y} r={l.r}
-                        fill={tierColor(l.tier)} fillOpacity={0.92}
-                        stroke="var(--surface)" strokeWidth={0.6} />
+                        className={l.recent ? "hearth-live" : undefined}
+                        fill={tierColor(l.tier)} fillOpacity={l.recent ? 1 : 0.92}
+                        stroke={l.recent ? "var(--ok, #34D399)" : "var(--surface)"}
+                        strokeWidth={l.recent ? 1.2 : 0.6} />
               ))}
               <text x={rm.x} y={rm.y + rm.r + 16} textAnchor="middle"
                     fontSize={12.5} fill={rm.sparse ? "var(--danger)" : "var(--text-dim)"}

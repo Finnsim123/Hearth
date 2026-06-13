@@ -425,6 +425,27 @@ from(bucket: "{RAW_BUCKET}")
                 out[name] = [float(v) for _, v in pts if v is not None]
         return out
 
+    def recent_active_names(self, minutes: int = 15) -> set[str]:
+        """Binding names that wrote at least one raw point in the last `minutes`
+        — the live 'heartbeat' for the coverage map (which dots/rooms pulse)."""
+        flux = f"""
+from(bucket: "{RAW_BUCKET}")
+  |> range(start: -{minutes}m)
+  |> filter(fn: (r) => r._field == "num" or r._field == "str")
+  |> group(columns: ["_measurement"])
+  |> count()
+"""
+        out: set[str] = set()
+        try:
+            for table in self.query_api.query(flux):
+                for rec in table.records:
+                    meas = rec.values.get("_measurement", "")
+                    if meas.startswith("raw_") and (rec.get_value() or 0) > 0:
+                        out.add(meas[4:])
+        except Exception as exc:
+            log.warning("recent_active_names failed: %s", exc)
+        return out
+
     def count_raw_events(self, hours: int = 24) -> int:
         flux = f"""
 from(bucket: "{RAW_BUCKET}")
