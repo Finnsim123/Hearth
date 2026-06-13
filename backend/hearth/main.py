@@ -95,7 +95,7 @@ def create_app() -> FastAPI:
         authz = request.headers.get("authorization", "")
         if authz.startswith("Bearer hrt_"):
             scope = repo.api_token_scope(authz[7:])
-            if scope == "integration" and integration_allowed(path):
+            if scope == "integration" and integration_allowed(path, request.method):
                 return await call_next(request)
             return JSONResponse({"detail": "Token invalid, revoked, or out of scope"},
                                 status_code=403)
@@ -117,14 +117,23 @@ def create_app() -> FastAPI:
 
         from fastapi.responses import FileResponse
 
+        static_root = static_dir.resolve()
+
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str) -> FileResponse:
             # SPA fallback: real files (favicon etc.) served as-is, every
             # client route (/onboarding, /inbox?q=..) gets index.html.
-            candidate = static_dir / path
-            if path and candidate.is_file():
-                return FileResponse(candidate)
-            return FileResponse(static_dir / "index.html")
+            # SECURITY: this route is unauthenticated, so resolve the path and
+            # confirm it stays inside the static root — otherwise "../../etc/passwd"
+            # (or %2e%2e) would escape and read arbitrary files incl. the DB.
+            if path:
+                try:
+                    candidate = (static_root / path).resolve()
+                    if candidate.is_file() and candidate.is_relative_to(static_root):
+                        return FileResponse(candidate)
+                except (ValueError, OSError):
+                    pass
+            return FileResponse(static_root / "index.html")
 
     @app.on_event("startup")
     async def _ensure_hierarchy() -> None:

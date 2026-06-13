@@ -637,17 +637,37 @@ class AppDb:
             return True
 
     def verify_login(self, email: str, password: str) -> User | None:
+        from datetime import timedelta
+        LOCK_AFTER = 5            # consecutive failures before we start backing off
+        now = datetime.now(timezone.utc)
         with Session(self.engine) as s:
             r = s.scalars(select(UserRow).where(
                 UserRow.email == self._norm_email(email))).first()
             if r is None or r.disabled:
                 return None
+            # Locked out? Refuse WITHOUT running argon2 — both throttles guessing
+            # and removes the unauth CPU-flood (argon2-per-request) DoS lever.
+            bu = r.backoff_until
+            if bu is not None:
+                if bu.tzinfo is None:
+                    bu = bu.replace(tzinfo=timezone.utc)
+                if now < bu:
+                    return None
             ok, new_hash = security.verify_password(password, r.password_hash)
             if not ok:
+                r.failed_logins = (r.failed_logins or 0) + 1
+                if r.failed_logins >= LOCK_AFTER:   # exponential backoff, capped 15m
+                    delay = min(2 ** (r.failed_logins - LOCK_AFTER) * 5, 900)
+                    r.backoff_until = now + timedelta(seconds=delay)
+                s.commit()
                 return None
+            # success — clear the counters
+            if r.failed_logins or r.backoff_until is not None:
+                r.failed_logins = 0
+                r.backoff_until = None
             if new_hash:
                 r.password_hash = new_hash
-                s.commit()
+            s.commit()
             return User(id=r.id, email=r.email, display_name=r.display_name,
                         role=r.role, person_id=r.person_id, disabled=r.disabled)
 

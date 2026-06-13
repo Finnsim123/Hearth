@@ -192,6 +192,27 @@ def test_update_endpoints(client, tmp_path, monkeypatch):
     assert (shared / "update_requested").is_file()
 
 
+def test_login_locks_out_after_repeated_failures(client):
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)        # user a@b.c / averylongpassword
+    for _ in range(5):
+        assert repo.verify_login("a@b.c", "wrong") is None
+    # now backed off — even the CORRECT password is refused during the window
+    assert repo.verify_login("a@b.c", "averylongpassword") is None
+
+
+def test_login_below_threshold_still_succeeds_and_resets(client):
+    c, repo = client
+    c.post("/api/setup/complete", json=PAYLOAD)
+    for _ in range(3):
+        assert repo.verify_login("a@b.c", "wrong") is None
+    # under the limit → correct password works and clears the counter
+    assert repo.verify_login("a@b.c", "averylongpassword") is not None
+    for _ in range(4):
+        assert repo.verify_login("a@b.c", "wrong") is None   # counter was reset
+    assert repo.verify_login("a@b.c", "averylongpassword") is not None
+
+
 def test_change_password_revokes_other_sessions(client):
     c, repo = client
     c.post("/api/setup/complete", json=PAYLOAD)        # auto-signs in
@@ -238,6 +259,8 @@ def test_api_token_bearer_scope(client):
     # …and out-of-scope endpoints are refused
     assert fresh.get("/api/models", headers=bearer).status_code == 403
     assert fresh.post("/api/tokens", headers=bearer, json={}).status_code == 403
+    # readable path is NOT writable: POST /api/persons must be denied (method-aware)
+    assert fresh.post("/api/persons", headers=bearer, json={"name": "Mallory"}).status_code == 403
     # bad token refused
     assert fresh.get("/api/persons",
                      headers={"Authorization": "Bearer hrt_nope"}).status_code == 403
