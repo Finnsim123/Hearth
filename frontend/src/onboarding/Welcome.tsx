@@ -177,7 +177,9 @@ function ScanFeed({ entities, active, done }: {
     if (done) { setCursor(entities.length); return; }
     if (!active || entities.length === 0) return;
     setCursor(0);
-    const id = setInterval(() => setCursor((c) => Math.min(c + 1, entities.length)), 75);
+    // one entity every 600ms — slow enough to read your own things scroll past
+    // (75ms was a blur). The scan stage outlasts this, so showing fewer is fine.
+    const id = setInterval(() => setCursor((c) => Math.min(c + 1, entities.length)), 600);
     return () => clearInterval(id);
   }, [active, done, entities.length]);
   if (entities.length === 0) return null;
@@ -189,7 +191,7 @@ function ScanFeed({ entities, active, done }: {
     <div style={{ height: ROW * VISIBLE, overflow: "hidden", position: "relative", marginTop: 10,
                   borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)",
                   maskImage: fade, WebkitMaskImage: fade }}>
-      <div style={{ transform: `translateY(-${offset}px)`, transition: "transform .16s linear" }}>
+      <div style={{ transform: `translateY(-${offset}px)`, transition: "transform .35s ease" }}>
         {shown.map((e, i) => {
           const scanning = active && !done && i === shown.length - 1;
           return (
