@@ -10,6 +10,7 @@ operation, run once from the wizard's "import history" action.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -109,3 +110,53 @@ def import_history(store: InfluxStore, source_bucket: str,
     binding, chunked in time to bound memory on long backfills."""
     return {b.name: _import_binding(store, source_bucket, b, start, end)
             for b in bindings}
+
+
+# ── HA recorder warm-start ───────────────────────────────────────────────────
+# Every HA install already keeps ~10 days in its recorder, exposed by the
+# history API — no HA→InfluxDB integration required. Pulling that in at setup
+# gives EVERY home a provisional model on day one (an external Influx bucket,
+# when present, just extends the history for a stronger start). Source: HA
+# `EventSource.history()` over `/api/history/period`.
+RECORDER_ENTITY_BATCH = 20      # entities per history request
+RECORDER_DAY_CHUNK = 2          # days per history request (bounds payload size)
+
+
+async def import_recorder_history(
+    events, store: InfluxStore, bindings: list[Binding],
+    start: datetime, end: datetime,
+    *, entity_batch: int = RECORDER_ENTITY_BATCH, day_chunk: int = RECORDER_DAY_CHUNK,
+) -> dict[str, int]:
+    """Backfill [start, end) from HA's recorder via the history API into
+    hearth_raw. Batched by entity and time so a wide home doesn't make one giant
+    request. Returns {binding.name: imported_points}; failures of a single batch
+    are logged and skipped, never fatal."""
+    by_eid = {b.entity_id: b for b in bindings}
+    counts: dict[str, int] = {b.name: 0 for b in bindings}
+    eids = list(by_eid)
+    if not eids:
+        return counts
+    cursor = start
+    while cursor < end:
+        cstop = min(cursor + timedelta(days=day_chunk), end)
+        for i in range(0, len(eids), entity_batch):
+            batch = eids[i:i + entity_batch]
+            try:
+                states = await events.history(batch, cursor, cstop)
+            except Exception as exc:
+                log.warning("recorder import batch failed (%s…): %s", batch[0], exc)
+                continue
+            grouped: dict[str, list] = {}
+            for s in states:
+                grouped.setdefault(s.entity_id, []).append(s)
+            for eid, sts in grouped.items():
+                b = by_eid.get(eid)
+                if b is None:
+                    continue
+                for j in range(0, len(sts), 5000):
+                    await asyncio.to_thread(store.write_raw, b, sts[j:j + 5000])
+                counts[b.name] += len(sts)
+        cursor = cstop
+    total = sum(counts.values())
+    log.info("recorder warm-start: imported %d points for %d entities", total, len(eids))
+    return counts
