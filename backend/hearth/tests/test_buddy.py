@@ -56,6 +56,20 @@ def test_llm_credit_error_surfaces_with_link():
     assert buddy_state(_Repo({"llm.status": {"ok": True, "code": 200}}), None)["phase"] != "llm_error"
 
 
+def test_onboarding_seed_phases_are_sequential_setup_phases():
+    # during onboarding (fast-track pending) the seed sub-steps surface in order
+    base = {"fasttrack.pending": {"source": "recorder"}}
+    assert buddy_state(_Repo({**base, "seed.status": {"stage": "scanning"}}), None)["phase"] == "setup:scanning"
+    assert buddy_state(_Repo({**base, "seed.status": {"stage": "triaging"}}), None)["phase"] == "setup:triaging"
+    assert buddy_state(_Repo({**base, "seed.status": {"stage": "mapping"}}), None)["phase"] == "setup:mapping"
+    # awaiting the user's approval parks at the sorting step
+    out = buddy_state(_Repo({**base, "triage.awaiting": True}), None)
+    assert out["phase"] == "setup:triaging" and out["tone"] == "ask"
+    # once seed is done, fast-track takes over (not masked by the seed block)
+    assert buddy_state(_Repo({**base, "seed.status": {"stage": "done"},
+                              "fasttrack.status": {"stage": "training"}}), None)["phase"] == "setup:training"
+
+
 def test_remap_after_retry_wins_over_stale_llm_error():
     # user clicked "Try again": seed re-runs while llm.status is still the old
     # failure. Buddy must narrate the live remap, not the stale credit warning.

@@ -78,6 +78,28 @@ def buddy_state(repo, tsdb) -> dict:
         return _state("error", "error", "I hit a snag importing",
                       ft.get("error") or "Check the logs, then re-run setup.",
                       cta={"label": "Settings", "href": "/settings"})
+
+    # Seeding (scan → sort → map) runs BEFORE fast-track and must be surfaced in
+    # order, otherwise the Welcome stepper sees "importing" the whole time and
+    # lights up several steps at once. Waiting on the user to approve the triage
+    # parks us at the sorting step until they say go (strictly sequential).
+    if _get(repo, "triage.awaiting"):
+        return _state("setup:triaging", "ask", "Your turn — pick the groups",
+                      "Keep or skip each group, then let me analyse them")
+    # Only narrate seed sub-phases as setup:* during ONBOARDING (fast-track
+    # pending). A deliberate later re-map has no fast-track pending and is
+    # handled by the remap:* block further down.
+    seed = _get(repo, "seed.status") or {}
+    sstage = seed.get("stage")
+    _SEED = {"scanning": ("setup:scanning", "Scanning your home", "Reading your entities", 0.2),
+             "triaging": ("setup:triaging", "Sorting into groups", "Clustering what I found", 0.45),
+             "mapping": ("setup:mapping", "Reading your sensors", "Giving each one a role", 0.7),
+             "writing_rules": ("setup:mapping", "Reading your sensors", "Writing your starter rules", 0.85)}
+    if (_get(repo, "fasttrack.pending") and sstage != "done"
+            and (_get(repo, "seed.pending") or sstage in _SEED)):
+        ph, title, detail, prog = _SEED.get(sstage, _SEED["scanning"])
+        return _state(ph, "work", title, detail, prog)
+
     if _get(repo, "fasttrack.pending") or (stage and stage != "done"):
         return _fasttrack(ft)
 

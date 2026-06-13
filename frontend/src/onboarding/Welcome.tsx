@@ -38,11 +38,15 @@ type Ent = { entity_id: string; friendly_name: string | null; domain: string | n
 // the ordered fast-track phases, used to place the current phase on the arc
 const fmtUsd = (u: number) => (u < 0.01 ? "<$0.01" : `$${u.toFixed(2)}`);
 
+// the full pipeline in order — seed (scan → sort → map) THEN fast-track
+// (import → features → train → discover). One monotonic position so each UI
+// stage owns a contiguous slice and only ONE is ever active at a time.
 const ORDER = [
-  "setup:importing", "setup:imported", "setup:pruned_empty",
-  "setup:building_features", "setup:features_built",
-  "setup:training", "setup:trained",
-  "setup:discovering", "setup:discovered",
+  "setup:scanning", "setup:triaging", "setup:mapping",                       // 0,1,2 (seed)
+  "setup:importing", "setup:imported", "setup:pruned_empty",                 // 3,4,5
+  "setup:building_features", "setup:features_built",                         // 6,7
+  "setup:training", "setup:trained",                                         // 8,9
+  "setup:discovering", "setup:discovered",                                   // 10,11
 ];
 
 type StageStatus = "pending" | "active" | "done" | "later";
@@ -528,16 +532,18 @@ export default function Welcome() {
   const hasModel = node("model")?.status === "ok";   // survives a later reload
   const finished = !!buddy && !inSetup && (sawSetup.current || !fastTrack || hasModel);
 
+  // Strict, single-active gating: a stage is active only while the live phase
+  // sits inside its slice of ORDER, done once the phase has moved past it, and
+  // pending before. Exactly one stage is ever active — the pipeline waits.
   const statusFor = (firstIdx: number, lastIdx: number): StageStatus => {
-    if (inSetup) {
-      if (pos > lastIdx) return "done";
-      if (pos >= firstIdx) return "active";
-      return "pending";
-    }
-    if (finished) return "done";
+    if (!started) return "pending";
+    if (!inSetup) return "done";            // setup finished → everything done
+    if (pos < 0) return "pending";
+    if (pos > lastIdx) return "done";
+    if (pos >= firstIdx) return "active";
     return "pending";
   };
-  // on the fresh arc, only scanning happens now; the rest waits for data
+  // on the fresh arc (no warm-start data), the post-sorting stages never run
   const laterIfFresh = (s: StageStatus): StageStatus => (fastTrack ? s : "later");
 
   const greeting = names.length
@@ -559,40 +565,35 @@ export default function Welcome() {
   const people = bindings.filter((b) => b.role === "person").map((b) => ({
     key: b.id, name: (b.person_id && personMap[b.person_id]) || prettify(b.name) }));
   const sensorChips = bindings.filter((b) => b.role !== "person");
-  const scanStatus: StageStatus = inSetup ? statusFor(0, 2) : (started ? "done" : "pending");
+  // stage slices of ORDER:
+  //   0 scan · 1 sort · 2 map(AI) · 3-7 build features · 8-9 train · 10-11 patterns
+  const scanStatus = statusFor(0, 0);
   const scanActive = scanStatus === "active";
   const scanDone = scanStatus === "done";
   // bound-sensor count from the flow map (e.g. "96 sensors"); 0/absent early on
   const scanCount = parseInt(node("ha")?.value ?? "", 10) || 0;
-  const featStatus = laterIfFresh(statusFor(3, 4));
+  const triageStatus: StageStatus = awaiting ? "active" : statusFor(1, 1);
+  const hasTriage = !!(triage && triage.clusters.length);
+  const aiStatus: StageStatus = awaiting ? "pending" : statusFor(2, 2);
+  const featStatus = laterIfFresh(statusFor(3, 7));
   const featActive = featStatus === "active";
   const featDone = featStatus === "done";
-  const hasTriage = !!(triage && triage.clusters.length);
-  const triageStatus: StageStatus = awaiting ? "active"
-    : inSetup ? (pos >= 3 ? "done" : "active") : (started ? "done" : "pending");
 
-  // live narration of the AI calls: "sending ... now" → "receiving ... now",
-  // but only while the call is actually fresh (so a finished call doesn't keep
-  // claiming it's happening "now").
+  // live narration of the AI calls — only while a call is genuinely fresh.
   const act = llm?.activity;
   const model = llm?.model && llm.model !== "auto" ? llm.model : "the LLM";
   const actFresh = !!act?.at && Date.now() - Date.parse(act.at) < 12000;
   const aiDetail = (() => {
-    if (awaiting) return "Waiting for you to approve the groups above";
+    if (aiStatus === "pending") return awaiting ? "Up next — after you approve the groups" : "Up next";
+    if (aiStatus === "done") return "Your AI suggestions are in";
     if (act && actFresh && act.phase === "sending")
       return `Sending to ${model} now — ${act.task.toLowerCase()}${act.sent ? ` (${act.sent})` : ""}`;
     if (act && actFresh && act.phase === "received")
       return `Receiving ${act.task.toLowerCase()} now${act.items != null ? ` — ${act.items} back` : ""}`;
     if (act?.phase === "error")
       return "AI call hit a snag — continuing with the built-in fallback";
-    if (inSetup && pos >= 3) return "Your AI suggestions are in";
     return `${model} is reading your sensors`;
   })();
-  // AI is "done" only once it's genuinely idle (no fresh call) AND the pipeline
-  // has moved past scanning — and always by the time training starts.
-  const aiStatus: StageStatus = awaiting ? "pending"
-    : !inSetup ? (started ? "done" : "pending")
-    : (pos >= 5 || (pos >= 3 && !actFresh)) ? "done" : "active";
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
@@ -669,12 +670,12 @@ export default function Welcome() {
 
         <StageRow title="Learning your routines"
           detail={node("model")?.value ? `Model ${node("model")!.value}` : "Training a model for each of you"}
-          status={laterIfFresh(statusFor(5, 6))} />
+          status={laterIfFresh(statusFor(8, 9))} />
 
         <StageRow title="Finding patterns"
           detail={!isNaN(nPatterns) && nPatterns > 0 ? `${nPatterns} routine${nPatterns !== 1 ? "s" : ""} to name`
                                                      : "Spotting routines worth naming"}
-          status={laterIfFresh(statusFor(7, 8))} />
+          status={laterIfFresh(statusFor(10, 11))} />
       </div>
 
       <div style={{ width: "100%", maxWidth: 560, marginTop: 10,

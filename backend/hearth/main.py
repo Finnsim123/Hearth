@@ -155,7 +155,10 @@ def create_app() -> FastAPI:
                 if repo.get_setting("seed.pending") and deps.get("events"):
                     from .domain.onboarding.seed import run_seed
                     await run_seed(repo, deps["events"])
-                if repo.get_setting("fasttrack.pending") and deps.get("tsdb"):
+                # don't warm-start while the triage is awaiting approval — the
+                # pipeline must wait at the AI step until the user says go.
+                if (repo.get_setting("fasttrack.pending") and deps.get("tsdb")
+                        and not repo.get_setting("triage.awaiting")):
                     from .domain.fasttrack import run_fast_track
                     await run_fast_track(repo, deps["tsdb"], deps["models"],
                                          deps.get("notifier"), deps.get("events"))
