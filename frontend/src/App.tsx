@@ -19,6 +19,7 @@ import Methodology from "./pages/Methodology";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
+import Welcome from "./onboarding/Welcome";
 import Login from "./components/Login";
 import ProgressWait from "./components/ProgressWait";
 import Buddy from "./components/Buddy";
@@ -260,6 +261,9 @@ export default function App() {
     );
   }
   if (auth === "login") return <Login onSuccess={() => { setAuth("ready"); navigate("/"); }} />;
+
+  // Live hand-off after setup: full-screen, no nav/buddy chrome (it has its own).
+  if (location.pathname === "/welcome") return <Welcome />;
 
   const closeNav = () => setDrawerOpen(false);
 

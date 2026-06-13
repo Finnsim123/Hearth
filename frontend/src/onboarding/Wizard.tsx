@@ -80,8 +80,12 @@ export default function Wizard() {
         const h = await fetch("/api/health").then((x) => x.json());
         if (h && h.needs_setup === false) {
           localStorage.removeItem(STORE);
-          setApplying("idle");
-          setStep(10);
+          // Hand off to the live Welcome screen (introduces the buddy and shows
+          // the pipeline running on real data). Stash the arc + names for it.
+          const fastTrack = data.influx.mode === "external" && !!data.influx.sourceBucket;
+          localStorage.setItem("hearth.welcome", JSON.stringify({
+            fastTrack, members: data.members.map((m) => m.name).filter(Boolean) }));
+          window.location.href = "/welcome";
           return;
         }
       } catch { /* still restarting */ }

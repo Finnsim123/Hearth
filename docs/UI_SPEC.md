@@ -86,8 +86,28 @@ passwords are never persisted.
    the host pre-filled; the user only pastes the token generated here (shown
    once). Manual fallback instructions in a callout; MQTT remains the
    alternative channel.
-10. **Done** — ingest starts; card explains what happens over the next days
-   (record → patterns appear → name them → first training).
+10. **Done** — ingest starts; the wizard hands off to the live Welcome screen
+   below.
+
+### 1a. Welcome hand-off (onboarding/Welcome.tsx)
+
+A full-screen moment between the wizard and the dashboard that introduces the
+buddy (Ember) and *shows* the pipeline running on this home's real data — no
+faked numbers. It polls `GET /api/buddy` for the current phase and `GET /api/flow`
+for live counts, and animates an entity strip over the sensors Hearth actually
+bound (`GET /api/bindings`). Two arcs, chosen by whether history was imported
+(flag in `localStorage['hearth.welcome']`):
+
+- **Fast-track** (imported history): the stepper lights up live as the phase
+  advances — scanning your home → reading with AI (only if a key is set) →
+  building features → learning your routines → finding patterns — finishing
+  with the first model live and CTAs to name patterns / answer questions.
+- **Fresh** (no history): scanning completes, the later stages show "starts as
+  your data arrives", and the copy explains the few-days wait.
+
+A "Go to my dashboard" button is always present (the work continues in the
+background); reaching the screen later still reflects current state. Clearing
+the localStorage flag on exit makes it a one-time moment.
 
 ## 2. Dashboard (implemented in pages/Dashboard.tsx)
 
