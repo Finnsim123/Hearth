@@ -45,8 +45,8 @@ from(bucket: "{source_bucket}")
   |> range(start: 1970-01-01T00:00:00Z)
   |> filter(fn: (r) => r._field == "value" or r._field == "state")
   |> first()
-  |> group()
   |> keep(columns: ["_time"])
+  |> group()
   |> sort(columns: ["_time"])
   |> limit(n: 1)
 '''
@@ -81,7 +81,7 @@ from(bucket: "{source_bucket}")
   |> filter(fn: (r) => {cond})
   |> filter(fn: (r) => r._field == "value" or r._field == "state")
   |> aggregateWindow(every: 1m, fn: last, createEmpty: false)
-  |> keep(columns: ["_time", "_value"])
+  |> keep(columns: ["_time", "_value", "_field"])
 '''
             try:
                 df = _frames(store, flux)
