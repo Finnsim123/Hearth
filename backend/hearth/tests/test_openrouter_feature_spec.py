@@ -66,6 +66,47 @@ async def test_propose_feature_spec_orchestration(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_revise_feature_spec_applies_delta(monkeypatch):
+    from hearth.domain.schemas import (
+        EntitySelection, FeatureDef, FeatureSpec, InfoTier, Role)
+    adv = OpenRouterAdvisor(FakeRepo())
+    spec = FeatureSpec(
+        selections=[EntitySelection(entity_id="binary_sensor.stove", keep=True,
+                                    role=Role.PRESENCE, info_tier=InfoTier.DISCRETE_EVENT_GATE)],
+        features=[FeatureDef(name="old_feat", transform="occupancy_fraction",
+                             inputs=["binary_sensor.stove"], info_tier=InfoTier.DISCRETE_EVENT_GATE)])
+
+    async def fake_chat(system, user, max_tokens=4000, model=None):
+        return {"add": [{"name": "stove_on", "transform": "any_active",
+                         "inputs": ["binary_sensor.stove"], "info_tier": "T1"}],
+                "drop": ["old_feat"], "reason": "stove separates cooking/eating"}
+
+    monkeypatch.setattr(adv, "_chat", fake_chat)
+    revised = await adv.revise_feature_spec(spec, {"confusion_top_pairs": []}, mode="conservative")
+    names = [f.name for f in revised.features]
+    assert "stove_on" in names and "old_feat" not in names      # added + dropped
+
+
+@pytest.mark.asyncio
+async def test_revise_feature_spec_unchanged_on_failure(monkeypatch):
+    from hearth.domain.schemas import (
+        EntitySelection, FeatureDef, FeatureSpec, InfoTier, Role)
+    adv = OpenRouterAdvisor(FakeRepo())
+    spec = FeatureSpec(
+        selections=[EntitySelection(entity_id="binary_sensor.stove", keep=True,
+                                    role=Role.PRESENCE, info_tier=InfoTier.DISCRETE_EVENT_GATE)],
+        features=[FeatureDef(name="old_feat", transform="occupancy_fraction",
+                             inputs=["binary_sensor.stove"], info_tier=InfoTier.DISCRETE_EVENT_GATE)])
+
+    async def boom(system, user, max_tokens=4000, model=None):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(adv, "_chat", boom)
+    revised = await adv.revise_feature_spec(spec, {}, mode="conservative")
+    assert [f.name for f in revised.features] == ["old_feat"]    # untouched
+
+
+@pytest.mark.asyncio
 async def test_propose_feature_spec_degrades_on_chat_failure(monkeypatch):
     adv = OpenRouterAdvisor(FakeRepo())
 

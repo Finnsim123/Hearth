@@ -202,6 +202,34 @@ def parse_features(raw, *, origin: str = "llm") -> list[FeatureDef]:
     return out
 
 
+def revision_prompt(feedback: dict, mode: str, max_new: int = 4) -> str:
+    """Ask for a MINIMAL revision targeting the confused pairs (OCTree/ZARA
+    feedback loop, llm_layer_design §f)."""
+    return (
+        "The current model's performance feedback:\n"
+        f"{json.dumps(feedback)}\n\n"
+        "ALLOWED TRANSFORMS (id -> tiers, input kind, params). Use ONLY these:\n"
+        f"{_whitelist_json(mode)}\n\n"
+        f"Propose a MINIMAL revision. ADD at most {max_new} new features that "
+        "would separate the most-confused pairs (use the discriminative_stats: "
+        "features with high cohens_d already separate them; propose ways to "
+        "capture or combine them). DROP only features in feature_importance_zero "
+        "you have no reason to keep. Do NOT restructure working features. Reply "
+        'ONLY JSON: {"add":[<feature objects as before>],"drop":[feature_name],'
+        '"reason":str}'
+    )
+
+
+def parse_delta(raw) -> tuple[list[FeatureDef], list[str]]:
+    """Parse a revision response into (features_to_add, names_to_drop)."""
+    if not isinstance(raw, dict):
+        return [], []
+    add = parse_features(raw.get("add") or [])
+    drop_raw = raw.get("drop") or []
+    drop = [str(x) for x in drop_raw] if isinstance(drop_raw, list) else []
+    return add, drop
+
+
 def assemble_spec(selections: list[EntitySelection], features: list[FeatureDef], *,
                   llm_model: str | None = None) -> FeatureSpec:
     return FeatureSpec(created_at=datetime.now(timezone.utc), created_by="llm",

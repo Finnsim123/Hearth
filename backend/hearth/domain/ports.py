@@ -151,6 +151,14 @@ class LlmAdvisor(Protocol):
         entity selections with info tiers and reliability, plus executable
         feature definitions. Supersedes the unimplemented propose_composites."""
         ...
+
+    async def revise_feature_spec(
+        self, spec: FeatureSpec, feedback: dict, mode: str = "conservative",
+    ) -> FeatureSpec:
+        """Maintenance loop (Phase 4): given the current spec and a feedback
+        summary (confusion + discriminative stats + importances), propose a
+        MINIMAL add/drop revision and return the validated, merged spec."""
+        ...
     async def propose_rules(
         self, bindings: list[Binding], activities: list[Activity]
     ) -> list[Rule]: ...

@@ -430,3 +430,28 @@ class OpenRouterAdvisor:
             log.info("feature_spec: %d features rejected by validation: %s",
                      len(rejected), [n for n, _ in rejected][:8])
         return clean
+
+    # ── maintenance: revise the spec from model feedback (Phase 4) ──────────
+    async def revise_feature_spec(self, spec, feedback: dict,
+                                  mode: str = "conservative"):
+        """One revision round: ask for a minimal add/drop delta targeting the
+        confused pairs, apply it, and re-validate. On LLM failure the spec is
+        returned unchanged."""
+        from ..domain.features.validate import validate_spec
+        from ..domain.onboarding.feature_architect import (
+            ARCHITECT_MODEL_DEFAULT, SYSTEM_PROMPT, parse_delta, revision_prompt)
+        try:
+            raw = await self._chat(SYSTEM_PROMPT, revision_prompt(feedback, mode),
+                                   model=ARCHITECT_MODEL_DEFAULT)
+        except Exception as exc:
+            log.warning("revise_feature_spec failed: %s", exc)
+            return spec
+        add, drop = parse_delta(raw)
+        drop_set = set(drop)
+        features = [f for f in spec.features if f.name not in drop_set] + add
+        revised = spec.model_copy(update={"features": features})
+        clean, rejected = validate_spec(revised, mode=mode)
+        if rejected:
+            log.info("revise_feature_spec: %d features rejected: %s",
+                     len(rejected), [n for n, _ in rejected][:8])
+        return clean
