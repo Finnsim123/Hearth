@@ -51,12 +51,29 @@ class HearthClient:
         return out
 
     async def post_action(self, action: str, device: str | None) -> bool:
+        return await self._post("/api/feedback/action",
+                                {"action": action, "device": device}) is not None
+
+    async def _post(self, path: str, payload: dict) -> Any:
         try:
             async with self._session.post(
-                f"{self._base}/api/feedback/action", headers=self._headers,
-                json={"action": action, "device": device},
+                f"{self._base}{path}", headers=self._headers, json=payload,
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
-                return resp.status == 200
+                if resp.status in (401, 403):
+                    raise HearthAuthError(f"{resp.status} on {path}")
+                resp.raise_for_status()
+                return await resp.json()
         except aiohttp.ClientError as exc:
             raise HearthApiError(str(exc)) from exc
+
+    # ── two-way controls (override + questions opt-out) ─────────────────────
+    async def controls(self) -> dict:
+        """{"activities": [slug…], "persons": {pid: {override, questions}}}."""
+        return await self._get("/api/controls")
+
+    async def set_override(self, person_id: str, activity: str) -> None:
+        await self._post(f"/api/persons/{person_id}/override", {"activity": activity})
+
+    async def set_questions(self, person_id: str, enabled: bool) -> None:
+        await self._post(f"/api/persons/{person_id}/questions", {"enabled": bool(enabled)})

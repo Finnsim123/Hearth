@@ -39,6 +39,14 @@ Connects HA to your local Hearth instance and closes the loop, no YAML, no autom
   The `sensor.hearth_<person>_activity` entity carries the state for dashboards
   and state-based triggers; the event is the low-latency path.
 
+- **Two-way controls** per member, on the same device:
+  - `switch.hearth_<person>_questions` — turn off to stop Hearth asking that
+    person training questions.
+  - `select.hearth_<person>_override` — pin the activity to a chosen one
+    (`auto` = let the model decide). While the override is fresh it's also fed
+    back as a confirmed label, so the model learns the correction. Identical
+    behaviour to the MQTT controls, and predictions stay 100% local.
+
 - **Feedback forwarding**: when someone taps ✓/✗ on a Hearth training question,
   the integration catches the `mobile_app_notification_action` event and POSTs it
   to Hearth with its API token. That's the whole active-learning loop.

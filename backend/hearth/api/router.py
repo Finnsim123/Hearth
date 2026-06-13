@@ -131,6 +131,31 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"ok": True, "family": fam,
                 "note": "applies on the next training run"}
 
+    # ── per-person two-way controls (override + questions opt-out) ──────────
+    # Read/written by BOTH output channels: the MQTT switch/select and the HA
+    # integration's switch/select, so behaviour is identical for every user.
+    @api.get("/controls")
+    def get_controls() -> dict:
+        from ..domain.controls import active_override, questions_disabled
+        return {"activities": [a.slug for a in repo.activities()],
+                "persons": {p.id: {"override": active_override(repo, p.id) or "auto",
+                                   "questions": not questions_disabled(repo, p.id)}
+                            for p in repo.persons()}}
+
+    @api.post("/persons/{person_id}/override")
+    def set_person_override(person_id: str, body: dict) -> dict:
+        from ..domain.controls import set_override
+        slug = set_override(repo, person_id, str(body.get("activity", "")),
+                            {a.slug for a in repo.activities()})
+        return {"ok": True, "override": slug or "auto"}
+
+    @api.post("/persons/{person_id}/questions")
+    def set_person_questions(person_id: str, body: dict) -> dict:
+        from ..domain.controls import set_questions_optout
+        on = bool(body.get("enabled", True))
+        set_questions_optout(repo, person_id, not on)
+        return {"ok": True, "questions": on}
+
     # ── output policy: abstain / "unknown" state ──────────────────────────
     @api.get("/output-policy")
     def get_output_policy() -> dict:

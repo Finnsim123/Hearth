@@ -255,9 +255,12 @@ Hearth publishes retained HA-discovery configs under `homeassistant/…` plus a
 per-person activity and confidence state stream, with an availability LWT and a
 birth-topic re-announce. This is the open path for **non-Home-Assistant hubs
 that speak HA-style MQTT discovery** (Homey, Node-RED, openHAB) and for
-broker-centric setups that prefer not to install a HACS integration. It is
-one-way today (predictions out); the two-way controls (questions opt-out,
-manual override) live only on the integration for now.
+broker-centric setups that prefer not to install a HACS integration. It also
+exposes the same two-way controls as the integration: a questions-opt-out
+`switch` and a manual-override `select` (HA-discovery entities with command
+topics), so a non-HA hub gets full parity. The controls write to the same
+per-person settings the inference and asking paths read, so behaviour is
+identical however the state was set.
 
 For Home Assistant the integration is the recommended path: it needs no broker,
 survives restarts via the device registry, carries the low-latency event and

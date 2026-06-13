@@ -22,17 +22,20 @@ from .api import HearthApiError, HearthAuthError, HearthClient
 from .const import ACTION_PREFIX, CONF_HOST, CONF_TOKEN, DOMAIN, UPDATE_INTERVAL_S
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "select", "switch"]
 
 
 class HearthCoordinator(DataUpdateCoordinator):
-    """Polls persons + latest predictions; sensors render from this."""
+    """Polls persons, latest predictions and the two-way controls; the sensor,
+    select and switch entities render from this."""
 
     def __init__(self, hass: HomeAssistant, client: HearthClient) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN,
                          update_interval=timedelta(seconds=UPDATE_INTERVAL_S))
         self.client = client
         self.persons: list[dict] = []
+        self.controls: dict[str, dict] = {}   # {pid: {override, questions}}
+        self.activities: list[str] = []        # override-select options
 
     async def _async_update_data(self) -> dict[str, dict]:
         try:
@@ -40,11 +43,18 @@ class HearthCoordinator(DataUpdateCoordinator):
             # added members are reflected (new members need one HA reload to
             # create their entity — see async_setup_entry)
             self.persons = await self.client.persons()
-            return await self.client.latest_predictions()
+            preds = await self.client.latest_predictions()
         except HearthAuthError as exc:
             raise ConfigEntryAuthFailed from exc
         except HearthApiError as exc:
             raise UpdateFailed(str(exc)) from exc
+        try:                                   # controls are best-effort, not fatal
+            c = await self.client.controls()
+            self.controls = c.get("persons", {}) or {}
+            self.activities = c.get("activities", []) or []
+        except HearthApiError:
+            _LOGGER.debug("controls fetch failed — keeping last known")
+        return preds
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
