@@ -93,6 +93,14 @@ a key derived from `HEARTH_SECRET`; all via `hearth/security.py`, nowhere else.
 value: 0.3}, {feat: "stove_fumes_any", op: "==", value: 1}]}` — renderable and
 editable in the UI, evaluable in pandas, no eval().
 
+`models.algo` is one of `random_forest | gradient_boosting | logistic |
+embedding`. New `settings` keys added by the AI layer: `feature_spec` (the active
+executable feature spec), `feature.power_mode` (conservative|full),
+`llm.share_stats` (yes|no consent), `training.config` / `asking.policy` /
+`output.policy` (the behaviour knobs, defaults = the historical constants),
+`discovery.pending` (sensors awaiting approval) and `discovery.integrate`
+(re-analysis/retrain progress for the buddy).
+
 ## 3. Roles and their feature recipes (initial set)
 
 | Role | Example entities | Features per window (prefix = binding name) |
@@ -114,35 +122,65 @@ Cross-binding composites (declared in recipe config, not code): lights-off+in-be
 media+sofa, fumes+kitchen-presence, pre-alarm indicator, partner-context flags,
 lag features (window t−1, t−2 of selected columns).
 
+Beyond these fixed recipes, the AI feature architect (ARCH §6b) can add features
+from a safe transform whitelist (`features/transforms.py`), keyed to each
+entity's information tier, executed by the same deterministic builder and hashed
+into the feature-set version. The recipes above are the conservative default and
+the only thing that runs with no LLM key.
+
 ## 4. Entity inventory (onboarding artifact)
 
-One JSON document per export, built automatically (ARCH §6b), downloadable in
-the wizard. Per entity:
+One catalog record per entity, built automatically (ARCH §6b), downloadable in
+the wizard. This is what the LLM reads (`onboarding/inventory.py`):
 
 ```json
 {
   "entity_id": "binary_sensor.presence_sensor_sofa",
-  "domain": "binary_sensor",
-  "friendly_name": "Sofa presence",
-  "device_class": "occupancy",
-  "unit": null,
-  "area": "Living room",
-  "device": {"manufacturer": "Aqara", "model": "FP2"},
+  "metadata": {
+    "domain": "binary_sensor",
+    "friendly_name": "Sofa presence",
+    "device_class": "occupancy",
+    "state_class": null,
+    "unit_of_measurement": null,
+    "area": "Living room",
+    "device": {"manufacturer": "Aqara", "model": "FP2"},
+    "entity_category": null,
+    "disabled": false,
+    "hidden": false
+  },
   "stats": {
     "window_days": 14,
+    "value_type": "boolean",
     "distinct_values": 2,
+    "top_states": [{"value": "on", "frac": 0.31}, {"value": "off", "frac": 0.69}],
+    "numeric": null,
     "changes_per_day": 38.2,
-    "active_hours_hist": [0,0,0,0,0,0,1,2,3,2, "..."],
-    "value_range": null,
-    "pct_missing": 0.4
-  }
+    "median_seconds_between_changes": 220.0,
+    "active_hours_hist": [0,0,0,0,0,0,0.02,0.05,"..."],
+    "longest_gap_hours": 7.5,
+    "flatline_frac": 0.0,
+    "last_changed_age_hours": 0.3
+  },
+  "samples": [{"ts_local": "2026-06-12T21:30:00+02:00", "state": "on"}],
+  "current_binding": {"role": "presence", "name": "sofa", "enabled": true,
+                      "model_importance": 0.14}
 }
 ```
 
-`stats` is null when no history source exists (fresh HA install) — the LLM
-and heuristics then work from metadata alone, and stats backfill after a few
-days of ingest. Privacy: this document (metadata + aggregates) is the ONLY
-thing ever sent to an LLM; raw time series never leave the stack.
+For numeric entities `stats.numeric` carries `{min, p05, median, p95, max,
+monotonic_increasing_frac}`; `monotonic_increasing_frac ≈ 1.0` plus
+`state_class: total_increasing` is the cumulative-counter signature, and
+`flatline_frac ≈ 1.0` is the stuck-sensor signature — both drive the
+information tier and the reliability flag (suspect / unusable).
+
+`stats` and `samples` are populated only when (a) a history source exists and
+(b) the user **consented** to sharing aggregate stats (an explicit yes/no, the
+`llm.share_stats` setting). With consent off, or no history, the LLM works from
+`metadata` alone (`stats`/`samples` are null) and the reliability flag falls
+back to a deterministic pass over basic signals. Privacy: metadata, aggregate
+statistics, and at most a handful of recent sample states are the ONLY things
+sent to an LLM; raw time series never leave the stack. `current_binding` is
+present only on a re-analysis, so the LLM revises rather than restarts.
 
 ## 5. How much history is needed? (defaults, surfaced in the wizard)
 

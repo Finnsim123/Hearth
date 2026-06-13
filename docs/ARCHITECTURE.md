@@ -197,13 +197,28 @@ curriculum as labels accumulate.
   has fewer labels). One `Trainer.run(person)` per enabled member, scheduled
   weekly + on-demand from the UI ("Train now" button with live log streaming
   over WS).
-- Baseline: RandomForest (ported, known-good). The `Estimator` port allows
-  gradient boosting / calibrated models later without touching callers.
+- Models: RandomForest is the default (robust on small data, no GPU,
+  interpretable). Gradient-boosted trees, logistic regression, and an
+  embedding-space head (the JEPA bet, RESEARCH.md §World models) are implemented
+  behind the `Estimator` port and selectable per instance. The port carries
+  fit/predict_proba/importances/calibrate, so swapping family touches no callers.
 - Registry (SQLite + `models/` volume): version, feature_set, train window, label
   counts by provenance, full metric report (accuracy both ways, per-class
   P/R/F1/AUC, confusion matrix, top SHAP importances), promotion status.
 - **Promotion gate:** new model replaces active only if `accuracy_confirmed`
   doesn't regress >2 pts; UI offers one-click rollback (port of prototype logic).
+- **Honest cold start:** a model is marked *provisional* until it has enough
+  human-confirmed labels (default 30) to be measured non-circularly. Below that,
+  the only signal is bootstrap agreement (the model echoing the rules that made
+  its own labels), so it serves day-one predictions but is never presented as
+  *validated*.
+- **Abstain:** below a confidence threshold the published state is `unknown`
+  rather than a forced guess, so automations don't act on a shaky prediction
+  (composes with the evidence cap and the asking policy).
+- **Training knobs are data:** model family, validation window, recency
+  half-life, promotion margin and tuning policy live in one `training.config`
+  setting; asking and output (abstain) thresholds in `asking.policy` /
+  `output.policy`. Defaults equal the historical constants.
 
 ## 5. Output + feedback loop (pillar 3)
 
@@ -336,6 +351,34 @@ The user approves/edits each screen and is done: ingest starts, features
 backfill from history if available, the first model trains, and from then on
 the LLM is out of the loop.
 
+### The feature architect (the LLM's deeper role)
+
+Beyond name→role mapping, the assistant builds a validated, executable **feature
+spec** (`domain/onboarding/feature_architect.py`, `features/{transforms,validate,
+spec_builder}.py`). Per entity it decides keep/skip, assigns an **information
+tier** (discrete event gate · state machine · continuous measurement · cumulative
+counter · slow state · low-information), proposes parameterised per-entity and
+cross-entity features chosen ONLY from a transform whitelist (CAAFE-style safe
+execution: it selects and parameterises vetted ops, never writes code), and
+**flags unreliable sensors** (stuck, flatlined, mostly-missing) from the
+aggregate stats. A deterministic builder executes the spec with no further LLM
+calls, and the spec is hashed into the feature-set version like any recipe.
+Controls: a **cost estimate** is shown before any run; whether the LLM may see
+aggregate stats at all is an **explicit user choice** (default off, metadata-only
+otherwise); *conservative* mode (recipes + basic composites) is the safe default,
+*full* mode unlocks the richer transforms. A scheduled **maintenance pass** can
+later revise the spec from model feedback (the activity pairs it confuses, with
+discriminative statistics), gated by the promotion gate.
+
+**Detect-then-ask.** Sensors discovered after setup are *staged for approval*,
+never auto-added: nothing is bound, analysed or retrained until the user approves,
+so plugging in a test sensor never silently spends tokens or changes the model.
+
+**No-key path is whole.** Without an LLM, the heuristic floor covers role mapping
+and the role recipes drive features, taxonomy comes from presets, and a
+deterministic reliability pass still flags suspect/unusable sensors — only the
+custom feature spec, information tiers and LLM weak labels go dark.
+
 ### LLM as weak annotator (the label-side payoff)
 
 The model's *output vocabulary* is exactly the labeled classes — labels are
@@ -433,7 +476,7 @@ OOM a tight box — steady-state swapping means undersized.
 | 6 | Feedback keyed on action IDs + server-side question rows | iOS never returns notification tags (home-assistant/iOS#1666) — proven failure in prototype. |
 | 7 | Features persisted to InfluxDB, versioned | Reproducible training, no train/serve skew, Grafana-inspectable. Cost: storage (trivial at 48–288 rows/day). |
 | 8 | Role-based feature recipes | Hardcoded entity names don't generalize; device-class-driven recipes are the portability mechanism. |
-| 9 | RF baseline, `Estimator` port for successors | Known-good on this exact problem; calibrated GBMs later without API change. |
+| 9 | RF default; GBT / logistic / embedding implemented behind the `Estimator` port, user-selectable | RF is the known-good cold-start default; the enriched port (importances/calibrate/sample-weight) lets families swap with no trainer changes. |
 | 10 | React SPA served by backend | Streamlit: weak for a product-grade comprehensive UI. Grafana-only: can't do wizards/inbox/taxonomy CRUD. |
 | 11 | HA custom integration (HACS) as primary output channel | Host+token config flow, push via Hearth's WS, two-way controls, no broker dependency — Frigate-proven. MQTT/REST remain as alternates behind the same port. |
 | 12 | Optional LLM advisor for onboarding (BYO OpenRouter/OpenAI-compatible key) | Semantic mapping of entity names is the costliest user step; LLM proposes (JSON, schema-validated), human approves. Heuristics remain the no-key path. Metadata only, never raw history. |

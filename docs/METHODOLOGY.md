@@ -181,6 +181,11 @@ active, plus transition count. Bed → mean/max pressure, occupied flag.
 Environment → mean, delta, max. These are deliberately *aggregations only* — the
 model learns the thresholds itself; Hearth never hard-codes "CO₂ > 1200 = cooking."
 
+If the AI assistant designed a **feature spec** for your home, its features are
+computed here too, by the same deterministic builder over a vetted transform
+whitelist (so nothing arbitrary ever runs). Without the assistant, the role
+recipes above are the whole feature set.
+
 > Your windows currently produce **{{ feature_count }}** features from
 > {{ sensor_count }} sensors, identified by feature-set version
 > **{{ feature_set_version }}**.
@@ -292,12 +297,15 @@ you're asleep). A confirmed answer is written back as a high-priority label.
 
 ## O. The model
 
-The classifier is a **Random Forest** — an ensemble of decision trees. It's
-chosen deliberately over a neural net: it's robust to uninformative features on
-small datasets, needs no GPU, trains in seconds on your hardware, and is
-*interpretable* (it can tell you which sensors drove a decision). For
-hierarchical taxonomies Hearth trains one forest per node (coarse root + a child
-per parent — "Local Classifier per Parent Node").
+The default classifier is a **Random Forest** — an ensemble of decision trees.
+It's the recommended default over a neural net: robust to uninformative features
+on small datasets, needs no GPU, trains in seconds on your hardware, and is
+*interpretable* (it can tell you which sensors drove a decision). You can switch
+the model family in Settings — gradient-boosted trees (often stronger once you
+have many labels), logistic regression (a simple baseline), or an experimental
+embedding head (the self-supervised / world-model direction) — without changing
+anything else. For hierarchical taxonomies Hearth trains one model per node
+(coarse root + a child per parent — "Local Classifier per Parent Node").
 
 > Your live model is version **{{ model_version }}**, trained
 > **{{ model_trained_at }}** on **{{ train_window_count }}** windows.
@@ -351,6 +359,12 @@ enough training windows, enough classes, and not materially worse than the model
 it would replace. If it fails, the previous model stays in service and the page
 tells you why. This is what stops a bad week of data from degrading predictions.
 
+Until enough of your own confirmations exist (about 30), a model is shown as
+**provisional**, not *validated*. With too few confirmed labels the only
+measurable "accuracy" is agreement with the starter rules — which can be wrong —
+so Hearth serves the model but won't claim it's validated until your real
+corrections back it up.
+
 > Your last training run: **{{ last_train_outcome }}**.
 
 - **Injects:** `last_train_outcome` (promoted / rejected + reason),
@@ -370,6 +384,10 @@ Predictions run on two lanes simultaneously:
 
 > In the last 24 hours Hearth produced **{{ predictions_24h }}** predictions.
 > Right now it thinks: {{ current_states }}.
+
+When Hearth isn't confident enough (below your commit threshold), it publishes
+**unknown** rather than guess — so an automation never fires on a shaky read.
+You can tune that threshold, or turn it off, in Settings.
 
 - **Injects:** `predictions_24h`, `current_states` (person → state + confidence).
 

@@ -86,18 +86,36 @@ Models page confirmed-accuracy before/after naming.
 - Change-point segmentation experiment (P4)
 - HEPA-style embedder behind the `Embedder` port (feature-flagged): pretrain on
   the home's unlabeled stream, side-by-side vs RF in the registry,
-  embedding-space clustering. The port exists; no implementation yet.
+  embedding-space clustering. The port and an `EmbeddingEstimator` seam now
+  exist (identity passthrough, selectable as the `embedding` family); the
+  self-supervised encoder itself (`adapters/hepa_embedder.py`) is the remaining
+  work — the JEPA / world-model bet (RESEARCH.md §World models).
+
+## AI feature layer + ML depth — ✅ implemented (June 2026)
+Beyond the original three pillars, shipped:
+- **Feature architect (optional LLM):** entity selection, information tiers, an
+  executable feature spec from a safe transform whitelist, cross-entity
+  composites, and reliability flagging — with a pre-run cost estimate and an
+  explicit aggregate-stats consent choice. Heuristic floor + role recipes when no
+  key; a deterministic reliability pass runs either way.
+- **Detect-then-ask sensor lifecycle:** new HA entities are staged for approval,
+  not auto-added; approval runs a scoped re-analysis + background retrain, gated
+  by the promotion gate.
+- **Model-to-LLM feedback loop:** discriminative statistics per confused class
+  pair feed a minimal spec revision, gated by the promotion gate / a
+  confirmed-label floor.
+- **Selectable model family:** random forest (default), gradient-boosted,
+  logistic, and an embedding head behind the enriched `Estimator` port.
+- **Cold-start honesty:** a model is *provisional* until enough confirmed labels
+  validate it (never presented as validated on circular bootstrap signal).
+- **Abstain state:** below a confidence threshold the published state is
+  `unknown`, so automations don't act on a shaky guess.
+- **Levers as data + UI:** training / asking / output policies and the above are
+  editable in Settings; the Sensors page shows pending approvals, the feature
+  spec and reliability flags; the Models page shows per-version trend + compare.
 
 ## Phase 5 — Ship it
 Hardening (authn, token encryption audit, backup/restore), docs site, example
 configs, HA add-on packaging (thin wrapper, Frigate-style), community recipe
 sharing format. Optional: Grafana dashboards pack.
 **Accept:** a Reddit/r-homeassistant stranger installs without filing an issue.
-
-## Migration: har-homelab → Hearth
-1. Run Hearth alongside the prototype (different buckets — no interference).
-2. History importer ingests the existing `homeassistant` bucket.
-3. Port confirmed labels (`har_labels`) with provenance `confirmed`.
-4. Bindings replicate the prototype's sensor map; recipes already ported.
-5. Parity check: Hearth's RF vs prototype metrics on the same weeks.
-6. Decommission prototype cron; keep it archived.

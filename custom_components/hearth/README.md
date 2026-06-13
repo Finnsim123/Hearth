@@ -3,8 +3,10 @@
 Connects HA to your local Hearth instance and closes the loop, no YAML, no automations:
 
 - **One device per household member** with `sensor.hearth_<person>_activity`:
-  state = predicted activity (`sleeping`, `cooking`, …), attributes = confidence,
-  per-class probabilities, model version, window time. Automate on it directly:
+  state = predicted activity (`sleeping`, `cooking`, …), or `unknown` when Hearth
+  isn't confident enough to commit (the abstain state — tune or disable it in
+  Settings). Attributes = confidence, per-class probabilities, model version,
+  window time. Automate on it directly:
 
   ```yaml
   trigger:

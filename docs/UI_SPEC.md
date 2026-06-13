@@ -54,13 +54,16 @@ passwords are never persisted.
    history") with a **Download inventory.json** button so users can inspect
    exactly what an LLM would see.
 6b. **AI assist (optional)** — paste an OpenRouter / OpenAI-compatible API key
-   to let an LLM pre-fill the next steps from the inventory: bindings,
-   candidate composite features, taxonomy and draft rules, plus its
-   clarifying questions ("two media players — which is the living-room
-   TV?"). Estimated cost shown up front; "Skip — use built-in heuristics" is
-   equally prominent. Key stored encrypted, reusable later for cluster-naming
-   hints, removable in Settings. Once the first model is trained the LLM is
-   no longer needed.
+   to let an LLM act as a *feature architect* over the inventory: it selects
+   which entities matter, assigns each an information tier, designs an executable
+   feature spec (from a safe transform whitelist) plus cross-sensor composites,
+   drafts taxonomy and rules, and **flags unreliable sensors** — returning
+   clarifying questions where ambiguous. An explicit **yes/no choice** governs
+   whether the model may see aggregate per-sensor statistics (default off =
+   metadata only), and an **estimated one-time cost** is shown before any run.
+   "Skip — use built-in heuristics" is equally prominent. Key stored encrypted,
+   reusable later for re-analysis and cluster-naming hints, removable in Settings.
+   Once the first model is trained the LLM is no longer needed for predictions.
 7. **Sensors** — table of HA entities with *suggested* role/room/person
    (heuristics, or LLM proposals with a reason per row — badge shows which);
    user confirms/edits; unbound entities are simply ignored. One-click
@@ -139,17 +142,34 @@ The closing wizard screen sets the expectation: go live your life, we'll ping yo
 ## 6. Models
 
 - **Registry table**: version, person, algo, feature_set, trained_at, n_train,
-  n_confirmed, accuracy_confirmed (with CI), accuracy_bootstrap, promoted badge.
-- **Detail view**: per-class precision/recall/F1/AUC bars, confusion matrix
-  heatmap, ROC curves, global SHAP importance, calibration plot, label-provenance
-  breakdown, drift panel (PSI per feature, confirmed-accuracy trend).
-- **Actions**: Train now (per person; streams logs over WS), Promote, Rollback,
-  Compare two versions side-by-side.
+  n_confirmed, accuracy_confirmed (with CI), accuracy_bootstrap, and a
+  **live / validated / provisional** status badge (provisional until enough
+  confirmed labels validate it).
+- **Per-model detail** (built): per-class precision/recall/F1, confusion matrix
+  heatmap, macro AUC, global feature importances, evidence-tier profile,
+  label-provenance breakdown, hyperparameters, feature-set version.
+- **History & trend** (built): confirmed-accuracy + AUC across versions (the
+  drift-over-time view) plus a compact compare table of every version.
+- **Actions**: Train now (per person; streams logs over WS), Promote (promote a
+  prior version to roll back).
+- **Planned**: ROC curves, calibration plot, per-feature PSI drift panel, and a
+  full side-by-side version diff.
 
 ## 7. Sensors
 
 - Bindings table: entity, role, room, person, freshness dot (last point age),
-  7-d sparkline, enable toggle. Add-binding flow = mini step 5 of wizard.
+  7-d sparkline, enable toggle, and a **reliability** state — live / no-variation
+  / no-data plus a *suspect* flag (rarely changes, long gaps) from a
+  deterministic stats pass that runs with OR without an LLM. Add-binding flow =
+  mini step 5 of wizard.
+- **Newly discovered sensors** (detect-then-ask): a card listing sensors found
+  since setup, with per-sensor and bulk **Approve / Dismiss**. Approving binds
+  them and triggers a scoped AI re-analysis + background retrain; nothing enters
+  the model unprompted.
+- **AI feature design** panel (collapsible): the active feature spec — kept
+  entities with their information tier and reliability, and the executable
+  features with the rationale behind each. Absent when the default recipes are
+  in use (no LLM).
 - Ingest health: WebSocket connection state, events/min, gap-fill runs,
   per-binding last-write.
 
@@ -164,7 +184,14 @@ The closing wizard screen sets the expectation: go live your life, we'll ping yo
   sessions with revoke; optional link account ↔ household member so inbox
   answers record who confirmed.
 - Asking policy: confidence threshold, ε random-ask rate, daily budget,
-  quiet hours, cooldowns — per person.
+  quiet hours, cooldowns.
+- **AI assistant: data sharing** — the explicit yes/no for sharing aggregate
+  stats with the LLM, with the implications of each choice spelled out.
+- **Feature engineering power** — conservative (recipes + basic composites) vs
+  full (richer transforms).
+- **Model family** — random forest / gradient-boosted / logistic / embedding.
+- **Commit threshold (abstain)** — confidence below which Hearth publishes
+  `unknown`, with an on/off toggle.
 - Schedules: window builder cadence, training schedule, discovery schedule.
 - Data: retention, export (features/labels CSV), danger zone (reset).
 - Appearance: theme — System (default) / Light / Dark (also cyclable from the
@@ -184,4 +211,11 @@ POST /api/labels/bulk                     GET  /api/clusters  POST /api/clusters
 GET  /api/models      POST /api/models/train|promote|rollback
 GET  /api/system/status                   POST /api/feedback/action   (HA webhook)
 WS   /ws                                  (predictions, ingest, training logs)
+
+# AI feature layer + ML levers
+GET  /api/bindings/health                 (status + reliability per binding)
+GET  /api/sensors/pending                 POST /api/sensors/pending/approve|dismiss
+GET  /api/feature-spec                    POST /api/feature-spec/estimate
+GET/POST /api/feature-power               GET/POST /api/stats-consent
+GET/POST /api/model-family                GET/POST /api/output-policy
 ```
