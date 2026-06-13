@@ -158,6 +158,26 @@ def test_train_promote_and_beat_rules(world):
     assert record.metrics["accuracy_bootstrap"] > 0.9          # learnable world
     assert record.metrics["n_train"] > 300
     assert "per_class" in record.metrics and "confusion" in record.metrics
+    # Estimator-port glass-box still flows through (importances + evidence profile)
+    assert record.metrics["feature_importances"]               # non-empty
+    assert "evidence_profile" in record.metrics
+
+
+def test_estimator_port_capabilities():
+    """Trainer programs against the Estimator port only — these are the methods
+    it relies on (commit 18): importances(), calibrate()->bool, the
+    supports_sample_weight flag, and classes_."""
+    idx = pd.date_range("2026-06-01", periods=120, freq="30min", tz="UTC")
+    X = pd.DataFrame({"a": np.r_[np.zeros(60), np.ones(60)],
+                      "b": np.random.default_rng(0).normal(size=120)}, index=idx)
+    y = pd.Series(["home"] * 60 + ["movie"] * 60, index=idx)
+    est = RandomForestEstimator(n_estimators=30)
+    assert est.supports_sample_weight is True
+    est.fit(X, y)
+    imp = est.importances()
+    assert set(imp) == {"a", "b"} and imp["a"] > imp["b"]      # 'a' is the signal
+    assert sorted(est.classes_) == ["home", "movie"]
+    assert est.calibrate(X, y) is True                          # both classes present
 
 
 def test_load_training_config_defaults_and_overrides(world):

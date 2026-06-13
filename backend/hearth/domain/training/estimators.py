@@ -46,6 +46,8 @@ def tune_hyperparams(X, y, n_iter: int = 15, cv_splits: int = 3,
 class RandomForestEstimator:
     """Implements domain.ports.Estimator."""
 
+    supports_sample_weight = True
+
     def __init__(self, **params):
         self.params = {**DEFAULT_PARAMS, **params}
         self.model = RandomForestClassifier(
@@ -55,6 +57,12 @@ class RandomForestEstimator:
     @property
     def classes_(self) -> list[str]:
         return list(self.model.classes_)
+
+    def importances(self) -> dict[str, float]:
+        imp = getattr(self.model, "feature_importances_", None)
+        if imp is None or not self.columns:
+            return {}
+        return {c: float(v) for c, v in zip(self.columns, imp)}
 
     def _align(self, X: pd.DataFrame) -> pd.DataFrame:
         """Inference rows may miss/add columns vs training — align hard."""
@@ -79,10 +87,11 @@ class RandomForestEstimator:
             df = df.div(row_sums, axis=0)
         return df
 
-    def calibrate(self, X_val: pd.DataFrame, y_val: pd.Series) -> None:
+    def calibrate(self, X_val: pd.DataFrame, y_val: pd.Series) -> bool:
         """Per-class isotonic regression on a held-out split — forests are
         systematically mis-calibrated and every downstream threshold (asking,
-        evidence cap, promotion) reads confidence as a probability."""
+        evidence cap, promotion) reads confidence as a probability. Returns True
+        if any class was calibrated."""
         from sklearn.isotonic import IsotonicRegression
         raw = self.model.predict_proba(self._align(X_val))
         raw = pd.DataFrame(raw, index=X_val.index, columns=self.classes_)
@@ -95,6 +104,7 @@ class RandomForestEstimator:
                                      out_of_bounds="clip")
             iso.fit(raw[cls].to_numpy(), target.to_numpy())
             self.calibrators[cls] = iso
+        return bool(self.calibrators)
 
     def explain(self, X: pd.DataFrame) -> pd.DataFrame:
         """Per-row SHAP for the predicted class; empty df if shap unavailable."""

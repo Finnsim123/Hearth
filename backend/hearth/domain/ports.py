@@ -86,9 +86,13 @@ class AppRepo(Protocol):
 
 
 class Estimator(Protocol):
-    """A trainable classifier (ADR-9). v1: RandomForest. Later: GBM, HEPA head."""
+    """A trainable classifier (ADR-9). v1: RandomForest. Later: GBM, logistic,
+    HEPA head. The trainer programs against THIS interface only — no estimator
+    internals (no est.model, no hasattr) — so a family swap is one new adapter."""
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> None: ...
+    supports_sample_weight: bool  # whether fit() honours sample_weight
+
+    def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> None: ...
     def predict_proba(self, X: pd.DataFrame) -> pd.DataFrame:
         """Returns DataFrame indexed like X, one column per class."""
         ...
@@ -96,6 +100,18 @@ class Estimator(Protocol):
     def explain(self, X: pd.DataFrame) -> pd.DataFrame:
         """Per-feature attribution (SHAP) for each row; empty df if unsupported."""
         ...
+
+    def importances(self) -> dict[str, float]:
+        """Per-feature importance {column: weight}; empty dict if unsupported."""
+        ...
+
+    def calibrate(self, X_val: pd.DataFrame, y_val: pd.Series) -> bool:
+        """Fit probability calibration on a held-out split. Returns True if it
+        actually calibrated (False = unsupported or not enough data)."""
+        ...
+
+    @property
+    def classes_(self) -> list[str]: ...
 
 
 class Embedder(Protocol):

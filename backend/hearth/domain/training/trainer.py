@@ -160,9 +160,12 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
 
     params = _hyperparams(repo, f"{person_id}.{node}", fset, X_train, y_train, force, cfg)
     est = RandomForestEstimator(**params)
-    age_days = (end - X_train.index).total_seconds() / 86400
-    weights = 0.5 ** (age_days / cfg.recency_half_life_days)
-    est.fit(X_train, y_train, sample_weight=weights.to_numpy())
+    if est.supports_sample_weight:
+        age_days = (end - X_train.index).total_seconds() / 86400
+        weights = 0.5 ** (age_days / cfg.recency_half_life_days)
+        est.fit(X_train, y_train, sample_weight=weights.to_numpy())
+    else:
+        est.fit(X_train, y_train)
     metrics = evaluate_model(est, X_val, y_val, prov_val)
     metrics["n_train"] = int(len(X_train))
     metrics["feature_count"] = int(X_train.shape[1])
@@ -171,26 +174,22 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
     train_acc = float((est.predict_proba(X_train).idxmax(axis=1) == y_train).mean())
     metrics["accuracy_train"] = round(train_acc, 4)
     metrics["hyperparams"] = params
-    if len(X_val) >= 100 and hasattr(est, "calibrate"):
-        # AFTER evaluation (metrics stay honest): isotonic per class on the
-        # held-out split, so 0.75 confidence actually means ~75% downstream
-        est.calibrate(X_val, y_val)
+    if len(X_val) >= 100 and est.calibrate(X_val, y_val):
+        # AFTER evaluation (metrics stay honest): so 0.75 confidence actually
+        # means ~75% downstream. calibrate() returns False if unsupported.
         metrics["calibrated"] = True
     if excluded:
         metrics["excluded_features"] = sorted(excluded)
-    try:                                   # glass-box: top-15 feature importances
-        imp = est.model.feature_importances_
-        ranked = sorted(zip(est.columns, imp), key=lambda kv: -kv[1])
+    imp = est.importances()                # glass-box; {} for estimators without
+    if imp:
+        ranked = sorted(imp.items(), key=lambda kv: -kv[1])
         metrics["feature_importances"] = {c: round(float(v), 4) for c, v in ranked[:15]}
         # full vector (cheap JSON) — Sensors page sums per binding to show
         # exactly how much the model relies on each sensor
         metrics["importance_all"] = {c: round(float(v), 5) for c, v in ranked if v > 0}
         # evidence profile: where the model's weight sits across trust tiers
         from ..features.evidence import evidence_profile
-        metrics["evidence_profile"] = evidence_profile(
-            dict(zip(est.columns, imp)), repo.bindings())
-    except Exception:                      # non-tree estimators have none
-        pass
+        metrics["evidence_profile"] = evidence_profile(imp, repo.bindings())
 
     stem = person_id if node == "root" else f"{person_id}-{node}"
     n_prior = len([m for m in repo.models(person_id) if m.node == node])
