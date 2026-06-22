@@ -10,6 +10,7 @@ import { useIsMobile } from "./useMedia";
 
 initTheme();
 import Dashboard from "./pages/Dashboard";
+import Behaviour from "./pages/Behaviour";
 import Inbox from "./pages/Inbox";
 import Activities from "./pages/Activities";
 import Patterns from "./pages/Patterns";
@@ -275,6 +276,7 @@ export default function App() {
       </span>
 
       <NavLink to="/" end style={navLinkStyle} onClick={closeNav}>Dashboard</NavLink>
+      <NavLink to="/behaviour" style={navLinkStyle} onClick={closeNav}>Behaviour</NavLink>
 
       {PIPELINE.map((g) => {
         const open = !navCollapsed.has(g.label) || g.label === currentGroup;
@@ -338,6 +340,7 @@ export default function App() {
                     padding: isMobile ? "16px 14px 40px" : 24 }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/behaviour" element={<Behaviour />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/activities" element={<Activities />} />
           <Route path="/patterns" element={<Patterns />} />

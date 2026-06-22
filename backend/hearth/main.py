@@ -141,6 +141,11 @@ def create_app() -> FastAPI:
     foundational_routes.bind(deps["repo"], deps.get("tsdb"))
     app.include_router(foundational_routes.router)
 
+    # behaviour: habits & routines analytics over the prediction store
+    from .api import behaviour_routes
+    behaviour_routes.bind(deps["repo"], deps.get("tsdb"))
+    app.include_router(behaviour_routes.router)
+
     # ── auth middleware (docs/SECURITY.md) ──────────────────────────────────
     # /api/* requires a session, except: health, login, the integration
     # webhook (TODO: bearer scope check), and — ONLY while no users exist —

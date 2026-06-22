@@ -777,6 +777,56 @@ function AdvancedTraining() {
   );
 }
 
+const ASK_FIELDS: { key: string; label: string; hint: string; step: number }[] = [
+  { key: "ask_threshold", label: "Ask below confidence", step: 0.05,
+    hint: "Ask when the top guess is below this confidence. Higher = asks more often." },
+  { key: "margin_threshold", label: "Ask on close calls (margin)", step: 0.05,
+    hint: "Ask when the top two guesses are within this gap. Higher = asks more on toss-ups." },
+  { key: "epsilon", label: "Random spot-check rate", step: 0.01,
+    hint: "Fraction of confident windows asked anyway, at random. These power the unbiased real-world accuracy — don't set it to 0." },
+  { key: "cooldown_min", label: "Min minutes between questions", step: 5,
+    hint: "How long Hearth waits after any question before asking again." },
+  { key: "repeat_min", label: "Min minutes before repeating", step: 5,
+    hint: "How long before Hearth re-asks about the same activity." },
+  { key: "expire_hours", label: "Question expiry (hours)", step: 1,
+    hint: "Unanswered questions disappear from the inbox after this long." },
+];
+
+function AdvancedAsking() {
+  const [open, setOpen] = useState(false);
+  const [pol, setPol] = useState<Record<string, number> | null>(null);
+  const [state, setState] = useState<SaveState>("idle");
+  useEffect(() => {
+    fetch("/api/settings/asking-policy").then(j).then((r) => setPol(r.policy)).catch(() => {});
+  }, []);
+  const saveField = async (key: string, value: number) => {
+    setState("saving");
+    try {
+      const r = await post("/api/settings/asking-policy", { [key]: value }).then(j);
+      setPol(r.policy); setState("ok");
+    } catch { setState("fail"); }
+  };
+  return (
+    <Card title="Advanced — how Hearth asks"
+          sub="Sensible defaults — most homes never touch these. Applies to new questions right away.">
+      <button className="btn btn-ghost" style={{ alignSelf: "flex-start" }}
+              onClick={() => setOpen(!open)}>{open ? "Hide advanced" : "Show advanced"}</button>
+      {open && pol && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {ASK_FIELDS.map((f) => (
+            <Row key={f.key} label={f.label} hint={f.hint}>
+              <input type="number" step={f.step} defaultValue={pol[f.key]} style={{ width: 120 }}
+                     onBlur={(e) => { const v = Number(e.target.value);
+                       if (!Number.isNaN(v) && v !== pol[f.key]) saveField(f.key, v); }} />
+            </Row>
+          ))}
+          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>{savedNote(state)}</p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 type CoveragePoint = { t: number; coverage: number; precision: number | null };
 
 function OutputPolicy() {
@@ -1150,7 +1200,7 @@ function ConnectionsSection() {
 
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
-    case "household": return <Household />;
+    case "household": return (<><Household /><AdvancedAsking /></>);
     case "model": return (<><FoundationalFacts /><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /><AdvancedTraining /></>);
     case "integrations": return <ConnectionsSection />;
     case "prompts": return <AiPrompts />;

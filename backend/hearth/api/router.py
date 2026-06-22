@@ -412,6 +412,44 @@ def build_api_router(deps: dict) -> APIRouter:
         from ..domain.training.trainer import load_training_config
         return {"ok": True, "config": asdict(load_training_config(repo))}
 
+    # ── advanced asking policy (model_levers.md G6; ε-explore + thresholds) ─
+    _ASK_BOUNDS = {
+        "ask_threshold": (0.0, 1.0),
+        "margin_threshold": (0.0, 1.0),
+        "epsilon": (0.0, 0.5),
+        "cooldown_min": (0.0, 720.0),
+        "repeat_min": (0.0, 1440.0),
+        "expire_hours": (1.0, 168.0),
+    }
+    _ASK_INT = {"cooldown_min", "repeat_min", "expire_hours"}
+
+    @api.get("/settings/asking-policy")
+    def get_asking_policy() -> dict:
+        from dataclasses import asdict
+        from ..domain.labeling.active import load_asking_policy
+        return {"policy": asdict(load_asking_policy(repo)), "bounds": _ASK_BOUNDS}
+
+    @api.post("/settings/asking-policy")
+    def set_asking_policy(body: dict) -> dict:
+        cur = repo.get_setting("asking.policy") or {}
+        if not isinstance(cur, dict):
+            cur = {}
+        for k, v in body.items():
+            if k not in _ASK_BOUNDS:
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"{k} must be a number")
+            lo, hi = _ASK_BOUNDS[k]
+            if not lo <= fv <= hi:
+                raise HTTPException(400, f"{k} must be between {lo} and {hi}")
+            cur[k] = int(fv) if k in _ASK_INT else fv
+        repo.set_setting("asking.policy", cur)
+        from dataclasses import asdict
+        from ..domain.labeling.active import load_asking_policy
+        return {"ok": True, "policy": asdict(load_asking_policy(repo))}
+
     # ── aggregate-stats consent (privacy lever for the AI assistant) ───────
     @api.get("/stats-consent")
     def get_stats_consent() -> dict:
