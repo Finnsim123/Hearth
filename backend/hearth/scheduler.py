@@ -133,6 +133,18 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
         scheduler.add_job(_first_train_if_ready, "interval", minutes=30,
                           id="first_train", max_instances=1, coalesce=True)
 
+        def _drift_check() -> None:
+            from .domain.training.drift import run_drift_check
+            try:
+                run_drift_check(tsdb, repo, deps.get("models"))
+            except Exception:
+                log.exception("drift check failed")
+
+        # daily: detect feature/regime drift (train window vs recent) before it
+        # silently degrades predictions; flags features and can trigger a retrain
+        scheduler.add_job(_drift_check, "interval", hours=24,
+                          id="drift_check", max_instances=1, coalesce=True)
+
         def _discover_all() -> None:
             from .domain.discovery.clustering import run_discovery
             run_discovery(tsdb, repo)

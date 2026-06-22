@@ -428,3 +428,37 @@ def test_recency_weighting_prefers_recent_regime():
     est.fit(X, y, sample_weight=w)
     pred = est.predict_proba(X.tail(1)).idxmax(axis=1).iloc[0]
     assert pred == "new"
+
+
+def test_compute_drift_flags_shifted_features():
+    """compute_drift reports per-feature PSI (training span vs recent) and flags
+    a feature whose distribution moved past the >0.2 bar (audit F5)."""
+    from hearth.domain.training.drift import compute_drift
+
+    now = pd.Timestamp.now(tz="UTC").floor("30min")
+    trained_at = (now - timedelta(days=10)).to_pydatetime()
+    rng = np.random.default_rng(5)
+    # training span: stable; recent week: temp shifts up hard, co2 stays put
+    train_idx = pd.date_range(end=now - timedelta(days=8), periods=400, freq="30min")
+    recent_idx = pd.date_range(end=now, periods=400, freq="30min")
+    train = pd.DataFrame({"temp": rng.normal(18, 1, 400),
+                          "co2": rng.normal(700, 20, 400)}, index=train_idx)
+    recent = pd.DataFrame({"temp": rng.normal(28, 1, 400),     # regime change
+                           "co2": rng.normal(700, 20, 400)}, index=recent_idx)
+    feats = pd.concat([train, recent])
+
+    class _Tsdb:
+        def read_features(self, person, fset, start, end):
+            return feats[(feats.index >= start) & (feats.index <= end)]
+
+    class _Repo:
+        def get_setting(self, k, d=None):
+            return d
+        def models(self, person=None):
+            return [ModelRecord(person_id="alice", version="alice-v1", node="root",
+                                feature_set="fs1", promoted=True,
+                                trained_at=trained_at, metrics={})]
+
+    report = compute_drift("alice", _Tsdb(), _Repo())
+    assert report["psi"]["temp"] > 0.2 and "temp" in report["drifted"]
+    assert report["psi"]["co2"] < 0.2 and "co2" not in report["drifted"]

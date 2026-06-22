@@ -1369,6 +1369,24 @@ def build_api_router(deps: dict) -> APIRouter:
             },
         }
 
+    # ── drift (feature/regime-change monitor, audit F5) ───────────────────
+    @api.get("/drift")
+    def drift(person: str | None = None) -> dict:
+        """Latest per-person drift report (computed daily by the scheduler).
+        {person_id: {psi, drifted, max_psi, trend, ...}}."""
+        people = [person] if person else [p.id for p in repo.persons()]
+        return {pid: repo.get_setting(f"drift.{pid}") for pid in people
+                if repo.get_setting(f"drift.{pid}")}
+
+    @api.post("/drift/run")
+    def drift_run() -> dict:
+        """Recompute drift now (don't wait for the daily job)."""
+        tsdb = deps.get("tsdb")
+        if tsdb is None:
+            raise HTTPException(503, "no time-series store")
+        from ..domain.training.drift import run_drift_check
+        return {"reports": run_drift_check(tsdb, repo, deps.get("models"))}
+
     # ── inbox (dashboard "needs you" preview + Inbox page) ────────────────
     @api.get("/inbox")
     def inbox(person: str | None = None) -> list:
