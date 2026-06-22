@@ -280,7 +280,6 @@ export default function App() {
       <NavLink to="/" end style={navLinkStyle} onClick={closeNav}>Dashboard</NavLink>
       <NavLink to="/behaviour" style={navLinkStyle} onClick={closeNav}>Behaviour</NavLink>
       <NavLink to="/activity" style={navLinkStyle} onClick={closeNav}>Activity</NavLink>
-      <NavLink to="/system" style={navLinkStyle} onClick={closeNav}>System</NavLink>
 
       {PIPELINE.map((g) => {
         const open = !navCollapsed.has(g.label) || g.label === currentGroup;

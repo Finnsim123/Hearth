@@ -5,6 +5,7 @@
  * Sources: /api/system/{vitals,history,coverage}; POST /api/system/mode.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import Card from "../components/Card";
 
 const j = (r: Response) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); };
@@ -82,6 +83,11 @@ export default function System() {
 
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 820 }}>
+      <Link to="/settings"
+        style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6,
+                 textDecoration: "none", color: "var(--text-dim)", fontSize: 13.5 }}>
+        ← All settings
+      </Link>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>System</h2>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "3px 11px",
