@@ -128,5 +128,5 @@ Capabilities beyond the three core pillars:
 ## Phase 5 — Ship it
 Hardening (authn, token encryption audit, backup/restore), docs site, example
 configs, HA add-on packaging (thin wrapper, Frigate-style), community recipe
-sharing format. Optional: Grafana dashboards pack.
+sharing format.
 **Accept:** a Reddit/r-homeassistant stranger installs without filing an issue.

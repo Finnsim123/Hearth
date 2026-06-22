@@ -1,5 +1,12 @@
 # Hearth — System Self-Awareness: Observability + Resource Governor
 
+> **Superseded premise (June 2026):** this proposal assumes "the Grafana you
+> already ship/bundle." Grafana has since been **removed** from the stack — all
+> dashboards/visuals are custom and live in the Hearth app. Read every "delegate
+> to / deep-link to Grafana" below as "render natively in the app." The
+> OpenTelemetry/Prometheus `/metrics` endpoint idea can stand on its own for
+> power users who bring their own Grafana, but Hearth no longer bundles one.
+
 Status: design proposal, June 2026. A subsystem that lets Hearth **sense its own
 load** (compute, power, thermal, I/O, Influx) and **regulate it** — throttle, defer,
 or safe-stop under pressure — alerting through the *same* Home-Assistant feedback

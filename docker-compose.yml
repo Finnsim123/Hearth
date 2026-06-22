@@ -5,7 +5,9 @@
 #                             bundled InfluxDB or point Hearth at your own — bring
 #                             your own and the bundled one simply stays idle.
 #   --profile mqtt      adds Mosquitto (skip if reusing HA's broker)
-#   --profile grafana   adds Grafana with provisioned dashboards
+#
+# All dashboards/visuals are custom and live in the Hearth app itself — there is
+# no Grafana.
 
 services:
   influxdb:
@@ -22,7 +24,7 @@ services:
       DOCKER_INFLUXDB_INIT_BUCKET: hearth_raw
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?set in .env}
     ports:
-      - "8086:8086"          # expose for Grafana on other hosts; remove if not needed
+      - "8086:8086"          # InfluxDB API; remove if only Hearth (same network) uses it
     healthcheck:
       test: ["CMD", "influx", "ping"]
       interval: 10s
@@ -67,23 +69,8 @@ services:
     ports:
       - "1883:1883"
 
-  grafana:
-    image: grafana/grafana:11.5.1
-    profiles: ["grafana"]
-    restart: unless-stopped
-    depends_on:
-      - influxdb
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-hearth}
-    ports:
-      - "3000:3000"
-
 volumes:
   influxdb-data:
   influxdb-config:
   hearth-data:
   mosquitto-data:
-  grafana-data:

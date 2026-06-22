@@ -158,8 +158,8 @@ Hearth never lets either system write ground truth on its own.
   (recall bias: people remember salient activities)?
 - Multi-home federation of *recipes/rules* (not data): a community recipe
   registry à la HACS — distribution question, post-v1.
-- Grafana: keep, or is the in-app model/feature explorer enough? Ship as
-  optional profile, decide on usage.
+- Grafana: dropped. The in-app model/feature explorer covers it; all visuals are
+  custom and live in the app, so there's no Grafana in the stack.
 
 
 ## Evidence tiers (added June 2026)

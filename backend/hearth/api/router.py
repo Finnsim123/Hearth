@@ -9,6 +9,19 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 log = logging.getLogger(__name__)
 
+SESSION_MAX_AGE = 30 * 86400
+
+
+def _set_session_cookie(response: Response, request: Request, cookie: str) -> None:
+    """Set the session cookie with `secure` derived from the request scheme /
+    X-Forwarded-Proto, so HTTPS deployments (behind a reverse proxy) get a
+    Secure cookie automatically while plain-HTTP LAN setups still work."""
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    secure = proto == "https" or request.url.scheme == "https"
+    response.set_cookie("hearth_session", cookie, httponly=True, samesite="lax",
+                        secure=secure, max_age=SESSION_MAX_AGE)
+
+
 from ..domain.onboarding.advisor import heuristic_bindings
 from ..domain.schemas import Activity, Binding, Person, Rule
 from ..domain.labeling.active import _is_sleep_like
@@ -20,15 +33,14 @@ def build_api_router(deps: dict) -> APIRouter:
 
     # ── auth ────────────────────────────────────────────────────────────────
     @api.post("/auth/login")
-    def login(body: dict, response: Response) -> dict:
+    def login(body: dict, request: Request, response: Response) -> dict:
         user = repo.verify_login(body.get("email", ""), body.get("password", ""))
         if user is None:
             raise HTTPException(401, "Wrong email or password")
         from .. import security
         cookie, sha = security.mint_session()
         repo.create_session(user.id, sha)
-        response.set_cookie("hearth_session", cookie, httponly=True,
-                            samesite="lax", max_age=30 * 86400)
+        _set_session_cookie(response, request, cookie)
         return {"ok": True, "user": {"email": user.email, "name": user.display_name,
                                      "role": user.role}}
 
@@ -63,8 +75,7 @@ def build_api_router(deps: dict) -> APIRouter:
         from .. import security
         cookie, sha = security.mint_session()
         repo.create_session(user.id, sha)
-        response.set_cookie("hearth_session", cookie, httponly=True,
-                            samesite="lax", max_age=30 * 86400)
+        _set_session_cookie(response, request, cookie)
         return {"ok": True}
 
     @api.post("/auth/reset")
@@ -546,7 +557,7 @@ def build_api_router(deps: dict) -> APIRouter:
     }
 
     @api.post("/setup/complete")
-    async def setup_complete(body: dict, response: Response) -> dict:
+    async def setup_complete(body: dict, request: Request, response: Response) -> dict:
         """One-shot: create admin, save connections/household/taxonomy/bindings,
         mark fast-track, then restart to apply (docker restarts the container)."""
         import asyncio
@@ -673,8 +684,7 @@ def build_api_router(deps: dict) -> APIRouter:
         if user is not None:
             cookie, sha = security.mint_session()
             repo.create_session(user.id, sha)
-            response.set_cookie("hearth_session", cookie, httponly=True,
-                                samesite="lax", max_age=30 * 86400)
+            _set_session_cookie(response, request, cookie)
 
         # restart to (re)build adapters with the saved connections
         if os.getenv("HEARTH_NO_RESTART") != "1":

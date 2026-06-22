@@ -54,7 +54,8 @@ HA sensors ──► Hearth pipeline ──► features ──► model ──�
   sensors are never pulled in silently. After the first model trains, predictions are
   100% local and the key is dead weight.
 - **📦 Shippable stack.** One command brings up the Hearth backend, web UI and a
-  bundled InfluxDB, with optional Grafana and Mosquitto.
+  bundled InfluxDB, with optional Mosquitto. All dashboards are custom and live
+  in the app — no Grafana.
 - **🕯️ Calm by design.** Warm ember on cool slate, one accent that always means
   something, dark/light/system themes. The full design language lives in
   [`docs/DESIGN.md`](docs/DESIGN.md).
@@ -248,7 +249,7 @@ behind ports, all I/O in adapters.
 backend/    Python modular monolith (api · domain · adapters · security.py)
 frontend/   React + TypeScript SPA (served by the backend in prod)
 custom_components/hearth/   Home Assistant integration (HACS layout)
-docs/ · brand/ · grafana/
+docs/ · brand/
 ```
 
 Run the backend tests:

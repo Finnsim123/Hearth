@@ -87,7 +87,7 @@ Verify on your machine:
   questions): `notifier.ask(...)` / a system-event variant → "running hot, training
   paused."
 - Telemetry: in the sampler, `tsdb.write_features`-style write a `hearth_system`
-  measurement so the Vitals page history + Grafana have data. Add `InfluxHealth`
+  measurement so the Vitals page history has data. Add `InfluxHealth`
   methods (`query_load`, `snapshot`) to `influx_store`.
 
 ### 2. Blind-spot advisor — assemble inputs + surface (small/medium)

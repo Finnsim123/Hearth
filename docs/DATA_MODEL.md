@@ -52,7 +52,7 @@ labels:       tags person, provenance(bootstrap|discovered|confirmed), source
 metrics:      tags person, model_version       fields accuracy_confirmed,
                                                accuracy_bootstrap, f1_<class>,
                                                auc_<class>, n_train, n_confirmed...
-heartbeat:    fields alive=1                   (Grafana/UI alert: gap > 2× cadence)
+heartbeat:    fields alive=1                   (UI alert: gap > 2× cadence)
 ```
 
 ## 2. SQLite schema (summary)

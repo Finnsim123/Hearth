@@ -21,7 +21,6 @@ flowchart LR
         B[Hearth backend\nFastAPI + scheduler]
         UI[Web UI :8420]
         I[(InfluxDB 2.x)]
-        G[Grafana\noptional]
         M[Mosquitto\noptional, or reuse HA's]
     end
     HA -- WebSocket: state_changed --> B
@@ -30,7 +29,6 @@ flowchart LR
     B -- REST: notify.mobile_app_* --> HA --> Phone
     Phone -- action tap / URI deep-link --> B
     UI --- B
-    G --- I
 ```
 
 Three pillars, exactly as required:
@@ -161,9 +159,10 @@ hearth_raw ──► prepare (resample 1-min, role-aware ffill limits)
 ```
 
 Features are **persisted to InfluxDB** — requirement #1 — which buys: training
-reads a precomputed matrix (fast retrains, reproducible), Grafana can chart any
-feature, and inference and training are guaranteed to see identical values
-(no train/serve skew — lesson from the prototype's dead `prev_label` features).
+reads a precomputed matrix (fast retrains, reproducible), the app's own feature
+explorer can chart any feature, and inference and training are guaranteed to see
+identical values (no train/serve skew — lesson from the prototype's dead
+`prev_label` features).
 Feature definitions are versioned; a changed recipe bumps `feature_set` and
 triggers backfill of the new column(s) only.
 
@@ -476,7 +475,7 @@ notification budgets, persons).
 ## 8. Deployment
 
 `docker-compose.yml` ships: `influxdb` (2.7, pinned), `hearth` (backend+UI),
-profiles for `grafana` and `mosquitto` (skip if reusing HA's broker). Single
+and an optional `mosquitto` profile (skip if reusing HA's broker). Single
 `.env` for first-boot secrets; everything else is configured in the UI and stored
 in SQLite (volume-mounted). Backend is one image; UI is built into it at image
 build time. Health endpoints + heartbeat measurement for alerting. A HA add-on
@@ -488,7 +487,7 @@ wrapper is a later thin packaging of the same image (Frigate model).
 |---|---|---|---|
 | Hearth only (external InfluxDB) | 1–2 | 1 GB | 1 GB |
 | Hearth + bundled InfluxDB | 2 | 2 GB | 1–2 GB |
-| Comfortable (+ Grafana, Phase 4 discovery, HEPA) | 4 | 4 GB | 2 GB |
+| Comfortable (+ Phase 4 discovery, HEPA) | 4 | 4 GB | 2 GB |
 
 Steady state is light (~300–400 MB backend, ~50 events/min ingest, one
 inference row/person/5 min). The spikes: weekly RF training (~1 GB peak,
@@ -507,7 +506,7 @@ OOM a tight box — steady-state swapping means undersized.
 | 4 | App state in SQLite (SQLAlchemy), not Influx | Taxonomy, bindings, rules, registry, questions are relational/transactional; time series DBs are wrong for this. Postgres unnecessary at this scale. |
 | 5 | Entities out via MQTT discovery, REST fallback | REST `/api/states` is ephemeral (restart-loss) and registry-less — proven pain. Custom component: high maintenance, blocks casual installs. |
 | 6 | Feedback keyed on action IDs + server-side question rows | iOS never returns notification tags (home-assistant/iOS#1666) — proven failure in prototype. |
-| 7 | Features persisted to InfluxDB, versioned | Reproducible training, no train/serve skew, Grafana-inspectable. Cost: storage (trivial at 48–288 rows/day). |
+| 7 | Features persisted to InfluxDB, versioned | Reproducible training, no train/serve skew, inspectable in the app's feature explorer. Cost: storage (trivial at 48–288 rows/day). |
 | 8 | Role-based feature recipes | Hardcoded entity names don't generalize; device-class-driven recipes are the portability mechanism. |
 | 9 | RF default; GBT / logistic / embedding implemented behind the `Estimator` port, user-selectable | RF is the known-good cold-start default; the enriched port (importances/calibrate/sample-weight) lets families swap with no trainer changes. |
 | 10 | React SPA served by backend | Streamlit: weak for a product-grade comprehensive UI. Grafana-only: can't do wizards/inbox/taxonomy CRUD. |
