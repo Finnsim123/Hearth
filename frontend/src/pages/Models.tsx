@@ -9,6 +9,9 @@ import { Icon } from "../icons";
 
 type PerClass = { precision: number; recall: number; f1: number; support: number };
 type Metrics = {
+  accuracy_gold?: number | null;
+  accuracy_gold_ci?: [number, number];
+  n_gold?: number;
   accuracy_confirmed?: number | null;
   accuracy_confirmed_ci?: [number, number];
   accuracy_bootstrap?: number | null;
@@ -24,6 +27,9 @@ type Metrics = {
   hyperparams?: Record<string, unknown>;
   validation_status?: "validated" | "provisional";
 };
+
+const GOLD_MIN = 30;  // matches MIN_CONFIRMED_FOR_VALIDATED — below this the
+                      // unbiased spot-check estimate is too thin to headline
 type Model = {
   id: number; person_id: string; version: string; algo: string;
   trained_at: string | null; promoted: boolean;
@@ -39,6 +45,35 @@ function MetricChip({ label, value, hint }: { label: string; value: string; hint
                                borderRadius: 10, textAlign: "center", minWidth: 92 }}>
       <div style={{ fontSize: 18, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{value}</div>
       <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{label}</div>
+    </div>
+  );
+}
+
+function HeroAccuracy({ mt }: { mt: Metrics }) {
+  // The honest headline (audit F1): accuracy measured on RANDOM spot-checks
+  // (ε-explore asks) is an unbiased sample of the home's life. accuracy_confirmed
+  // pools those with the hard, uncertainty-sampled windows we deliberately asked
+  // about, so it reads pessimistically — shown beside, not as, the headline.
+  const nGold = mt.n_gold ?? 0;
+  const ready = nGold >= GOLD_MIN && mt.accuracy_gold != null;
+  return (
+    <div style={{ padding: "10px 16px", border: "1px solid var(--accent)", borderRadius: 10,
+                  minWidth: 150, background: "color-mix(in srgb, var(--accent) 7%, transparent)" }}
+         title={ready && mt.accuracy_gold_ci
+           ? `95% CI: ${pct(mt.accuracy_gold_ci[0])}–${pct(mt.accuracy_gold_ci[1])}. Measured on ${nGold} random spot-checks — an unbiased sample, the fair estimate of real-world accuracy.`
+           : `Gathering random spot-checks (${nGold}/${GOLD_MIN}). Until then the fair headline can't be measured; the numbers beside are on harder, hand-picked moments.`}>
+      <div style={{ fontSize: 24, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                    color: ready ? "var(--text)" : "var(--text-dim)" }}>
+        {ready ? pct(mt.accuracy_gold) : `${nGold}/${GOLD_MIN}`}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+        {ready ? "real-world accuracy" : "gathering spot-checks"}
+      </div>
+      {ready && mt.accuracy_gold_ci && (
+        <div style={{ fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+          ±{pct((mt.accuracy_gold_ci[1] - mt.accuracy_gold_ci[0]) / 2)}
+        </div>
+      )}
     </div>
   );
 }
@@ -203,9 +238,10 @@ function ModelCard({ m, onAction }: { m: Model; onAction: () => void }) {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <MetricChip label="confirmed acc" value={pct(mt.accuracy_confirmed)}
-          hint={mt.accuracy_confirmed_ci ? `95% CI: ${pct(mt.accuracy_confirmed_ci[0])}–${pct(mt.accuracy_confirmed_ci[1])} — accuracy on labels a human confirmed` : "no confirmed labels in validation yet"} />
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch" }}>
+        <HeroAccuracy mt={mt} />
+        <MetricChip label="on tricky moments" value={pct(mt.accuracy_confirmed)}
+          hint={mt.accuracy_confirmed_ci ? `95% CI: ${pct(mt.accuracy_confirmed_ci[0])}–${pct(mt.accuracy_confirmed_ci[1])}. Accuracy on the uncertain windows Hearth deliberately asked about — these are the HARD cases, so this reads lower than real-world accuracy. Great for training, not the fair headline.` : "no confirmed labels in validation yet"} />
         <MetricChip label="bootstrap agr" value={pct(mt.accuracy_bootstrap)}
           hint="Agreement with rule-generated labels — NOT real accuracy, the rules can be wrong" />
         <MetricChip label="AUC (macro)" value={mt.auc_macro ? mt.auc_macro.toFixed(3) : "—"}
@@ -290,8 +326,8 @@ function PersonHistory({ models }: { models: Model[] }) {
   const [open, setOpen] = useState(false);
   if (models.length < 2) return null;
   const series = [...models].reverse();             // oldest -> newest
-  const accs = series.map((m) => m.metrics?.accuracy_confirmed
-    ?? m.metrics?.accuracy_bootstrap ?? null);
+  const accs = series.map((m) => m.metrics?.accuracy_gold
+    ?? m.metrics?.accuracy_confirmed ?? m.metrics?.accuracy_bootstrap ?? null);
   const aucs = series.map((m) => m.metrics?.auc_macro ?? null);
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
@@ -390,10 +426,11 @@ export default function Models() {
         <h2 style={{ margin: 0 }}>Models</h2>
       </div>
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)", maxWidth: 640 }}>
-        Every model Hearth has trained, with honest numbers: <strong>confirmed acc</strong> is
-        measured only on labels a human gave; bootstrap agreement just says how much the model
-        echoes the starter rules. New models go live only when the promotion gate says they're
-        not credibly worse than the current one.
+        Every model Hearth has trained, with honest numbers. <strong>Real-world accuracy</strong> is
+        measured on random spot-checks — an unbiased sample, so it's the fair headline; the
+        "tricky moments" number is on the hard windows Hearth asked about and reads lower by design.
+        Bootstrap agreement just says how much the model echoes the starter rules. New models go
+        live only when the promotion gate says they're not credibly worse than the current one.
       </p>
       {trainMsg && <p style={{ margin: 0, fontSize: 13.5, color: "var(--accent)" }}>{trainMsg}</p>}
       {models === null && <p style={{ color: "var(--text-dim)" }}>Loading…</p>}
