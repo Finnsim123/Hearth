@@ -40,22 +40,30 @@ HA sensors ──► Hearth pipeline ──► features ──► model ──�
 ## 🔥 Why Hearth
 
 - **🏠 Local-first.** Everything runs on your own box. Your accounts, your data, no
-  cloud anywhere, no account to sign up for.
+  cloud to depend on, no account to sign up for. The only outbound traffic is opt-in
+  and yours: the setup LLM (if you add a key) and the weekly email (if you turn it on).
 - **🗣️ Your activities, not ours.** Define your own taxonomy (cooking, gaming,
   chilling…) in the UI. Hearth clusters patterns it finds in your data and you name
   them, in a tap.
-- **🔍 Glass-box ML.** The UI shows accuracy with confidence intervals, per-class
-  F1 and AUC, confusion matrices, the sensors behind every prediction, and how the
-  model trends across versions. A model stays marked *provisional* until enough of
-  your own confirmations have validated it.
+- **🧱 A fact beats a guess.** Some things never need a model: when your presence says
+  you're out, Hearth marks you *away* and skips inference entirely. Bind a reliable
+  sleep or presence sensor and those states become facts — checked for reliability
+  before they're trusted, and cheaper and surer than any prediction.
+- **🔍 Glass-box ML.** The UI shows accuracy with confidence intervals, per-class F1
+  and AUC, confusion matrices, the sensors behind every prediction, and how the model
+  trends across versions. A model stays *provisional* until enough of your own
+  confirmations have validated it.
 - **🧠 AI sets up, you stay in control.** An optional language-model assistant reads
   your sensors *once* — it picks what's worth using, classifies each signal, designs
   the features (with reasons you can read), and flags sensors that look broken. New
   sensors are never pulled in silently. After the first model trains, predictions are
   100% local and the key is dead weight.
+- **📰 A weekly recap, if you want it.** An opt-in, per-member email summarises the
+  week's habits — designed in three detail levels, written from your own data (with an
+  optional AI summary). Off by default.
 - **📦 Shippable stack.** One command brings up the Hearth backend, web UI and a
-  bundled InfluxDB, with optional Mosquitto. All dashboards are custom and live
-  in the app — no Grafana.
+  bundled InfluxDB, with optional Mosquitto. All dashboards are custom and live in the
+  app — no Grafana.
 - **🕯️ Calm by design.** Warm ember on cool slate, one accent that always means
   something, dark/light/system themes. The full design language lives in
   [`docs/DESIGN.md`](docs/DESIGN.md).
@@ -70,8 +78,10 @@ HA sensors ──► Hearth pipeline ──► features ──► model ──�
 | **Home Assistant** | Source of sensor data and where predictions land. You'll need its URL and a long-lived access token. |
 | **InfluxDB** *(optional)* | Where time-series data lives. Hearth bundles one; or point it at your existing instance in the wizard. |
 | **An LLM API key** *(optional)* | OpenRouter or any OpenAI-compatible endpoint. Used only at setup to tailor sensor mapping and features. Heuristics cover everything without it. |
+| **An SMTP relay** *(optional)* | Only if you want email — the weekly newsletter and self-service password recovery. Any provider works (e.g. Gmail with an app-password). Not a mail server; outbound only. |
 
-A typical homelab box (a NAS, a mini-PC, a Pi 4/5) is plenty. No GPU.
+A typical homelab box (a NAS, a mini-PC, a Pi 4/5) is plenty. No GPU. Classical ML
+(scikit-learn) only — steady state is light; the heaviest moment is the weekly retrain.
 
 ---
 
@@ -99,8 +109,8 @@ the browser.
 
 ## 🧭 The setup wizard
 
-A ten-step, resumable wizard walks you through everything. Each step explains itself
-in plain language, and you can close the tab and pick up where you left off.
+An eleven-step, resumable wizard walks you through everything. Each step explains
+itself in plain language, and you can close the tab and pick up where you left off.
 
 1. **Create your account** — first boot has no users; you set the admin login.
 2. **Connect Home Assistant** — URL + token, with a live connection check.
@@ -108,7 +118,8 @@ in plain language, and you can close the tab and pick up where you left off.
    configuration) or connect your own. Connect your own and the bundled one sits idle.
 4. **MQTT** *(optional)* — reuse Home Assistant's broker or skip.
 5. **Household** — add the people Hearth predicts for, each with optional phone
-   notifications, a daily question budget and quiet hours.
+   notifications, an email (for recovery and the opt-in newsletter), a daily question
+   budget and quiet hours.
 6. **Sensor inventory** — Hearth scans every entity and, where history exists,
    computes per-sensor statistics. Downloadable so you can see exactly what's used.
 7. **AI assist** *(optional)* — paste a key to let the assistant design your setup,
@@ -116,9 +127,12 @@ in plain language, and you can close the tab and pick up where you left off.
    the built-in heuristics.
 8. **Activities** — pick a starter set (sleeping/away/home, plus cooking/movie/…) or
    define your own. Fully editable later.
-9. **Connect output to Home Assistant** — one-click links install the Hearth
-   integration and add it in HA; paste the token shown here.
-10. **Done** — recording starts.
+9. **What I can know for sure** — bind a reliable presence/sleep sensor so *away* and
+   *asleep* become facts, not predictions. Each is reliability-checked before it's
+   trusted. Skippable; set up later in Settings.
+10. **Connect output to Home Assistant** — one-click links install the Hearth
+    integration and add it in HA; paste the token shown here.
+11. **Done** — recording starts.
 
 **Fast track:** if your InfluxDB already holds history, Hearth imports it, builds
 features and trains a first model during setup, so predictions appear within minutes.
@@ -133,13 +147,14 @@ After setup, the UI is insight, settings and a feedback loop:
 
 | Page | What it's for |
 |---|---|
-| **Dashboard** | What Hearth thinks each person is doing right now, the day's activity ribbon, and anything that needs you. |
+| **Dashboard** | What Hearth thinks each person is doing right now, the day's activity ribbon, the sensor-coverage map, and anything that needs you. |
+| **Behaviour** | Your habits and routines over time — when things happen, what follows what, and shifts from week to week. |
 | **Inbox** | The questions Hearth asks when it's unsure. One tap to answer; bulk-label a time range. |
 | **Activities** | Your activity taxonomy and the labeling rules behind it. |
 | **Patterns** | Recurring routines Hearth discovered but can't name yet. Name one and it labels weeks of history at once. |
 | **Models** | The glass box: honest metrics, confusion matrix, feature importances, version trends, and Train now. |
 | **Sensors** | Every bound sensor, its role and reliability, newly discovered sensors waiting for approval, and the AI's feature design. |
-| **Settings** | Connections, the household, model and AI levers, themes, accounts, and updates. |
+| **Settings** | Connections, the household, model and AI levers, email, the weekly newsletter, themes, accounts and two-factor, and updates. |
 | **Methodology** | A plain-language, personalised walkthrough of how Hearth turns your sensors into "what you're doing". |
 
 ### Getting predictions out
@@ -153,9 +168,19 @@ answer straight back into training. This path needs no MQTT broker.
 
 **Other hubs, or broker-based setups (MQTT).** Configure an MQTT broker and Hearth
 publishes the same per-person activity and confidence as retained Home-Assistant
-discovery entities, so any hub that speaks HA-style MQTT discovery, Homey, Node-RED,
-openHAB, picks them up automatically. Use this when you're not on Home Assistant or
+discovery entities, so any hub that speaks HA-style MQTT discovery — Homey, Node-RED,
+openHAB — picks them up automatically. Use this when you're not on Home Assistant or
 prefer broker wiring; if you use the HA integration, leave MQTT off.
+
+### The weekly newsletter *(optional)*
+
+A designed weekly recap of each member's habits, emailed Sunday morning — headline
+stats, the week's activity split, a rhythm heatmap and trends, in **three detail
+tiers** (overview / medium / detailed) you choose in Settings, with a live preview.
+It's **opt-in per member** and off by default; turn it on (and add an email) for a
+member in the wizard or under Settings → Household, and configure the SMTP relay under
+Settings → Integrations. The more detailed the tier, the more revealing the document
+that leaves your box — so the choice is yours, and clearly labelled.
 
 ---
 
@@ -178,22 +203,36 @@ aggregate sensor statistics** (a clear yes/no, default off), and approve every
 proposal. When you add a new sensor later, Hearth asks before analysing or retraining
 — a sensor you plug in to test never silently spends tokens or changes the model.
 
-The key is used only at setup and re-analysis. Predictions never call it.
+The key is used only at setup and re-analysis. Predictions never call it. (If you also
+enable the newsletter's AI summary, that's the only other place a key is used.)
 
 ---
 
 ## 🔒 Privacy & control
 
-- **Nothing leaves your hardware.** No cloud, no telemetry, no account.
+- **Your hardware is the boundary.** No cloud service, no telemetry, no account to
+  create. The only traffic that ever leaves the box is opt-in and yours: the setup LLM
+  (if you add a key) and the weekly email (if you turn it on). Both are off by default.
 - **The LLM, if you enable it, sees metadata and aggregate statistics only** — never
   your raw sensor history or a timeline of your life — and only with your explicit
   consent. You can run entirely without it.
+- **The newsletter is opt-in and labelled.** Email leaves your box by nature, so the
+  weekly recap is off until a member turns it on, and the detail tier tells you exactly
+  how revealing the message is.
+- **Your model data is kept forever; raw is not hoarded.** Engineered features (what
+  the model learns from) and your predictions/labels are retained indefinitely; the
+  raw sensor stream is bounded (default 90 days) — long enough to rebuild and power the
+  live views, without keeping a fine-grained log of your life around forever. The
+  window is yours to change in Settings.
+- **Accounts you control.** Password login with lockout/backoff, optional **two-factor
+  (TOTP)** with one-time recovery codes, and self-service password recovery by email
+  (or a CLI token if email isn't set up).
 - **Honest by default.** A model is labelled *provisional* until enough confirmed
   labels validate it, and Hearth publishes `unknown` rather than guess when it isn't
   sure, so an automation never fires on a shaky read.
 - **You own the levers.** Model family (random forest, gradient-boosted, logistic),
-  feature-engineering power, the commit/abstain threshold, question budgets and quiet
-  hours are all editable in Settings.
+  feature-engineering power, the commit/abstain threshold, question budgets, quiet
+  hours and raw-retention are all editable in Settings.
 - **Delete anything.** Sensors, labels, models — and a factory reset (`bash
   install.sh --reset`) returns you to the wizard without touching your time-series data.
 
@@ -219,8 +258,14 @@ git pull && docker compose up -d --build
   over its WebSocket API — no HA→InfluxDB integration needed. "No data" means HA isn't
   sending changes for it (entity disabled in HA, or it simply hasn't changed yet). The
   Sensors page flags stuck or silent sensors.
-- **It can't predict "away".** Link each person to their `person.*` home/away entity
-  on the Sensors page (Auto-link with AI, or by hand).
+- **It can't predict "away".** Bind each person's `person.*` home/away entity in the
+  "What I can know for sure" step (or later on the Sensors page) — that makes *away* a
+  fact, not a guess.
+- **No email arriving.** Configure an SMTP relay under Settings → Integrations and use
+  its test button; for Gmail use an app-password, not your login password.
+- **Locked out and 2FA-bound.** Use a recovery code at sign-in, or reset your password
+  by email; with no email set up, mint a token with `docker compose exec hearth python
+  -m hearth.recover you@example.com`.
 
 ---
 
@@ -229,11 +274,11 @@ git pull && docker compose up -d --build
 | Doc | What's in it |
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design, the three pillars, the AI feature layer, all ADRs — **start here** |
-| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | Buckets, schemas, the entity catalog, data-duration guidance |
+| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | Buckets, schemas, the entity catalog, retention, data-duration guidance |
 | [`docs/UI_SPEC.md`](docs/UI_SPEC.md) | Every page of the web UI, the wizard, the API surface |
 | [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) | How sensors become activities, in plain language |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | Design language: tokens, components, icons, theming, voice |
-| [`docs/SECURITY.md`](docs/SECURITY.md) | Accounts, sessions, where every secret lives |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | Accounts, sessions, two-factor, where every secret lives |
 | [`docs/RESEARCH.md`](docs/RESEARCH.md) | Hard problems, prior art, the HEPA / world-model and LLM bets |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phased build plan with acceptance criteria |
 
