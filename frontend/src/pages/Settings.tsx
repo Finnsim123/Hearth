@@ -1153,7 +1153,7 @@ type SectionKey =
 
 const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }[] = [
   { key: "household", icon: "household", title: "Household",
-    desc: "People, avatars, notifications and daily question budgets." },
+    desc: "People, avatars, notifications, the weekly newsletter, and daily question budgets." },
   { key: "model", icon: "models", title: "Model",
     desc: "Ground-truth facts, data sharing, feature power, model family, clock trust, commit threshold and history retention." },
   { key: "integrations", icon: "flow", title: "Integrations",
@@ -1233,6 +1233,88 @@ function EmailSettings() {
   );
 }
 
+const NL_TIERS: [string, string, string][] = [
+  ["overview", "Overview", "Headline stats + the week's split. Short."],
+  ["medium", "Medium", "+ rhythm heatmap, weekly shifts, top routines."],
+  ["detailed", "Detailed", "+ per-day breakdown, full transitions, rest & away."],
+];
+
+// The weekly habits newspaper: pick a detail tier, preview the real design, and
+// send. Opt-in + per-member email live on each person (Household / wizard).
+function NewsletterDesign() {
+  const [cfg, setCfg] = useState<Record<string, any> | null>(null);
+  const [detail, setDetail] = useState("medium");
+  const [person, setPerson] = useState("");
+  const [html, setHtml] = useState("");
+  const [note, setNote] = useState("");
+  const load = () => fetch("/api/settings/newsletter").then(j).then((d) => {
+    setCfg(d); setDetail(d.detail);
+    if (d.recipients?.[0] && !person) setPerson(d.recipients[0].id);
+  }).catch(() => setCfg({}));
+  useEffect(() => { load(); }, []);
+  // live preview — refetch the rendered HTML when tier or recipient changes
+  useEffect(() => {
+    const qs = new URLSearchParams({ detail, ...(person ? { person } : {}) });
+    fetch(`/api/newsletter/preview?${qs}`).then((r) => r.text()).then(setHtml).catch(() => setHtml(""));
+  }, [detail, person]);
+  const save = (d: string) => {
+    setDetail(d);
+    post("/api/settings/newsletter", { detail: d }).then(j).catch(() => {});
+  };
+  const send = async (toAll: boolean) => {
+    setNote(toAll ? "Sending to everyone…" : "Sending test…");
+    try {
+      const r = await post("/api/newsletter/send", toAll ? {} : { person }).then(j);
+      setNote(toAll ? `Sent to ${r.sent ?? 0} member(s)` : `Sent to ${r.sent_to}`);
+    } catch { setNote("Send failed — check email settings and logs"); }
+  };
+  if (!cfg) return null;
+  const recips: { id: string; name: string }[] = cfg.recipients ?? [];
+  return (
+    <Card title="Weekly newsletter"
+          sub="A designed weekly recap of each member's habits, emailed Sunday morning. Pick how much detail to include — more detail means a more revealing document leaving your local box. Opt-in and email address are set per member above.">
+      {!cfg.email_ready && (
+        <p style={{ margin: 0, fontSize: 13, color: "var(--warn, #fbbf24)" }}>
+          Set up email under Settings → Integrations first — the newsletter needs an SMTP relay.
+        </p>
+      )}
+      <Row label="Detail level">
+        <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 999, overflow: "hidden" }}>
+          {NL_TIERS.map(([v, l]) => (
+            <button key={v} onClick={() => save(v)} title={NL_TIERS.find((t) => t[0] === v)![2]}
+              style={{ border: "none", cursor: "pointer", padding: "6px 14px", fontSize: 12.5, fontWeight: 600,
+                       background: detail === v ? "var(--accent)" : "transparent",
+                       color: detail === v ? "#fff" : "var(--text-dim)" }}>{l}</button>
+          ))}
+        </span>
+      </Row>
+      <p style={{ margin: "0 0 4px", fontSize: 12.5, color: "var(--text-dim)" }}>
+        {NL_TIERS.find((t) => t[0] === detail)?.[2]}
+      </p>
+      {recips.length > 0 && (
+        <Row label="Preview member">
+          <select value={person} onChange={(e) => setPerson(e.target.value)}>
+            {recips.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </Row>
+      )}
+      <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "#0f1115" }}>
+        <iframe title="Newsletter preview" srcDoc={html} style={{ width: "100%", height: 520, border: "none", display: "block" }} />
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
+        <button className="btn btn-ghost" disabled={!cfg.email_ready || !person} onClick={() => send(false)}>Send test to selected</button>
+        <button className="btn btn-primary" disabled={!cfg.email_ready || recips.length === 0} onClick={() => send(true)}>Send this week's now</button>
+        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{note}</span>
+      </div>
+      {recips.length === 0 && (
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+          No opted-in recipients yet — turn on the weekly email for a member (with an address) above.
+        </p>
+      )}
+    </Card>
+  );
+}
+
 function ConnectionsSection() {
   return (
     <>
@@ -1264,7 +1346,7 @@ function ConnectionsSection() {
 
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
-    case "household": return (<><Household /><AdvancedAsking /></>);
+    case "household": return (<><Household /><NewsletterDesign /><AdvancedAsking /></>);
     case "model": return (<><FoundationalFacts /><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /><AdvancedTraining /></>);
     case "integrations": return <ConnectionsSection />;
     case "prompts": return <AiPrompts />;

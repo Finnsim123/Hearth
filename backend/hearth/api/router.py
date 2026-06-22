@@ -1800,6 +1800,65 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(502, "Send failed — check host/port/credentials and logs")
         return {"ok": True}
 
+    # ── weekly habits newsletter (detail tier + preview + send-now) ───────
+    @api.get("/settings/newsletter")
+    def get_newsletter() -> dict:
+        from ..domain.behaviour.newsletter import DETAIL_LEVELS
+        from ..domain.behaviour.newsletter_service import current_detail
+        recipients = [{"id": p.id, "name": p.name} for p in repo.persons()
+                      if getattr(p, "enabled", True) and getattr(p, "newsletter", False)
+                      and getattr(p, "email", None)]
+        return {"detail": current_detail(repo), "levels": list(DETAIL_LEVELS),
+                "email_ready": bool(deps.get("email") and deps["email"].configured()),
+                "recipients": recipients}
+
+    @api.post("/settings/newsletter")
+    def set_newsletter(body: dict) -> dict:
+        from ..domain.behaviour.newsletter import DETAIL_LEVELS
+        detail = body.get("detail")
+        if detail not in DETAIL_LEVELS:
+            raise HTTPException(400, f"detail must be one of {DETAIL_LEVELS}")
+        repo.set_setting("newsletter.detail", detail)
+        return {"ok": True, "detail": detail}
+
+    @api.get("/newsletter/preview")
+    def preview_newsletter(person: str | None = None, detail: str | None = None) -> Response:
+        """Rendered HTML for the Settings live preview. No LLM intro (fast +
+        deterministic); the real weekly send adds the AI recap."""
+        from ..domain.behaviour.newsletter_service import build_for_person, current_detail
+        people = repo.persons()
+        p = next((x for x in people if x.id == person), None) or (people[0] if people else None)
+        if p is None:
+            return Response(content="<p style='font:14px sans-serif;padding:20px'>No household members yet.</p>",
+                            media_type="text/html")
+        _, html, _ = build_for_person(repo, deps.get("tsdb"), p, detail or current_detail(repo))
+        return Response(content=html, media_type="text/html")
+
+    @api.post("/newsletter/send")
+    async def send_newsletter(body: dict) -> dict:
+        """Send now. {person:<id>} sends to that member (test/manual); omit to
+        run the full weekly send to all opted-in members."""
+        from ..domain.behaviour.newsletter_service import (build_async,
+                                                           current_detail, send_weekly)
+        sender = deps.get("email")
+        if sender is None or not sender.configured():
+            raise HTTPException(409, "Configure SMTP first")
+        pid = body.get("person")
+        if not pid:
+            return await send_weekly(deps)
+        p = next((x for x in repo.persons() if x.id == pid), None)
+        if p is None:
+            raise HTTPException(404, "Unknown member")
+        if not getattr(p, "email", None):
+            raise HTTPException(400, "That member has no email address")
+        subject, html, text = await build_async(repo, deps.get("tsdb"), p,
+                                                current_detail(repo), with_llm=True)
+        import asyncio
+        ok = await asyncio.to_thread(sender.send, p.email, subject, html, text)
+        if not ok:
+            raise HTTPException(502, "Send failed — check logs")
+        return {"ok": True, "sent_to": p.email}
+
     @api.get("/system/status")
     def status() -> dict:
         return {"bindings": len(repo.bindings()),

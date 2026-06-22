@@ -149,6 +149,18 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
         scheduler.add_job(_train_all, "cron", day_of_week="sun", hour=3,
                           id="weekly_training", max_instances=1)
 
+        async def _weekly_newsletter() -> None:
+            # Sunday morning recap, after the overnight retrain so accuracy is
+            # fresh. No-ops cleanly when SMTP is off or nobody opted in.
+            from .domain.behaviour.newsletter_service import send_weekly
+            try:
+                await send_weekly(deps)
+            except Exception:
+                log.exception("weekly newsletter failed")
+
+        scheduler.add_job(_weekly_newsletter, "cron", day_of_week="sun", hour=8,
+                          id="weekly_newsletter", max_instances=1)
+
         def _first_train_if_ready() -> None:
             """Cold-start accelerator: a fresh no-history install shouldn't wait
             until Sunday for its first model. As soon as a person has enough
@@ -231,6 +243,19 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
         scheduler.add_job(check_milestones, "interval", minutes=30,
                           args=[repo, tsdb, deps["notifier"]], id="milestones",
                           max_instances=1, coalesce=True)
+
+        async def _behaviour_digest() -> None:
+            # opt-in weekly recap (descriptive, via the same notification channel).
+            # No-op unless behaviour.digest.enabled is set.
+            from .domain.behaviour.digest import run_weekly_digest
+            try:
+                await run_weekly_digest(repo, tsdb, deps["notifier"])
+            except Exception:
+                log.exception("weekly behaviour digest failed")
+
+        # Monday 08:00 — a gentle start-of-week "here's how last week went".
+        scheduler.add_job(_behaviour_digest, "cron", day_of_week="mon", hour=8,
+                          id="behaviour_digest", max_instances=1)
 
     if tsdb is not None and events is not None:
         from .domain.inference.realtime import RealtimeSignal, realtime_loop
