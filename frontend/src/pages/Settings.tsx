@@ -727,14 +727,26 @@ function TrainingWindow() {
   );
 }
 
+type CoveragePoint = { t: number; coverage: number; precision: number | null };
+
 function OutputPolicy() {
   const [enabled, setEnabled] = useState(true);
   const [threshold, setThreshold] = useState(0.4);
   const [state, setState] = useState<SaveState>("idle");
+  const [curve, setCurve] = useState<CoveragePoint[]>([]);
   useEffect(() => {
     fetch("/api/output-policy").then(j)
       .then((r) => { setEnabled(r.abstain_enabled); setThreshold(r.abstain_threshold); }).catch(() => {});
+    // coverage/precision curve from the live model → "set with preview" (UX6)
+    fetch("/api/models").then(j).then((ms: { promoted: boolean; node?: string;
+      metrics?: { coverage_curve?: CoveragePoint[] } }[]) => {
+      const live = ms.find((m) => m.promoted && m.metrics?.coverage_curve);
+      if (live?.metrics?.coverage_curve) setCurve(live.metrics.coverage_curve);
+    }).catch(() => {});
   }, []);
+  const pt = curve.length
+    ? curve.reduce((b, c) => Math.abs(c.t - threshold) < Math.abs(b.t - threshold) ? c : b)
+    : null;
   const save = async (patch: { abstain_enabled?: boolean; abstain_threshold?: number }) => {
     setState("saving");
     try {
@@ -761,6 +773,15 @@ function OutputPolicy() {
                onMouseUp={(e) => save({ abstain_threshold: Number((e.target as HTMLInputElement).value) })}
                onTouchEnd={(e) => save({ abstain_threshold: Number((e.target as HTMLInputElement).value) })} />
       </Row>
+      {enabled && pt && pt.precision != null && (
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)",
+                    background: "var(--surface-2)", borderRadius: 8, padding: "8px 12px" }}>
+          On your model's recent data, Hearth would commit on{" "}
+          <strong>~{Math.round(pt.coverage * 100)}%</strong> of windows and be right{" "}
+          <strong>~{Math.round(pt.precision * 100)}%</strong> of those; the rest become
+          “unknown” or a question. <span style={{ opacity: 0.7 }}>Indicative — moves with the slider.</span>
+        </p>
+      )}
       <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>{savedNote(state)}</p>
     </Card>
   );

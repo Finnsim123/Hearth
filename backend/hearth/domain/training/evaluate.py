@@ -132,6 +132,22 @@ def evaluate_model(
     cm = confusion_matrix(y_val, y_pred, labels=classes)
     out["confusion"] = {"labels": classes, "matrix": cm.tolist()}
 
+    # coverage/precision curve (UX6): at each confidence threshold, what fraction
+    # of windows the model commits on (coverage) and how accurate those are
+    # (precision). Drives the live preview under the abstain slider — the
+    # "set-with-preview" pattern. Indicative (pre-calibration eval probs).
+    conf = probs.max(axis=1).to_numpy()
+    corr = correct.to_numpy()
+    n = len(conf)
+    curve = []
+    for t in np.linspace(0.0, 0.9, 10):
+        m = conf >= t
+        cov = int(m.sum())
+        curve.append({"t": round(float(t), 2),
+                      "coverage": round(cov / n, 4) if n else 0.0,
+                      "precision": round(float(corr[m].mean()), 4) if cov else None})
+    out["coverage_curve"] = curve
+
     # slice analysis (UX5): accuracy by daypart × activity surfaces failure
     # pockets that the aggregate hides (great at 8pm, poor at 3am). Free here —
     # the windows are already time-stamped (SliceFinder idiom).
