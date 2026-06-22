@@ -278,7 +278,8 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
         est.fit(X_train, y_train, sample_weight=weights.to_numpy())
     else:
         est.fit(X_train, y_train)
-    metrics = evaluate_model(est, X_val, y_val, prov_val, gold_val)
+    tz = repo.get_setting("timezone", "UTC") or "UTC"
+    metrics = evaluate_model(est, X_val, y_val, prov_val, gold_val, tz=tz)
     metrics["n_train"] = int(len(X_train))
     metrics["feature_count"] = int(X_train.shape[1])
     metrics["validation_status"] = validation_status(

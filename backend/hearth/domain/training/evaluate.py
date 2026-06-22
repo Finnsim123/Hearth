@@ -71,6 +71,7 @@ def evaluate_model(
     y_val: pd.Series,
     provenance: pd.Series,
     gold: pd.Series | None = None,
+    tz: str = "UTC",
 ) -> dict:
     """Metrics dict for the registry (JSON-safe). Empty val -> {}.
 
@@ -130,4 +131,32 @@ def evaluate_model(
         pass
     cm = confusion_matrix(y_val, y_pred, labels=classes)
     out["confusion"] = {"labels": classes, "matrix": cm.tolist()}
+
+    # slice analysis (UX5): accuracy by daypart × activity surfaces failure
+    # pockets that the aggregate hides (great at 8pm, poor at 3am). Free here —
+    # the windows are already time-stamped (SliceFinder idiom).
+    try:
+        from zoneinfo import ZoneInfo
+
+        from ..features.pipeline import _bucket
+        try:
+            hours = y_val.index.tz_convert(ZoneInfo(tz)).hour
+        except Exception:
+            hours = y_val.index.hour
+        dp = np.array([int(_bucket(int(h))) for h in hours])
+        corr = correct.to_numpy()
+        yv = y_val.to_numpy()
+        rows = []
+        for cls in classes:
+            cells = []
+            for b in range(4):
+                mask = (yv == cls) & (dp == b)
+                n = int(mask.sum())
+                cells.append({"acc": round(float(corr[mask].mean()), 4) if n else None,
+                              "n": n})
+            rows.append({"activity": cls, "cells": cells})
+        out["slices"] = {"dayparts": ["night", "morning", "afternoon", "evening"],
+                         "by_activity_daypart": rows}
+    except Exception:
+        pass
     return out

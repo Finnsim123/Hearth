@@ -35,6 +35,10 @@ type Metrics = {
     accuracy_bootstrap?: number; n_gold?: number; n_confirmed?: number;
   };
   excluded_features?: string[];
+  slices?: {
+    dayparts: string[];
+    by_activity_daypart: { activity: string; cells: { acc: number | null; n: number }[] }[];
+  };
 };
 
 const GOLD_MIN = 30;  // matches MIN_CONFIRMED_FOR_VALIDATED — below this the
@@ -186,6 +190,49 @@ function EvidenceBar({ profile }: { profile: Record<string, number> }) {
           per-window evidence are automatically held below the ask threshold.
         </p>
       )}
+    </div>
+  );
+}
+
+function SliceHeatmap({ slices }: { slices: NonNullable<Metrics["slices"]> }) {
+  // Per-slice accuracy (UX5): rows = activities, cols = daypart. Red cells are
+  // exactly where the model fails — the aggregate can't show this.
+  const cell = (acc: number | null) => {
+    if (acc === null) return "transparent";
+    return acc >= 0.5
+      ? `color-mix(in srgb, var(--ok, #34D399) ${20 + 60 * ((acc - 0.5) / 0.5)}%, transparent)`
+      : `color-mix(in srgb, var(--danger) ${20 + 60 * ((0.5 - acc) / 0.5)}%, transparent)`;
+  };
+  return (
+    <div>
+      <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>Where it does well — and doesn't</h4>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead><tr>
+            <th style={{ padding: 6, textAlign: "left", color: "var(--text-dim)", fontWeight: 500 }}>activity</th>
+            {slices.dayparts.map((d) => (
+              <th key={d} style={{ padding: 6, color: "var(--text-dim)", fontWeight: 500 }}>{d}</th>))}
+          </tr></thead>
+          <tbody>
+            {slices.by_activity_daypart.map((r) => (
+              <tr key={r.activity}>
+                <td style={{ padding: 6, fontWeight: 500 }}>{r.activity}</td>
+                {r.cells.map((c, i) => (
+                  <td key={i} title={c.n ? `${(c.acc! * 100).toFixed(0)}% right · ${c.n} windows` : "no windows"}
+                      style={{ padding: "6px 12px", textAlign: "center", borderRadius: 6,
+                               fontVariantNumeric: "tabular-nums", background: cell(c.acc),
+                               color: c.n ? "var(--text)" : "var(--text-dim)" }}>
+                    {c.n ? `${(c.acc! * 100).toFixed(0)}%` : "·"}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ fontSize: 12, color: "var(--text-dim)", margin: "6px 0 0" }}>
+        Red = struggling in that part of day. A dot means too few windows to judge.
+      </p>
     </div>
   );
 }
@@ -429,6 +476,9 @@ function ModelCard({ m, onAction, personName }: { m: Model; onAction: () => void
           )}
           {mt.calibration && (mt.calibration.reliability?.length ?? 0) > 0 && (
             <Calibration cal={mt.calibration} />
+          )}
+          {mt.slices && mt.slices.by_activity_daypart.length > 0 && (
+            <SliceHeatmap slices={mt.slices} />
           )}
           {mt.feature_importances ? (
             <div>
