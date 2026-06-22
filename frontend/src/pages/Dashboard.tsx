@@ -4,7 +4,7 @@
  *   steady:     avatar hero cards · today ribbon · needs-you · trust · pulse
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import Card from "../components/Card";
@@ -124,7 +124,10 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 function WeekHeatmap({ preds, personId, ruleBased }:
                      { preds: Pred[]; personId: string; ruleBased: boolean }) {
   const qc = useQueryClient();
-  const [sel, setSel] = useState<{ label: string; h: number; time: Date } | null>(null);
+  // selection is a SET of cell start-times (epoch ms) so a drag can mark many
+  // hours at once; click = one cell, click-drag = a streak.
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const painting = useRef(false);
   if (!preds.length) return null;
   const now = new Date();
   const days: { key: string; label: string; date: Date }[] = [];
@@ -144,13 +147,24 @@ function WeekHeatmap({ preds, personId, ruleBased }:
     const c = grid[key]?.[h];
     return c ? Object.entries(c).sort((a, b) => b[1] - a[1])[0][0] : null;
   };
+  const addCell = (t: number) => setSel((s) => { const n = new Set(s); n.add(t); return n; });
   const correct = async (slug: string) => {
-    if (!sel) return;
-    const start = sel.time, end = new Date(start.getTime() + 3600_000);
-    await fetch("/api/labels/bulk", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ person_id: personId, activity: slug, source: "heatmap",
-                             start: start.toISOString(), end: end.toISOString() }) });
-    setSel(null);
+    if (!sel.size) return;
+    // collapse the selected hours into contiguous runs → one bulk call each
+    // (usually just one). Each cell is a 1h window; the API labels every 30-min
+    // window in [start, end).
+    const times = [...sel].sort((a, b) => a - b);
+    const runs: [number, number][] = [];
+    for (const t of times) {
+      const last = runs[runs.length - 1];
+      if (last && t === last[1] + 3600_000) last[1] = t;
+      else runs.push([t, t]);
+    }
+    await Promise.all(runs.map(([s0, e0]) =>
+      fetch("/api/labels/bulk", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_id: personId, activity: slug, source: "heatmap",
+          start: new Date(s0).toISOString(), end: new Date(e0 + 3600_000).toISOString() }) })));
+    setSel(new Set());
     qc.invalidateQueries({ queryKey: ["predictions"] });
     qc.invalidateQueries({ queryKey: ["predictions_week"] });
   };
@@ -166,33 +180,43 @@ function WeekHeatmap({ preds, personId, ruleBased }:
       const st = dom(d.key, h);
       const cellTime = new Date(d.date); cellTime.setHours(h);
       const future = cellTime > now;
-      const on = sel && sel.label === d.label && sel.h === h && +sel.time === +cellTime;
+      const t = +cellTime;
+      const on = sel.has(t);
       cells.push(
         <div key={`c${d.key}-${h}`}
-             onClick={() => future ? undefined : setSel(on ? null : { label: d.label, h, time: cellTime })}
+             onPointerDown={future ? undefined : (e) => {
+               (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+               painting.current = true; setSel(new Set([t])); }}
+             onPointerEnter={future ? undefined : () => { if (painting.current) addCell(t); }}
              title={`${d.label} ${String(h).padStart(2, "0")}:00 — ${st ? st.replace("_", " ") : "no data"}`}
              style={{ height: 14, borderRadius: 2, cursor: future ? "default" : "pointer",
                       background: st ? color(st) : "var(--surface-2)", opacity: future ? 0.3 : 1,
+                      touchAction: "none",
                       outline: on ? "2px solid var(--accent)" : "none", outlineOffset: -1 }} />);
     });
   });
   const present = Array.from(new Set(preds.map((p) => p.smoothed || p.predicted)));
   return (
     <div>
-      <p className="label" style={{ margin: "0 0 6px" }}>This week · tap a cell to correct</p>
-      <div style={{ display: "grid", gridTemplateColumns: "32px repeat(24, 1fr)", gap: 2 }}>
+      <p className="label" style={{ margin: "0 0 6px" }}>This week · tap or drag across cells, then label</p>
+      <div style={{ display: "grid", gridTemplateColumns: "32px repeat(24, 1fr)", gap: 2,
+                    touchAction: "none" }}
+           onPointerUp={() => { painting.current = false; }}
+           onPointerLeave={() => { painting.current = false; }}>
         {cells}
       </div>
-      {sel && (
+      {sel.size > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
           <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-            {sel.label} {String(sel.h).padStart(2, "0")}:00 was actually:
+            {sel.size === 1 ? "1 hour" : `${sel.size} hours`} selected — mark as:
           </span>
           {CORRECTION_SLUGS.map((slug) => (
             <button key={slug} className="btn btn-secondary"
                     style={{ minHeight: 30, padding: "4px 10px", fontSize: 12.5 }}
                     onClick={() => correct(slug)}>{slug.replace("_", " ")}</button>
           ))}
+          <button className="btn btn-ghost" style={{ minHeight: 30, padding: "4px 10px", fontSize: 12.5 }}
+                  onClick={() => setSel(new Set())}>Clear</button>
         </div>
       )}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
