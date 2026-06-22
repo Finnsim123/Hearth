@@ -143,7 +143,11 @@ def compute_verdict(feats: pd.DataFrame, fact: FoundationalFact) -> ReliabilityV
 # ── the verdict job (scheduler / API) ────────────────────────────────────────
 def run_verdicts(tsdb, repo, days: int = 14) -> dict:
     """Score every enabled foundational fact from recent history and store the
-    verdicts. Reuse the drift cadence. Returns {fact_id: verdict dict}."""
+    verdicts. Reuse the drift cadence. Returns {fact_id: verdict dict}.
+
+    Side effect (transparency): when a sensor's role_decision CHANGES — especially a
+    demotion out of 'fact' status — record an advisory + a timeline event so the user
+    learns a fact they depend on has become unreliable (or has re-earned trust)."""
     from ..features.registry import active_feature_set_version
     fset = active_feature_set_version(repo)
     end = datetime.now(timezone.utc)
@@ -157,12 +161,38 @@ def run_verdicts(tsdb, repo, days: int = 14) -> dict:
         if feats is None or feats.empty:
             continue
         try:
+            prev = (verdicts.get(f.id) or {}).get("role_decision")
             v = compute_verdict(feats, f)
             verdicts[f.id] = v.model_dump(mode="json")
+            _announce_verdict_change(repo, f, prev, v)
         except Exception:
             continue
     save_verdicts(repo, verdicts)
     return verdicts
+
+
+def _announce_verdict_change(repo, fact: FoundationalFact, prev: str | None,
+                             v: ReliabilityVerdict) -> None:
+    """Advisory + event on a meaningful change in a sensor's reliability role."""
+    new = v.role_decision
+    if prev is None or prev == new:
+        return
+    from .. import advisories, events
+    name = fact.binding_name
+    gate = fact.gate
+    kind = f"foundational:{fact.id}"
+    if prev == "fact" and new in ("feature", "suspect"):
+        events.record_event(repo, "sensor_demoted",
+                            f"{name} demoted from a trusted '{gate}' fact",
+                            v.reason)
+        advisories.record_advisory(
+            repo, kind, f"{name} is no longer reliable for '{gate}'",
+            v.reason + " I've stopped treating it as known and I'm using it as a hint.",
+            severity="warn", cta={"label": "Review", "href": "/settings#model"})
+    elif new == "fact" and prev in ("feature", "suspect"):
+        events.record_event(repo, "sensor_promoted",
+                            f"{name} earned trusted '{gate}' fact status", v.reason)
+        advisories.clear_advisory(repo, kind)
 
 
 def candidate_bindings(repo, gate: str) -> list[dict]:

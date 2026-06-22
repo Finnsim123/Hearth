@@ -47,7 +47,11 @@ def build_api_router(deps: dict) -> APIRouter:
             ok = (bool(secret) and security.verify_totp(secret, code)) \
                 or repo.consume_recovery_code(user.id, code)
             if not ok:
+                # a wrong code counts toward the lockout, so the 6-digit TOTP /
+                # recovery codes can't be brute-forced once the password is known
+                repo.note_2fa_failure(user.id)
                 raise HTTPException(401, "Invalid authentication code")
+        repo.clear_auth_failures(user.id)        # full success → reset counters
         cookie, sha = security.mint_session()
         repo.create_session(user.id, sha)
         _set_session_cookie(response, request, cookie)
@@ -1042,6 +1046,20 @@ def build_api_router(deps: dict) -> APIRouter:
         if not pid:
             return {"summary": "No household members yet.", "facts": {}}
         return model_insight(pid, repo)
+
+    @api.get("/advisories")
+    def advisories_list() -> dict:
+        """Active standing advisories + the event timeline, for the Activity page."""
+        from ..domain.advisories import active_advisories
+        from ..domain.events import list_events
+        return {"advisories": active_advisories(repo), "events": list_events(repo)}
+
+    @api.post("/advisories/dismiss")
+    def advisories_dismiss(kind: str, days: int = 14) -> dict:
+        """Snooze an advisory for `days` (the buddy 'Dismiss' action)."""
+        from ..domain.advisories import dismiss_advisory
+        dismiss_advisory(repo, kind, days=days)
+        return {"ok": True, "kind": kind}
 
     @api.get("/flow")
     def flow() -> dict:

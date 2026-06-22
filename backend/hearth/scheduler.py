@@ -214,6 +214,18 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
         scheduler.add_job(_foundational_verdicts, "interval", hours=24,
                           id="foundational_verdicts", max_instances=1, coalesce=True)
 
+        def _advisory_scan() -> None:
+            # turn coverage blind-spots + poor model health into standing advisories
+            # the buddy can surface (foundational demotions are produced inline above)
+            from .domain.advisory_scan import refresh_system_advisories
+            try:
+                refresh_system_advisories(repo)
+            except Exception:
+                log.exception("advisory scan failed")
+
+        scheduler.add_job(_advisory_scan, "interval", hours=24,
+                          id="advisory_scan", max_instances=1, coalesce=True)
+
         def _discover_all() -> None:
             if not _admit(DISCOVERY):
                 log.info("discovery deferred — system %s", gov_runtime.state().name.lower())

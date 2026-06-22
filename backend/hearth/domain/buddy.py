@@ -50,9 +50,10 @@ def _span_phrase(days: int) -> str:
     return f"~{years:.0f} years" if years >= 1.95 else "~1 year"
 
 
-def _state(phase, tone, title, detail, progress=None, cta=None, ack=None) -> dict:
+def _state(phase, tone, title, detail, progress=None, cta=None, ack=None,
+           ack_label=None) -> dict:
     return {"phase": phase, "tone": tone, "title": title, "detail": detail,
-            "progress": progress, "cta": cta, "ack": ack}
+            "progress": progress, "cta": cta, "ack": ack, "ack_label": ack_label}
 
 
 def _fasttrack(ft: dict) -> dict:
@@ -198,6 +199,18 @@ def buddy_state(repo, tsdb) -> dict:
         return _state("whatsnew", "news", "Updated — here's what's new", detail,
                       ack="/api/system/whats-new/seen")
 
+    # standing advisory (sensor demoted, model health) — surfaced above routine
+    # nudges because it affects what the user can trust; dismissible (snoozes it).
+    # info-level advisories stay passive (Activity page), so only warn/critical here.
+    from .advisories import worst_advisory
+    adv = _safe(lambda: worst_advisory(repo))
+    if adv:
+        tone = "alert" if adv.get("severity") == "critical" else "ask"
+        return _state(f"advisory:{adv['kind']}", tone, adv["title"], adv["detail"],
+                      cta=adv.get("cta"),
+                      ack=f"/api/advisories/dismiss?kind={adv['kind']}",
+                      ack_label="Dismiss")
+
     # questions waiting — a gentle nudge
     open_q = _safe(lambda: repo.open_questions(), [])
     if open_q:
@@ -222,7 +235,14 @@ def buddy_state(repo, tsdb) -> dict:
         for p in persons:
             rows = _safe(lambda p=p: tsdb.read_predictions(p.id, now - timedelta(hours=6), now), [])
             if rows:
-                states.append(f"{p.name}: {rows[-1].get('smoothed') or rows[-1].get('predicted')}")
+                last = rows[-1]
+                st = last.get("smoothed") or last.get("predicted")
+                # make the glass-box ethos visible: known fact vs model guess
+                known = str(last.get("model_version", "")).lower().startswith("fact")
+                conf = last.get("confidence")
+                tag = " (known)" if known else (f" ({round(conf * 100)}%)"
+                                                if isinstance(conf, (int, float)) else "")
+                states.append(f"{p.name}: {st}{tag}")
         events = _safe(lambda: tsdb.count_raw_events(24), None)
         detail = " · ".join(states) if states else (
             f"{int(events):,} readings today" if events else "Keeping an eye on things")

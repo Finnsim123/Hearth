@@ -86,6 +86,35 @@ def test_onboarding_seed_phases_are_sequential_setup_phases():
                               "fasttrack.status": {"stage": "training"}}), None)["phase"] == "setup:training"
 
 
+def test_warn_advisory_surfaces_as_dismissible_nudge():
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    repo = _Repo({"system.advisories": {"foundational:alice:asleep": {
+        "kind": "foundational:alice:asleep", "severity": "warn",
+        "title": "Bed sensor unreliable", "detail": "demoted",
+        "cta": {"label": "Review", "href": "/settings#model"}, "at": now}}})
+    out = buddy_state(repo, None)
+    assert out["phase"] == "advisory:foundational:alice:asleep"
+    assert out["tone"] == "ask"
+    assert out["ack"].endswith("kind=foundational:alice:asleep")
+    assert out["ack_label"] == "Dismiss"
+
+
+def test_info_advisory_stays_passive_and_dismissed_is_hidden():
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    info = {"system.advisories": {"coverage:blindspot": {
+        "kind": "coverage:blindspot", "severity": "info", "title": "Blind spot",
+        "detail": "add a sensor", "cta": None, "at": now.isoformat()}}}
+    assert not buddy_state(_Repo(info), None)["phase"].startswith("advisory:")
+    # a dismissed warn advisory is hidden too
+    dis = {"system.advisories": {"model:bob": {
+        "kind": "model:bob", "severity": "warn", "title": "x", "detail": "y",
+        "cta": None, "at": now.isoformat()}},
+        "system.advisories.dismissed": {"model:bob": (now + timedelta(days=5)).isoformat()}}
+    assert not buddy_state(_Repo(dis), None)["phase"].startswith("advisory:")
+
+
 def test_remap_after_retry_wins_over_stale_llm_error():
     # user clicked "Try again": seed re-runs while llm.status is still the old
     # failure. Buddy must narrate the live remap, not the stale credit warning.

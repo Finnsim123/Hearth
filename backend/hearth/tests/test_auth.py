@@ -80,3 +80,31 @@ def test_recent_reset_token_rate_limit(tmp_path, monkeypatch):
     repo.create_reset_token(u.id, "sha-abc", hours=1)
     assert repo.recent_reset_token(u.id, within_min=15) is True   # just minted
     assert repo.recent_reset_token(u.id, within_min=0) is False   # window elapsed
+
+
+def test_2fa_enable_and_brute_force_lockout(client):
+    """TOTP code attempts share the password lockout: once the password is known,
+    the 6-digit code can't be brute-forced (wrong codes back off the account)."""
+    import time
+    from hearth import security
+    c = client
+    assert c.post("/api/setup/complete", json=PAYLOAD).status_code == 200
+    email, pw = PAYLOAD["account"]["email"], PAYLOAD["account"]["password"]
+
+    secret = c.post("/api/auth/2fa/setup").json()["secret"]
+    code = security._hotp(secret, int(time.time() // 30))
+    enabled = c.post("/api/auth/2fa/enable", json={"code": code}).json()
+    assert enabled["ok"] and len(enabled["recovery_codes"]) >= 8
+
+    # password alone now yields no session — second factor required
+    r = c.post("/api/auth/login", json={"email": email, "password": pw})
+    assert r.json().get("twofa_required") is True and "hearth_session" not in r.cookies
+
+    # hammer wrong codes past the lockout threshold
+    for _ in range(6):
+        assert c.post("/api/auth/login",
+                      json={"email": email, "password": pw, "code": "000000"}).status_code == 401
+    # even a CORRECT code is now refused — the code path is rate-limited
+    good = security._hotp(secret, int(time.time() // 30))
+    assert c.post("/api/auth/login",
+                  json={"email": email, "password": pw, "code": good}).status_code == 401

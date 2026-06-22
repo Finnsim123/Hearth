@@ -753,8 +753,10 @@ class AppDb:
                     r.backoff_until = now + timedelta(seconds=delay)
                 s.commit()
                 return None
-            # success — clear the counters
-            if r.failed_logins or r.backoff_until is not None:
+            # success — clear the counters, UNLESS a second factor is still owed:
+            # the TOTP/recovery step manages the same backoff so wrong codes can't
+            # be brute-forced (note_2fa_failure / clear_auth_failures below).
+            if not r.totp_enabled and (r.failed_logins or r.backoff_until is not None):
                 r.failed_logins = 0
                 r.backoff_until = None
             if new_hash:
@@ -763,6 +765,33 @@ class AppDb:
             return User(id=r.id, email=r.email, display_name=r.display_name,
                         role=r.role, person_id=r.person_id, disabled=r.disabled,
                         totp_enabled=r.totp_enabled)
+
+    def _bump_backoff(self, r: "UserRow", now: datetime) -> None:
+        from datetime import timedelta
+        LOCK_AFTER = 5
+        r.failed_logins = (r.failed_logins or 0) + 1
+        if r.failed_logins >= LOCK_AFTER:
+            delay = min(2 ** (r.failed_logins - LOCK_AFTER) * 5, 900)
+            r.backoff_until = now + timedelta(seconds=delay)
+
+    def note_2fa_failure(self, user_id: int) -> None:
+        """A wrong TOTP/recovery code counts toward the same lockout as a wrong
+        password, so the second factor can't be brute-forced once the password
+        is known. The next login attempt is refused by verify_login's backoff."""
+        with Session(self.engine) as s:
+            r = s.get(UserRow, user_id)
+            if r is not None:
+                self._bump_backoff(r, datetime.now(timezone.utc))
+                s.commit()
+
+    def clear_auth_failures(self, user_id: int) -> None:
+        """Clear lockout counters after a fully successful login (password + 2FA)."""
+        with Session(self.engine) as s:
+            r = s.get(UserRow, user_id)
+            if r is not None and (r.failed_logins or r.backoff_until is not None):
+                r.failed_logins = 0
+                r.backoff_until = None
+                s.commit()
 
     def check_password(self, user_id: int, password: str) -> bool:
         """Verify a password with NO side effects (no lockout counters) — for
