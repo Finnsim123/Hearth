@@ -953,6 +953,85 @@ function Account() {
   );
 }
 
+function TwoFactor() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [setup, setSetup] = useState<{ secret: string; uri: string; qr: string | null } | null>(null);
+  const [code, setCode] = useState("");
+  const [codes, setCodes] = useState<string[] | null>(null);  // shown once
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const load = () => fetch("/api/auth/2fa").then(j).then((d) => setEnabled(d.enabled)).catch(() => setEnabled(false));
+  useEffect(() => { load(); }, []);
+  const begin = async () => {
+    setErr(""); setCodes(null);
+    try { setSetup(await post("/api/auth/2fa/setup", {}).then(j)); } catch { setErr("Couldn't start setup."); }
+  };
+  const confirm = async () => {
+    setErr("");
+    try {
+      const r = await post("/api/auth/2fa/enable", { code }).then(j);
+      setCodes(r.recovery_codes); setSetup(null); setCode(""); load();
+    } catch { setErr("That code didn't match — check the app and try again."); }
+  };
+  const disable = async () => {
+    setErr("");
+    try { await post("/api/auth/2fa/disable", { password: pw }).then(j); setPw(""); setCodes(null); load(); }
+    catch { setErr("Current password is wrong."); }
+  };
+  if (enabled === null) return null;
+  const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace", fontSize: 13 };
+  return (
+    <Card title="Two-factor authentication"
+          sub="Add a one-time code from an authenticator app (Google Authenticator, Authy, 1Password…) on top of your password. Email handles recovery if you lose it.">
+      {codes && (
+        <div style={{ padding: 14, borderRadius: 10, background: "var(--surface-2)", border: "1px solid var(--accent)" }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Save your recovery codes</div>
+          <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--text-dim)" }}>
+            Each works once if you lose your authenticator. Store them somewhere safe — they won't be shown again.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px,1fr))", gap: 8 }}>
+            {codes.map((c) => <span key={c} style={{ ...mono, padding: "6px 8px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, textAlign: "center" }}>{c}</span>)}
+          </div>
+          <button className="btn btn-ghost" style={{ marginTop: 10 }}
+                  onClick={() => navigator.clipboard?.writeText(codes.join("\n"))}>Copy all</button>
+        </div>
+      )}
+      {!enabled && !setup && (
+        <button className="btn btn-primary" onClick={begin}>Turn on two-factor</button>
+      )}
+      {setup && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {setup.qr
+            ? <img src={setup.qr} alt="2FA QR code" width={176} height={176}
+                   style={{ borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface-2)" }} />
+            : <p style={{ margin: 0, fontSize: 13, color: "var(--text-dim)" }}>Add this account to your authenticator app:</p>}
+          <div style={{ fontSize: 13 }}>Or enter this key manually: <span style={mono}>{setup.secret}</span></div>
+          <Row label="6-digit code from the app">
+            <input value={code} inputMode="numeric" placeholder="123456"
+                   onChange={(e) => setCode(e.target.value)} style={{ maxWidth: 160 }} />
+          </Row>
+          {err && <span style={{ color: "var(--danger)", fontSize: 13 }}>{err}</span>}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn btn-primary" disabled={!code} onClick={confirm}>Verify &amp; enable</button>
+            <button className="btn btn-ghost" onClick={() => { setSetup(null); setErr(""); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {enabled && !setup && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <span style={{ color: "var(--ok, #34D399)", fontSize: 14, fontWeight: 600 }}>Two-factor is on ✓</span>
+          <Row label="Current password to turn off">
+            <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} style={{ maxWidth: 220 }} />
+          </Row>
+          {err && <span style={{ color: "var(--danger)", fontSize: 13 }}>{err}</span>}
+          <button className="btn btn-ghost" style={{ color: "var(--danger)", alignSelf: "flex-start" }}
+                  disabled={!pw} onClick={disable}>Turn off two-factor</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // ── system ──────────────────────────────────────────────────────────────────
 
 function System() {
@@ -1163,7 +1242,7 @@ const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }
   { key: "logs", icon: "monitor", title: "Logs",
     desc: "Recent backend activity, live." },
   { key: "account", icon: "user", title: "Account",
-    desc: "Your password and sign-in." },
+    desc: "Your password, two-factor authentication and sign-in." },
   { key: "general", icon: "settings", title: "General",
     desc: "Appearance, system info, updates and the danger zone." },
   { key: "methodology", icon: "info", title: "How it works",
@@ -1351,7 +1430,7 @@ function SectionBody({ section }: { section: SectionKey }) {
     case "integrations": return <ConnectionsSection />;
     case "prompts": return <AiPrompts />;
     case "logs": return <Logs />;
-    case "account": return <Account />;
+    case "account": return (<><Account /><TwoFactor /></>);
     case "general": return (<><Appearance /><System /><DangerZone /></>);
     case "methodology": return <Methodology />;
   }

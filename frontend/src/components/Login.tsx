@@ -29,6 +29,8 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
     () => (typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("token") ?? "" : ""));
   const [newPw, setNewPw] = useState("");
+  const [code, setCode] = useState("");
+  const [needCode, setNeedCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,10 +50,12 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
     setBusy(true); setError(null);
     const r = await fetch("/api/auth/login", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }) });
+      body: JSON.stringify({ email, password, ...(code ? { code } : {}) }) });
+    const data = await r.json().catch(() => ({}));
     setBusy(false);
-    if (r.ok) onSuccess();
-    else setError((await r.json()).detail ?? "Wrong email or password");
+    if (r.ok) { onSuccess(); return; }
+    if (data.twofa_required) { setNeedCode(true); setError(null); return; }
+    setError(data.detail ?? "Wrong email or password");
   };
 
   const reset = async (e: React.FormEvent) => {
@@ -125,10 +129,22 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
       Password
       <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
     </label>
+    {needCode && (
+      <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 500 }}>
+        Authentication code
+        <input value={code} autoFocus inputMode="numeric" autoComplete="one-time-code"
+               placeholder="6-digit code or a recovery code"
+               onChange={(e) => setCode(e.target.value)} />
+        <span style={{ fontSize: 12, color: "var(--text-dim)", fontWeight: 400 }}>
+          From your authenticator app, or one of your saved recovery codes.
+        </span>
+      </label>
+    )}
     {ok && <span style={{ color: "var(--ok, #34D399)", fontSize: 13.5 }}>{ok}</span>}
     {error && <span style={{ color: "var(--danger)", fontSize: 13.5 }}>{error}</span>}
-    <button className="btn btn-primary" disabled={busy || !email || !password} onClick={signIn} type="submit">
-      {busy ? "Signing in…" : "Sign in"}
+    <button className="btn btn-primary" disabled={busy || !email || !password || (needCode && !code)}
+            onClick={signIn} type="submit">
+      {busy ? "Signing in…" : needCode ? "Verify & sign in" : "Sign in"}
     </button>
     <button style={linkBtn} onClick={() => { setMode("reset"); setError(null); }}>Forgot password?</button>
   </>);
