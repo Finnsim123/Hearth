@@ -1773,21 +1773,6 @@ def build_api_router(deps: dict) -> APIRouter:
         mark_seen(repo)
         return {"ok": True}
 
-    @api.get("/system/vitals")
-    def system_vitals() -> dict:
-        """Resource vitals the governor collects (CPU/temp/mem/power/heaviness +
-        state), for the Settings → System view. Latest snapshot + recent history."""
-        hist = repo.get_setting("system.vitals.history")
-        hist = hist if isinstance(hist, list) else []
-        latest = hist[-1] if hist else None
-        try:
-            from ..domain.system import runtime as gov
-            state = gov.state().name.lower()
-        except Exception:
-            state = (latest or {}).get("state", "normal")
-        return {"latest": latest, "history": hist[-120:], "state": state,
-                "monitored": bool(hist)}
-
     @api.post("/system/restart")
     def restart_app() -> dict:
         """Restart the container so newly-saved connections (HA / InfluxDB) take

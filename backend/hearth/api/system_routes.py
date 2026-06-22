@@ -7,7 +7,7 @@ Governor state lives in domain.system.runtime, shared with the scheduler.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from ..domain.system import runtime
 from ..domain.system.governor import plan_for
@@ -76,6 +76,33 @@ def get_history() -> dict:
         except Exception:
             hist = []
     return {"history": hist}
+
+
+@router.get("/config")
+def get_config() -> dict:
+    """Current governor thresholds (effective) + the defaults, for the editor."""
+    return {"config": runtime.config().model_dump(mode="json"),
+            "defaults": GovernorConfig().model_dump(mode="json")}
+
+
+@router.post("/config")
+def set_config(body: dict) -> dict:
+    """Validate + persist governor thresholds to the `system.governor` setting.
+    Takes effect on the next governor tick (config() re-reads it; no restart)."""
+    if _repo is None:
+        raise HTTPException(503, "no store")
+    base = GovernorConfig().model_dump()
+    merged = {**base, **{k: v for k, v in (body or {}).items() if k in base}}
+    try:
+        cfg = GovernorConfig(**merged)
+    except Exception as exc:                       # bad types / out of range
+        raise HTTPException(400, f"invalid config: {exc}")
+    if not (0 < cfg.enter_elevated < cfg.enter_high < cfg.enter_critical <= 1.0):
+        raise HTTPException(400, "thresholds must satisfy 0 < elevated < high < critical ≤ 1")
+    if not (0 < cfg.temp_warn < cfg.temp_max):
+        raise HTTPException(400, "temp_warn must be above 0 and below temp_max")
+    _repo.set_setting("system.governor", cfg.model_dump(mode="json"))
+    return {"config": cfg.model_dump(mode="json")}
 
 
 @router.get("/coverage")

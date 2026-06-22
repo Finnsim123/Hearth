@@ -55,7 +55,7 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
             record_issue(repo, "system_heavy", "Hearth is running heavy",
                          f"System load is {state.name.lower()} — I've paused heavy work "
                          "and kept predictions live. It resumes automatically when load "
-                         "eases.", cta={"label": "System", "href": "/settings#system"})
+                         "eases.", cta={"label": "System", "href": "/system"})
         else:
             clear_issue(repo, "system_heavy")
 

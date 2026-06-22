@@ -20,6 +20,8 @@ type Plan = { state: number; admitted: string[]; n_jobs_cap: number | null;
 type VitalsResp = { vitals: Vitals; heaviness: number; state: string; plan: Plan };
 type Hist = { t: string; cpu: number; temp: number | null; mem: number; watts: number | null; h: number; state: string };
 type Gap = { kind: string; severity: number; room: string | null; recommendation: string };
+type Cfg = { temp_warn: number; temp_max: number; enter_elevated: number; enter_high: number;
+             enter_critical: number; leave_margin: number; min_disk_gb: number; swap_weight: number };
 
 const STATE_COLOR: Record<string, string> = {
   normal: "var(--ok, #34D399)", elevated: "var(--accent)",
@@ -33,12 +35,28 @@ export default function System() {
   const [hist, setHist] = useState<Hist[]>([]);
   const [gaps, setGaps] = useState<Gap[]>([]);
   const [busy, setBusy] = useState(false);
+  const [cfg, setCfg] = useState<Cfg | null>(null);
+  const [defaults, setDefaults] = useState<Cfg | null>(null);
+  const [advOpen, setAdvOpen] = useState(false);
+  const [cfgMsg, setCfgMsg] = useState("");
   const timer = useRef<number>();
 
   const loadSlow = useCallback(() => {
     fetch("/api/system/history").then(j).then((d) => setHist(d.history || [])).catch(() => {});
     fetch("/api/system/coverage").then(j).then((d) => setGaps(d.gaps || [])).catch(() => {});
+    fetch("/api/system/config").then(j).then((d) => { setCfg(d.config); setDefaults(d.defaults); }).catch(() => {});
   }, []);
+
+  const saveCfg = () => {
+    if (!cfg) return;
+    setBusy(true); setCfgMsg("");
+    fetch("/api/system/config", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg) })
+      .then(async (r) => { if (!r.ok) throw new Error((await r.json()).detail || "invalid"); return r.json(); })
+      .then((d) => { setCfg(d.config); setCfgMsg("Saved — applies on the next check."); })
+      .catch((e) => setCfgMsg(String(e.message || e)))
+      .finally(() => setBusy(false));
+  };
 
   useEffect(() => {
     let alive = true;
@@ -125,6 +143,19 @@ export default function System() {
         </div>
       </Card>
 
+      {/* advanced: governor thresholds */}
+      {cfg && defaults && (
+        <Card title="Advanced — governor thresholds"
+          sub="When Hearth eases off. Changes apply on the next check (every 60s); no restart."
+          action={<button className="btn btn-ghost" onClick={() => setAdvOpen((o) => !o)}>{advOpen ? "Hide" : "Edit"}</button>}>
+          {advOpen && (
+            <CfgEditor cfg={cfg} defaults={defaults} setCfg={setCfg}
+                       onSave={saveCfg} onReset={() => { setCfg(defaults); setCfgMsg(""); }}
+                       busy={busy} msg={cfgMsg} />
+          )}
+        </Card>
+      )}
+
       {/* blind spots */}
       {gaps.length > 0 && (
         <Card title="Blind spots" sub="Where another sensor would sharpen recognition.">
@@ -138,6 +169,50 @@ export default function System() {
         </Card>
       )}
     </section>
+  );
+}
+
+const CFG_GROUPS: { title: string; fields: { key: keyof Cfg; label: string; step: number; unit?: string }[] }[] = [
+  { title: "Thermal", fields: [
+    { key: "temp_warn", label: "Warn at", step: 1, unit: "°C" },
+    { key: "temp_max", label: "Critical at", step: 1, unit: "°C" }] },
+  { title: "Heaviness bands (0–1)", fields: [
+    { key: "enter_elevated", label: "Elevated above", step: 0.01 },
+    { key: "enter_high", label: "High above", step: 0.01 },
+    { key: "enter_critical", label: "Critical above", step: 0.01 },
+    { key: "leave_margin", label: "Step-down margin", step: 0.01 }] },
+  { title: "Safety", fields: [
+    { key: "min_disk_gb", label: "Min disk free", step: 0.5, unit: "GB" },
+    { key: "swap_weight", label: "Swap weight", step: 0.1 }] },
+];
+
+function CfgEditor({ cfg, defaults, setCfg, onSave, onReset, busy, msg }: {
+  cfg: Cfg; defaults: Cfg; setCfg: (c: Cfg) => void;
+  onSave: () => void; onReset: () => void; busy: boolean; msg: string;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {CFG_GROUPS.map((g) => (
+        <div key={g.title}>
+          <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 6 }}>{g.title}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+            {g.fields.map((f) => (
+              <label key={f.key} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 13 }}>
+                <span>{f.label}{f.unit ? ` (${f.unit})` : ""}</span>
+                <input type="number" step={f.step} value={cfg[f.key]}
+                  onChange={(e) => setCfg({ ...cfg, [f.key]: Number(e.target.value) })} />
+                <span style={{ fontSize: 11, color: "var(--text-dim)" }}>default {defaults[f.key]}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button className="btn btn-primary" disabled={busy} onClick={onSave}>Save</button>
+        <button className="btn btn-ghost" disabled={busy} onClick={onReset}>Reset to defaults</button>
+        {msg && <span style={{ fontSize: 12.5, color: msg.startsWith("Saved") ? "var(--ok, #34D399)" : "var(--danger)" }}>{msg}</span>}
+      </div>
+    </div>
   );
 }
 
