@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import pandas as pd
 
+from datetime import datetime, timedelta, timezone
+
 from hearth.domain.markers import (
     Marker,
     apply_marker_prior,
     binding_from_feature,
+    estimate_lag,
     load_markers,
     looks_like_marker,
     marker_fired,
     markers_for,
     save_markers,
+    strength_from,
 )
 
 
@@ -75,3 +79,36 @@ def test_looks_like_marker_heuristic():
     assert looks_like_marker(spike, n_windows=5)
     flat = [3] * 24                                # spread all day, many windows
     assert not looks_like_marker(flat, n_windows=72)
+
+
+D0 = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+
+def test_estimate_lag_learns_a_30min_lead():
+    # coffee fires at 06:30 each day; the wake transition follows at 07:00 (+30 min)
+    fires = [D0 + timedelta(days=d, hours=6, minutes=30) for d in range(7)]
+    trans = [D0 + timedelta(days=d, hours=7) for d in range(7)]
+    e = estimate_lag(fires, trans)
+    assert e["lead_min"] == 30
+    assert e["precision"] == 1.0 and e["recall"] == 1.0
+    assert strength_from(e) == 1.0                 # consistent → fully trusted
+
+
+def test_low_precision_timer_is_demoted():
+    # coffee fires all 7 days, but the wake transition only happened on 3 of them
+    fires = [D0 + timedelta(days=d, hours=6, minutes=30) for d in range(7)]
+    trans = [D0 + timedelta(days=d, hours=7) for d in range(3)]
+    e = estimate_lag(fires, trans)
+    assert e["precision"] < 0.5                    # fires often without a wake
+    assert strength_from(e) < 0.5                  # → gentle hint, not a hard flip
+
+
+def test_strength_scales_the_boost():
+    row = pd.Series({"asleep": 0.7, "home": 0.3})
+    weak = Marker(slug="w", name="w", from_state="asleep", to_state="home",
+                  binding_name="b", strength=0.1)
+    strong = Marker(slug="s", name="s", from_state="asleep", to_state="home",
+                    binding_name="b", strength=1.0)
+    weak_home = apply_marker_prior(row, "asleep", [weak])["home"]
+    strong_home = apply_marker_prior(row, "asleep", [strong])["home"]
+    assert weak_home < strong_home                 # weaker marker pulls less

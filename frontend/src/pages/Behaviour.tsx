@@ -39,7 +39,9 @@ type Summary = {
   rhythm: Cell[]; sequences: Trans[];
   sessions: Sess[]; consistency: Consistency;
 };
+type MarkerFlag = { time: string; name: string; to: string };
 type Data = { summary: Summary | null; trends: Trend[]; body: Body | null;
+              marker_flags?: MarkerFlag[];
               persons: { id: string; name: string }[];
               activities: { slug: string; name: string; color: string }[] };
 
@@ -185,6 +187,18 @@ export default function Behaviour() {
                   );
                 })}
               </div>
+              {(data.marker_flags?.length ?? 0) > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+                  {data.marker_flags!.map((f, i) => (
+                    <span key={i} style={{ fontSize: 12, color: "var(--text-dim)",
+                      display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ width: 0, height: 0, borderLeft: "4px solid transparent",
+                        borderRight: "4px solid transparent", borderBottom: `7px solid ${colorOf(f.to)}` }} />
+                      {f.name} {new Date(f.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  ))}
+                </div>
+              )}
             </Card>
           )}
 

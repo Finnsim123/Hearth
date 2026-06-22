@@ -214,6 +214,17 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
         scheduler.add_job(_foundational_verdicts, "interval", hours=24,
                           id="foundational_verdicts", max_instances=1, coalesce=True)
 
+        def _marker_timing() -> None:
+            # learn each transition marker's lead/lag + reliability from history
+            from .domain.markers import learn_marker_timing
+            try:
+                learn_marker_timing(repo, tsdb)
+            except Exception:
+                log.exception("marker timing learning failed")
+
+        scheduler.add_job(_marker_timing, "interval", hours=24,
+                          id="marker_timing", max_instances=1, coalesce=True)
+
         def _advisory_scan() -> None:
             # turn coverage blind-spots + poor model health into standing advisories
             # the buddy can surface (foundational demotions are produced inline above)

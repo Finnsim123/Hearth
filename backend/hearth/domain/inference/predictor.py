@@ -160,7 +160,15 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                 # coffee) sharply boosts P(from→to) so the published state switches
                 # cleanly at the right window. Markers are never classifier labels.
                 if markers:
-                    fired = [m for m in markers if marker_fired(todo.loc[ts], m)]
+                    # a marker's signal may LEAD the transition (coffee ~30 min
+                    # before waking): look up the window at ts − lead_min and, if it
+                    # fired there, boost THIS (the real transition) window.
+                    fired = []
+                    for m in markers:
+                        fire_ts = ts - pd.Timedelta(minutes=m.lead_min) if m.lead_min else ts
+                        frow = feats.loc[fire_ts] if fire_ts in feats.index else None
+                        if frow is not None and marker_fired(frow, m):
+                            fired.append(m)
                     if fired:
                         row = apply_marker_prior(row, prev_state, fired)
         predicted = str(row.idxmax())

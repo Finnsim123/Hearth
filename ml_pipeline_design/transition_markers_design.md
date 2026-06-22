@@ -100,6 +100,63 @@ This advances the earlier goal of *intuitively asking for input only when it hel
    consistency panel.
 5. **Reliability (optional)**: use a marker as a corroboration series for its transition.
 
+## 7b. Status — IMPLEMENTED (June 2026)
+- **Domain** `domain/markers.py`: `Marker` (settings-backed, `excluded_from_model`),
+  load/save/`markers_for`, `binding_from_feature`, `marker_fired`, `apply_marker_prior`
+  (boost from→to, damp the self-loop, renormalise), `looks_like_marker` heuristic. Tested.
+- **Predictor**: in the transition block, after the learned `transition_filter`, fired
+  markers re-weight the row toward `to_state`; markers never enter the label set. Applies
+  even before a transition matrix exists. (Decision: one-sided `from=None` supported.)
+- **API**: `markers_routes` CRUD + candidate sensors/activities; `POST
+  /clusters/{id}/marker` classifies a discovered pattern as a marker bound to its
+  dominant signal (`signature[0]`), emits no activity labels, records a timeline event.
+- **UI (consistent across the model surface)**: a `TransitionMarkers` card in
+  Settings → Model (next to Foundational facts; manual add by sensor + from→to); the
+  Patterns card gains an *"Something I do / A moment of change"* toggle that
+  auto-pre-selects marker mode for brief, time-locked clusters; Behaviour's Today ribbon
+  shows marker moments as flags.
+- **Deferred** (decisions 2): auto-promoting a marker to a reliability-gated
+  corroborator for sleep/away — left as a future suggestion, not auto-wired.
+
+## 7c. Lead / lag — markers that don't coincide with the transition (June 2026)
+
+Real markers rarely fire *exactly* at the transition. Two examples: the coffee machine
+runs ~30 min **before** waking; the lights pop on ~1 min **before** arriving home.
+
+**Does it matter? Only when the offset crosses a 30-min window boundary.**
+- *Lights, −1 min*: the signal and the real arrival fall in the **same** window, so the
+  boost already lands on the right window. No action needed — sub-window offsets are free.
+- *Coffee, −30 min*: a full window early. v1 boosts the *fire* window, so it would mark
+  you awake at 06:30 while you're still in your last sleep window → ~30 min mislabelled,
+  and the wake-time anchor reads 30 min early. This one needs handling.
+
+**Two real risks with a lead marker**
+1. *Timing* — the state flips early (above).
+2. *Causality* — a lead signal is often an **automation/timer** (coffee on a schedule)
+   that fires *regardless* of whether you actually wake. Treated naively it invents a
+   transition on days you sleep in.
+
+**Design**
+- **Offset** (`lead_min`, signed): apply the boost at the window nearest
+  `fire_time + lead_min`, not the fire window. For coffee, +30 lands it on the real wake
+  window; for lights, ~0 ⇒ unchanged. Sub-window offsets round to 0 → no-op (so the
+  lights case stays free).
+- **Learn it, don't make the user measure.** Cross-correlate each marker's fire times
+  against the actual from→to boundaries in the published/confirmed timeline: take the
+  **modal lag** and its **spread**. Auto-set `lead_min`; surface it ("your coffee fires
+  ~30 min before you actually wake — I account for that"). Manual override allowed.
+- **Reliability gate (reuse the pattern).** Score a marker by hit-rate (how often the
+  fire is actually followed by the transition within the expected window) and lag
+  variance. High variance / low hit-rate → demote to a *hint* (small boost), not a
+  committing flip — exactly the fact-vs-hint gate we use for sleep sensors.
+- **Corroboration for lead markers.** A lead marker *arms* an expected transition; only
+  **commit** the flip if corroborating evidence shows up around `fire + lead` (movement,
+  lights, steps, or the model already trending). Coffee on + no motion for an hour ⇒ the
+  timer fired but you didn't wake ⇒ suppress. This kills the fixed-timer false-positive.
+
+Net: offset fixes the *timing*; the reliability gate + corroboration fix the *causality*.
+Coincident markers (lights) are unaffected; anticipatory ones (coffee) become correct.
+
 ## 8. Open questions (for you)
 1. Should a marker require an explicit `from`→`to`, or also support a one-sided
    "wake-up" that just anchors a time without asserting the prior state? (Lean: allow

@@ -17,8 +17,10 @@ const post = (url: string, body?: unknown) =>
   fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
                body: body === undefined ? undefined : JSON.stringify(body) });
 
+type Timing = { lead_min: number; spread_min: number; precision: number; recall: number } | null;
 type Marker = { slug: string; name: string; to_state: string; from_state: string | null;
-                binding_name: string; source: string; enabled: boolean };
+                binding_name: string; source: string; enabled: boolean;
+                lead_min: number; strength: number; timing: Timing };
 type Bind = { name: string; entity_id: string; room?: string | null };
 type Act = { slug: string; name: string };
 type Data = { markers: Marker[]; bindings: Bind[]; activities: Act[] };
@@ -26,7 +28,7 @@ type Data = { markers: Marker[]; bindings: Bind[]; activities: Act[] };
 export default function TransitionMarkers() {
   const [data, setData] = useState<Data | null>(null);
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({ name: "", binding_name: "", from_state: "", to_state: "" });
+  const [draft, setDraft] = useState({ name: "", binding_name: "", from_state: "", to_state: "", lead_min: 0 });
 
   const load = useCallback(() => {
     fetch("/api/markers").then(j).then(setData)
@@ -39,8 +41,9 @@ export default function TransitionMarkers() {
     const slug = draft.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
     if (!slug || !draft.binding_name || !draft.to_state) return;
     await post("/api/markers", { slug, name: draft.name, binding_name: draft.binding_name,
-      from_state: draft.from_state || null, to_state: draft.to_state, source: "manual" });
-    setAdding(false); setDraft({ name: "", binding_name: "", from_state: "", to_state: "" });
+      from_state: draft.from_state || null, to_state: draft.to_state,
+      lead_min: Number(draft.lead_min) || 0, source: "manual" });
+    setAdding(false); setDraft({ name: "", binding_name: "", from_state: "", to_state: "", lead_min: 0 });
     load();
   };
   const remove = async (slug: string) => { await post("/api/markers/delete", { slug }); load(); };
@@ -57,6 +60,9 @@ export default function TransitionMarkers() {
               <span style={{ fontWeight: 500 }}>{m.name}</span>
               <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
                 {m.from_state ? nameOf(m.from_state) : "any"} → {nameOf(m.to_state)} · from <code>{m.binding_name}</code>
+                {m.lead_min ? ` · fires ~${m.lead_min}m before` : ""}
+                {m.timing ? ` · ${Math.round(m.timing.precision * 100)}% reliable` : ""}
+                {m.strength < 0.5 ? " · used as a hint" : ""}
                 {m.source === "discovery" ? " · discovered" : ""}
               </span>
               <button className="btn" style={{ marginLeft: "auto" }} onClick={() => remove(m.slug)}>Remove</button>
@@ -91,6 +97,15 @@ export default function TransitionMarkers() {
               {data.activities.map((a) => <option key={a.slug} value={a.slug}>{a.name}</option>)}
             </select>
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+            Fires
+            <input type="number" step={5} value={draft.lead_min} style={{ width: 70 }}
+                   onChange={(e) => setDraft({ ...draft, lead_min: Number(e.target.value) })} />
+            min before the change (0 = at the moment)
+          </label>
+          <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+            Leave at 0 — Hearth learns the real lead from your history and refines it automatically.
+          </span>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-primary" onClick={save}>Add marker</button>
             <button className="btn btn-ghost" onClick={() => setAdding(false)}>Cancel</button>
