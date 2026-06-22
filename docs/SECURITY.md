@@ -88,6 +88,23 @@ values have `__repr__` redaction; tokens are masked `hrt_****…` in UI and logs
   can't OOM the box. All outbound clients also carry timeouts.
 - Remote InfluxDB bucket names are escaped (`_flux_tag`) before Flux interpolation.
 
+## Two-factor authentication (TOTP, RFC 6238)
+
+- Optional per-account. Secret generated server-side, stored **encrypted**
+  (`HEARTH_SECRET`), and only marked enabled after the user proves a live code
+  (`/auth/2fa/enable`) — a mistyped enrolment can't lock anyone out.
+- Login is two-step: a correct password with 2FA on returns `twofa_required`
+  and **no session**; the cookie is issued only after the TOTP or a recovery
+  code verifies. TOTP compares constant-time (`hmac.compare_digest`, ±1 step
+  for clock skew).
+- **Brute-force**: a wrong second factor feeds the same exponential backoff as a
+  wrong password (`note_2fa_failure`), and `verify_login` won't clear the
+  counters while a factor is owed — so the 6-digit code can't be guessed once the
+  password is known. Recovery codes are 48-bit, hashed (SHA-256), single-use, and
+  matched constant-time.
+- Disabling 2FA requires a password re-auth. Setup/enable/disable all sit behind
+  the session middleware. Recovery codes are shown once at enable time.
+
 ## Outbound email (SMTP relay)
 
 - Not a mail server — Hearth authenticates to the operator's existing SMTP
