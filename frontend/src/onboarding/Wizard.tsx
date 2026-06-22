@@ -451,32 +451,34 @@ type Inv = { entity_id: string; friendly_name: string | null; domain: string | n
 type TriageResp = { by: string | null; total: number; kept_count: number;
                     clusters: TriageCluster[] };
 
-// A taste of what Hearth unlocks in Home Assistant — shown on a gentle loop
-// while the scan runs, so the wait sells the payoff instead of just spinning.
-const AUTOMATION_IDEAS: { icon: IconName; title: string; text: string }[] = [
-  { icon: "play", title: "Movie mode, instantly",
+// A taste of what Hearth unlocks in Home Assistant — looped while the scan runs,
+// then on the result screen the ones your sensors actually support are surfaced
+// (`needs` = triage category keys the idea relies on).
+type Idea = { icon: IconName; title: string; text: string; needs?: string[]; bespoke?: boolean };
+const AUTOMATION_IDEAS: Idea[] = [
+  { icon: "play", title: "Movie mode, instantly", needs: ["media", "lights"],
     text: "Lights dim and the blinds drop the moment a movie starts — no remote, no scene button." },
-  { icon: "presence", title: "Wake up gently",
+  { icon: "presence", title: "Wake up gently", needs: ["presence", "lights"],
     text: "As you stir awake, the lights fade up and the kettle clicks on." },
-  { icon: "power", title: "Away = armed and saving",
+  { icon: "power", title: "Away = armed and saving", needs: ["presence", "power"],
     text: "Everyone out? Arm the alarm, drop the heating, cut standby power — automatically." },
-  { icon: "focus", title: "Deep-work mode",
+  { icon: "focus", title: "Deep-work mode", needs: ["lights"],
     text: "Sit down to work and phones go do-not-disturb while the desk light turns cool and bright." },
-  { icon: "env", title: "Cooking light",
+  { icon: "env", title: "Cooking light", needs: ["lights"],
     text: "The kitchen jumps to full brightness while you cook, then eases back when you're done." },
-  { icon: "household", title: "Welcome home",
+  { icon: "household", title: "Welcome home", needs: ["presence", "lights"],
     text: "First one through the door gets the hallway lit and their playlist going." },
-  { icon: "lock", title: "Goodnight, handled",
+  { icon: "lock", title: "Goodnight, handled", needs: ["lights", "doors"],
     text: "Drift off and Hearth locks the doors, kills the lights, and sets the night temperature." },
-  { icon: "play", title: "Dinner together",
+  { icon: "play", title: "Dinner together", needs: ["media", "lights"],
     text: "Sitting down to eat pauses the TV and warms the lights." },
-  { icon: "alarm", title: "A heads-up on the unusual",
+  { icon: "alarm", title: "A heads-up on the unusual", needs: ["presence"],
     text: "Away at 3pm on a workday? A quiet nudge — only if you ask for one." },
-  { icon: "sensors", title: "Heat the room you're in",
+  { icon: "sensors", title: "Heat the room you're in", needs: ["climate", "presence"],
     text: "Warmth follows people and activity, not a dumb schedule." },
-  { icon: "info", title: "Reading nook",
+  { icon: "info", title: "Reading nook", needs: ["lights"],
     text: "Pick up a book and one warm lamp glows while the rest of the room dims." },
-  { icon: "light", title: "Wind-down",
+  { icon: "light", title: "Wind-down", needs: ["lights"],
     text: "Half an hour before your usual bedtime, the house softens and quietens on its own." },
 ];
 
@@ -511,6 +513,59 @@ function AutomationIdeas() {
         ))}
       </div>
       <style>{`@keyframes hearth-idea-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }`}</style>
+    </div>
+  );
+}
+
+// Result-screen payoff: the ideas your sensors actually support (heuristic match
+// on triage categories), plus a few bespoke ones from the LLM when a key's set.
+function IdeasForYourHome({ triage, llmKey, llmModel }:
+                          { triage: TriageResp; llmKey: string; llmModel: string }) {
+  const present = new Set(
+    triage.clusters.filter((c) => (c.count ?? 0) > 0)
+      .map((c) => c.category).filter(Boolean) as string[]);
+  const supported = AUTOMATION_IDEAS.filter((i) => (i.needs ?? []).every((n) => present.has(n)));
+  const [bespoke, setBespoke] = useState<Idea[]>([]);
+  useEffect(() => {
+    fetch("/api/ideas/suggest", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ categories: [...present],
+        llm: llmKey ? { key: llmKey, model: llmModel } : undefined }) })
+      .then((r) => r.json())
+      .then((d) => setBespoke((d.ideas ?? []).map((x: { title: string; text: string }) =>
+        ({ icon: "more" as IconName, title: x.title, text: x.text, bespoke: true }))))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const list = [...bespoke, ...supported].slice(0, 8);
+  if (!list.length) return null;
+  return (
+    <div style={{ marginTop: 4 }}>
+      <p className="label" style={{ margin: "0 0 8px" }}>Ideas for your home</p>
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+        {list.map((i, k) => (
+          <div key={k} className="card" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: 14 }}>
+            <span style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 9, display: "flex",
+                           alignItems: "center", justifyContent: "center", color: "var(--accent)",
+                           background: "color-mix(in srgb, var(--accent) 14%, transparent)",
+                           border: "1px solid var(--accent)" }}>
+              <Icon name={i.icon} size={18} />
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                {i.title}
+                {i.bespoke && (
+                  <span style={{ fontSize: 10, color: "var(--accent)", border: "1px solid var(--accent)",
+                                 borderRadius: 999, padding: "0 6px", flexShrink: 0 }}>tailored</span>
+                )}
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginTop: 2, lineHeight: 1.4 }}>{i.text}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--text-dim)" }}>
+        You've got the sensors for these — build them in Home Assistant once Hearth is live.
+      </p>
     </div>
   );
 }
@@ -618,6 +673,7 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
               onToggle={(l) => persist({ ...kept, [l]: !kept[l] })}
               onReset={() => persist(Object.fromEntries(
                 triage.clusters.map((c) => [c.category ?? c.label, c.relevant])))} />
+            <IdeasForYourHome triage={triage} llmKey={d.llmKey} llmModel={d.llmModel} />
           </>
         )}
       </StepShell>

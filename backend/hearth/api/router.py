@@ -388,6 +388,40 @@ def build_api_router(deps: dict) -> APIRouter:
                     for c in res.get("clusters", [])]
         return {**res, "clusters": clusters, "has_llm": bool(key)}
 
+    @api.post("/ideas/suggest")
+    async def ideas_suggest(body: dict) -> dict:
+        """Bespoke automation ideas from the user's sensor categories. Lazy +
+        cached (runs once; pass refresh=true to regenerate). Accepts the wizard's
+        unsaved LLM key (body.llm) so it works mid-onboarding, else the saved
+        connection. Returns {ideas: []} without a key — the static/heuristic
+        ideas stand alone."""
+        cached = repo.get_setting("ideas.suggested")
+        if cached and not body.get("refresh"):
+            return {"ideas": cached, "cached": True}
+        llm = body.get("llm") or {}
+        key = llm.get("key")
+        from ..adapters.openrouter_llm import OpenRouterAdvisor
+        from ..domain.onboarding.ideas import suggest_ideas
+        if key:
+            class _AdHocRepo:
+                def __init__(self, real):
+                    self._real, self._llm = real, {
+                        "url": llm.get("url") or "https://openrouter.ai/api/v1", "token": key,
+                        "options": {"model": llm.get("model") or "openai/gpt-4o-mini"}}
+                def get_connection(self, kind):
+                    return self._llm if kind == "llm" else self._real.get_connection(kind)
+                def get_setting(self, k, d=None): return self._real.get_setting(k, d)
+                def set_setting(self, k, v): return self._real.set_setting(k, v)
+            advisor = OpenRouterAdvisor(_AdHocRepo(repo))
+        elif repo.get_connection("llm") is not None:
+            advisor = OpenRouterAdvisor(repo)
+        else:
+            return {"ideas": []}
+        ideas = await suggest_ideas(advisor, body.get("categories") or [])
+        if ideas:
+            repo.set_setting("ideas.suggested", ideas)
+        return {"ideas": ideas, "cached": False}
+
     @api.post("/entity-triage/approve")
     async def approve_entity_triage(body: dict) -> dict:
         """Approve the keep-set (optionally with whole clusters toggled off) and
