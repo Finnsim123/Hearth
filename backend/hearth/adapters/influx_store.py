@@ -27,11 +27,14 @@ log = logging.getLogger(__name__)
 
 RAW_BUCKET, FEAT_BUCKET, ML_BUCKET = "hearth_raw", "hearth_features", "hearth_ml"
 
-# History retention default (days) for the raw + feature buckets. The longer the
-# window, the further back training can reach — bias toward keeping data. This is
-# the DEFAULT only: the live value is the 'retention.days' setting (editable in
-# Settings → Model), applied to existing buckets on boot via set_retention().
-DEFAULT_RETENTION_DAYS = 730   # 2 years (was 180)
+# Raw-signal retention default (days). Raw is only the SOURCE features are built
+# from + the window the live health/behaviour views look back over — it is NOT
+# the model corpus, so it doesn't need to be kept forever. The FEATURE bucket
+# (the actual model data) and the ML bucket (predictions/labels) are ALWAYS kept
+# forever; this knob bounds raw only. Trade-off: feature rebuilds after a
+# feature-set change reach back only as far as raw is retained. Live value is the
+# 'retention.days' setting (Settings → Model), applied on boot via set_retention().
+DEFAULT_RAW_RETENTION_DAYS = 90   # ~a quarter of raw; covers the 4-week views + rebuild headroom
 
 
 def _flux_tag(value: str) -> str:
@@ -155,37 +158,40 @@ class InfluxStore:
                 log.warning("wipe_all: could not drop %s: %s", name, exc)
         self.ensure_buckets()
 
-    def ensure_buckets(self, retention_days: int = DEFAULT_RETENTION_DAYS) -> None:
+    def ensure_buckets(self, raw_retention_days: int = DEFAULT_RAW_RETENTION_DAYS) -> None:
         api = self.client.buckets_api()
         existing = {b.name for b in api.find_buckets().buckets}
-        secs = max(0, int(retention_days)) * 86400
-        # raw + features hold the training corpus and share the retention knob;
-        # ml (predictions/labels) is kept forever — it's tiny and is ground truth.
-        retention = {RAW_BUCKET: secs, FEAT_BUCKET: secs, ML_BUCKET: 0}
+        secs = max(0, int(raw_retention_days)) * 86400
+        # features (the model corpus) and ml (predictions/labels — ground truth)
+        # are kept FOREVER; only raw expires, since it's just the source features
+        # are built from and the look-back for the live views.
+        retention = {RAW_BUCKET: secs, FEAT_BUCKET: 0, ML_BUCKET: 0}
         for name, secs in retention.items():
             if name not in existing:
                 rules = [{"type": "expire", "everySeconds": secs}] if secs else []
                 api.create_bucket(bucket_name=name, retention_rules=rules, org=self.org)
                 log.info("Created bucket %s", name)
 
-    def set_retention(self, retention_days: int) -> dict:
-        """Apply a retention window (days; <=0 = keep forever) to the raw +
-        feature history buckets, updating them in place if they already exist.
-        Returns {days, buckets} for the buckets actually changed."""
+    def set_retention(self, raw_retention_days: int) -> dict:
+        """Apply a retention window (days; <=0 = keep forever) to the RAW bucket
+        only — features + ml are kept forever and are realigned to 'forever' here
+        too, in case an older install had them on a shared expiry. Updates buckets
+        in place if they exist. Returns {days, buckets} for those changed."""
         from influxdb_client import BucketRetentionRules
-        secs = max(0, int(retention_days)) * 86400
+        secs = max(0, int(raw_retention_days)) * 86400
         api = self.client.buckets_api()
         applied: list[str] = []
-        for name in (RAW_BUCKET, FEAT_BUCKET):
+        targets = {RAW_BUCKET: secs, FEAT_BUCKET: 0, ML_BUCKET: 0}   # features/ml: forever
+        for name, want in targets.items():
             b = api.find_bucket_by_name(name)
             if b is None:
                 continue
-            b.retention_rules = ([BucketRetentionRules(type="expire", every_seconds=secs)]
-                                 if secs else [])
+            b.retention_rules = ([BucketRetentionRules(type="expire", every_seconds=want)]
+                                 if want else [])
             api.update_bucket(bucket=b)
             applied.append(name)
-            log.info("Set retention on %s to %d days", name, retention_days)
-        return {"days": retention_days, "buckets": applied}
+            log.info("Set retention on %s to %d days", name, want // 86400 if want else 0)
+        return {"days": raw_retention_days, "buckets": applied}
 
     # ── raw ────────────────────────────────────────────────────────────────
     def write_raw(self, binding: Binding, states: list[EntityState]) -> None:

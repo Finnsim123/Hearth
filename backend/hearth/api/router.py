@@ -1657,20 +1657,22 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"ok": True, "note": "takes effect on the next training run "
                                     "(feature schema changed — retrain to apply)"}
 
-    # ── data history retention (raw + features bucket lifetime) ───────────
+    # ── raw-signal retention (features + ml are kept forever) ─────────────
     @api.get("/settings/retention")
     def get_retention() -> dict:
-        from ..adapters.influx_store import DEFAULT_RETENTION_DAYS
-        days = repo.get_setting("retention.days", DEFAULT_RETENTION_DAYS)
+        from ..adapters.influx_store import DEFAULT_RAW_RETENTION_DAYS
+        days = repo.get_setting("retention.days", DEFAULT_RAW_RETENTION_DAYS)
         if not isinstance(days, int):
-            days = DEFAULT_RETENTION_DAYS
-        return {"days": days, "default": DEFAULT_RETENTION_DAYS}
+            days = DEFAULT_RAW_RETENTION_DAYS
+        return {"days": days, "default": DEFAULT_RAW_RETENTION_DAYS}
 
     @api.post("/settings/retention")
     def set_retention_ep(body: dict) -> dict:
-        """Set how long raw events + features are kept (the training corpus).
-        days=0 keeps data forever; otherwise 1..3650 (10y). Applied to the live
-        InfluxDB buckets at once when connected, else on the next restart."""
+        """Set how long RAW signal is kept. Features (the model corpus) and
+        predictions/labels are ALWAYS kept forever — this knob bounds raw only,
+        since raw is just the source features are built from and the look-back
+        for the live views. days=0 keeps raw forever too; otherwise 1..3650
+        (10y). Applied to the live InfluxDB buckets at once, else on restart."""
         raw = body.get("days")
         try:
             days = int(raw)
