@@ -167,8 +167,13 @@ def train_person(person_id: str, tsdb, repo, store,
                        repo, store, fset, end, excluded, force, cfg,
                        baseline_labels=labels)
     if record is not None:
-        from ..inference.smoothing import learn_transitions
-        repo.set_setting(f"transitions.{person_id}", learn_transitions(coarse_labels))
+        # time-conditioned transition matrices (audit F6): the forward filter
+        # auto-detects the daypart structure and falls back to "all" when no
+        # daypart is supplied, so this stays compatible with the flat consumer.
+        from ..inference.smoothing import learn_transitions_by_daypart
+        tz = repo.get_setting("timezone", "UTC") or "UTC"
+        repo.set_setting(f"transitions.{person_id}",
+                         learn_transitions_by_daypart(coarse_labels, tz))
 
     for parent in parents_with_children(activities):
         fine = fine_label_series(labels, parent, pmap)

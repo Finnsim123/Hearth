@@ -72,6 +72,44 @@ def test_transition_filter_noop_without_model():
     assert transition_filter(row, "unknown", {"a": {"a": 1.0}}).equals(row)
 
 
+def test_daypart_transitions_are_time_conditioned():
+    """sleeping→cooking happens only in the morning, so the morning matrix must
+    allow it while the night matrix suppresses it (audit F6)."""
+    from hearth.domain.inference.smoothing import learn_transitions_by_daypart
+    start = datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc)
+    idx = pd.DatetimeIndex([start + timedelta(minutes=30 * i) for i in range(480)])
+    # every morning (hour 8) a sleeping→cooking flip; nights stay sleeping
+    labels = []
+    for ts in idx:
+        labels.append("cooking" if ts.hour == 8 else "sleeping")
+    s = pd.Series(labels, index=idx)
+    dp = learn_transitions_by_daypart(s, tz="UTC")
+    assert "all" in dp and "1" in dp                     # morning bucket = 1
+    # morning matrix: sleeping→cooking is real; night matrix: ~never
+    assert dp["1"]["sleeping"]["cooking"] > dp["0"]["sleeping"]["cooking"]
+    # filter picks the matrix by daypart
+    row = pd.Series({"sleeping": 0.5, "cooking": 0.5})
+    morning = transition_filter(row, "sleeping", dp, daypart=1)
+    night = transition_filter(row, "sleeping", dp, daypart=0)
+    assert morning["cooking"] > night["cooking"]
+
+
+def test_viterbi_smooths_a_single_flicker():
+    """One noisy mid-run flip is corrected by the global path when the
+    transition prior is sticky (audit F6 offline relabeling)."""
+    from hearth.domain.inference.smoothing import viterbi, viterbi_relabel
+    trans = {"home": {"home": 0.95, "away": 0.05},
+             "away": {"home": 0.05, "away": 0.95}}
+    em = [{"home": 0.9, "away": 0.1}] * 5
+    em[2] = {"home": 0.45, "away": 0.55}                 # lone flicker to away
+    path = viterbi(em, trans)
+    assert path == ["home"] * 5                          # flicker erased
+    idx = pd.date_range("2026-06-01", periods=5, freq="30min", tz="UTC")
+    probs = pd.DataFrame(em, index=idx)
+    out = viterbi_relabel(probs, trans)
+    assert list(out) == ["home"] * 5 and out.index.equals(idx)
+
+
 def test_calibration_fixes_overconfidence():
     from hearth.domain.training.estimators import RandomForestEstimator
     rng = np.random.default_rng(3)
