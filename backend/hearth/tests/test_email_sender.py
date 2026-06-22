@@ -69,3 +69,36 @@ def test_send_failure_returns_false(monkeypatch):
     monkeypatch.setattr("smtplib.SMTP_SSL", Boom)
     s = EmailSender(FakeRepo(conn))
     assert s.send("a@b.com", "s", "<p>h</p>") is False
+
+
+def test_drops_header_injection_recipients(monkeypatch):
+    """A recipient carrying CR/LF (Bcc smuggling) is rejected; only clean
+    addresses reach the relay."""
+    conn = {"url": "smtp.example.com", "token": "pw",
+            "options": {"port": 587, "username": "u@x.com", "from": "u@x.com",
+                        "from_name": "Hearth", "tls": "starttls"}}
+    seen: dict = {}
+
+    class FakeSMTP:
+        def __init__(self, *a, **k): ...
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def ehlo(self): ...
+        def starttls(self, context=None): ...
+        def login(self, u, p): ...
+        def send_message(self, msg): seen["msg"] = msg
+
+    monkeypatch.setattr("smtplib.SMTP", FakeSMTP)
+    s = EmailSender(FakeRepo(conn))
+    # one poisoned + one clean recipient
+    assert s.send(["a@b.com\r\nBcc: evil@x.com", "good@b.com"], "S", "<p>h</p>") is True
+    assert seen["msg"]["To"] == "good@b.com"          # injected one dropped
+    assert "\r" not in seen["msg"]["To"] and "\n" not in seen["msg"]["To"]
+
+
+def test_all_invalid_recipients_is_noop(monkeypatch):
+    conn = {"url": "smtp.example.com", "token": "pw",
+            "options": {"username": "u@x.com", "from": "u@x.com", "tls": "starttls"}}
+    monkeypatch.setattr("smtplib.SMTP", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not connect")))
+    s = EmailSender(FakeRepo(conn))
+    assert s.send("not-an-email", "S", "<p>h</p>") is False

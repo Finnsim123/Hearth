@@ -59,6 +59,7 @@ class User(BaseModel):
     role: Literal["admin", "member"] = "member"
     person_id: str | None = None  # optional link to a household member
     disabled: bool = False
+    totp_enabled: bool = False    # 2FA on? (the secret itself never leaves the DB)
 
 
 class Person(BaseModel):

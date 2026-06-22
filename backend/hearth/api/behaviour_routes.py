@@ -69,6 +69,63 @@ def behaviour(person: str | None = None, days: int = 7) -> dict:
             "persons": plist, "activities": acts}
 
 
+@router.get("/share")
+def get_share(person: str) -> dict:
+    from ..domain.behaviour.household import shares
+    return {"person": person, "shares": shares(_repo, person) if _repo else False}
+
+
+@router.post("/share")
+def set_share(body: dict) -> dict:
+    from ..domain.behaviour.household import set_share as _set
+    pid = body.get("person")
+    enabled = bool(body.get("enabled"))
+    if _repo is not None and pid:
+        _set(_repo, pid, enabled)
+    return {"person": pid, "shares": enabled}
+
+
+@router.get("/household")
+def household(person: str | None = None, days: int = 7) -> dict:
+    from ..domain.behaviour.household import cooccurrence, opted_in_ids, shares
+    if _repo is None or _tsdb is None:
+        return {"enabled": False, "shared": [], "self_shared": False, "pairs": []}
+    try:
+        persons = list(_repo.persons())
+    except Exception:
+        persons = []
+    name = {p.id: getattr(p, "name", p.id) for p in persons}
+    opted = opted_in_ids(_repo)
+    pid = person or (persons[0].id if persons else None)
+    self_shared = bool(pid and shares(_repo, pid))
+    # gate: the viewer must have opted in, and there must be someone to compare to
+    if not pid or not self_shared or len(opted) < 2:
+        return {"enabled": False, "shared": opted, "self_shared": self_shared, "pairs": []}
+
+    days = max(1, min(int(days or 7), 92))
+    tz = (_repo.get_setting("timezone", "UTC") or "UTC")
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    try:
+        a_rows = _tsdb.read_predictions(pid, start, end)
+    except Exception:
+        a_rows = []
+    pairs = []
+    for other in opted:
+        if other == pid:
+            continue
+        try:
+            b_rows = _tsdb.read_predictions(other, start, end)
+        except Exception:
+            b_rows = []
+        items = cooccurrence(a_rows, b_rows)
+        if items:
+            pairs.append({"other_id": other, "other_name": name.get(other, other),
+                          "items": [it.model_dump(mode="json") for it in items]})
+    return {"enabled": True, "shared": opted, "self_shared": True,
+            "self_name": name.get(pid, pid), "pairs": pairs}
+
+
 @router.get("/digest")
 def get_digest() -> dict:
     en = bool(_repo.get_setting("behaviour.digest.enabled")) if _repo else False

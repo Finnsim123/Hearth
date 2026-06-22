@@ -38,11 +38,84 @@ def build_api_router(deps: dict) -> APIRouter:
         if user is None:
             raise HTTPException(401, "Wrong email or password")
         from .. import security
+        if user.totp_enabled:
+            code = (body.get("code") or "").strip()
+            if not code:
+                # password OK, but a second factor is needed — no session yet
+                return {"twofa_required": True}
+            secret = repo.totp_secret(user.id)
+            ok = (bool(secret) and security.verify_totp(secret, code)) \
+                or repo.consume_recovery_code(user.id, code)
+            if not ok:
+                raise HTTPException(401, "Invalid authentication code")
         cookie, sha = security.mint_session()
         repo.create_session(user.id, sha)
         _set_session_cookie(response, request, cookie)
         return {"ok": True, "user": {"email": user.email, "name": user.display_name,
                                      "role": user.role}}
+
+    # ── two-factor (TOTP, RFC 6238) ───────────────────────────────────────
+    @api.get("/auth/2fa")
+    def twofa_status(request: Request) -> dict:
+        user = getattr(request.state, "user", None)
+        if user is None:
+            raise HTTPException(401, "Not signed in")
+        return {"enabled": user.totp_enabled}
+
+    @api.post("/auth/2fa/setup")
+    def twofa_setup(request: Request) -> dict:
+        """Generate a pending secret + otpauth URI (and a QR if segno is present).
+        Not active until /auth/2fa/enable confirms a code."""
+        user = getattr(request.state, "user", None)
+        if user is None:
+            raise HTTPException(401, "Not signed in")
+        if user.totp_enabled:
+            raise HTTPException(409, "Two-factor is already on — disable it first to re-enroll")
+        from .. import security
+        secret = security.new_totp_secret()
+        repo.set_totp_pending(user.id, secret)
+        uri = security.totp_uri(secret, user.email)
+        qr = None
+        try:                                   # optional, pure-python QR
+            import base64 as _b64
+            import io
+
+            import segno
+            buf = io.BytesIO()
+            segno.make(uri, error="m").save(buf, kind="svg", scale=4,
+                                            dark="#e7eaf0", light="#161a21")
+            qr = "data:image/svg+xml;base64," + _b64.b64encode(buf.getvalue()).decode()
+        except Exception:
+            qr = None
+        return {"secret": secret, "uri": uri, "qr": qr}
+
+    @api.post("/auth/2fa/enable")
+    def twofa_enable(body: dict, request: Request) -> dict:
+        """Confirm enrollment with a live code; returns one-time recovery codes
+        (shown ONCE)."""
+        user = getattr(request.state, "user", None)
+        if user is None:
+            raise HTTPException(401, "Not signed in")
+        from .. import security
+        secret = repo.totp_secret(user.id)
+        if not secret:
+            raise HTTPException(409, "Start setup first")
+        if not security.verify_totp(secret, body.get("code", "")):
+            raise HTTPException(400, "That code didn't match — check the app and try again")
+        codes = security.new_recovery_codes()
+        repo.enable_totp(user.id, [security.recovery_sha(c) for c in codes])
+        return {"ok": True, "recovery_codes": codes}
+
+    @api.post("/auth/2fa/disable")
+    def twofa_disable(body: dict, request: Request) -> dict:
+        """Turn off 2FA. Requires the current password (re-auth)."""
+        user = getattr(request.state, "user", None)
+        if user is None:
+            raise HTTPException(401, "Not signed in")
+        if not repo.check_password(user.id, body.get("password", "")):
+            raise HTTPException(403, "Current password is wrong")
+        repo.disable_totp(user.id)
+        return {"ok": True}
 
     @api.post("/auth/logout")
     def logout(request: Request, response: Response) -> dict:
@@ -99,16 +172,22 @@ def build_api_router(deps: dict) -> APIRouter:
         never reveal whether an address has an account (enumeration guard). Needs
         SMTP configured; the CLI (`python -m hearth.recover`) remains the fallback
         when email isn't set up."""
-        from ..security import mint_reset_token
+        from html import escape
+
+        from ..security import mint_reset_token, valid_email
         email = (body.get("email") or "").strip().lower()
         sender = deps.get("email")
-        user = repo.user_by_email(email) if email else None
-        if user and sender is not None and sender.configured():
+        user = repo.user_by_email(email) if (email and valid_email(email)) else None
+        # rate-limit: at most one recovery mail per user per cooldown, so /forgot
+        # can't be used to flood an inbox or burn the SMTP quota.
+        if (user and sender is not None and sender.configured()
+                and not repo.recent_reset_token(user.id, within_min=15)):
             token, sha = mint_reset_token()
             repo.create_reset_token(user.id, sha, hours=1)
             base = (repo.get_setting("hearth_base_url") or "").rstrip("/")
             link = f"{base}/reset?token={token}" if base else None
-            html = (f"<p>Hi {user.display_name or 'there'},</p>"
+            name = escape(user.display_name or "there")
+            html = (f"<p>Hi {name},</p>"
                     "<p>Someone asked to reset your Hearth password. This link is valid "
                     "for one hour and can be used once:</p>"
                     + (f'<p><a href="{link}">{link}</a></p>' if link else "")

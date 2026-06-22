@@ -66,3 +66,17 @@ def test_lockdown_and_sessions(client):
     # logout kills the session server-side
     fresh.post("/api/auth/logout")
     assert fresh.get("/api/auth/me").status_code == 401
+
+
+def test_recent_reset_token_rate_limit(tmp_path, monkeypatch):
+    """recent_reset_token gates /auth/forgot so it can't mailbomb an inbox."""
+    monkeypatch.setenv("HEARTH_SECRET", "test-secret")
+    from hearth.adapters.app_db import AppDb
+    from hearth.domain.schemas import User
+    repo = AppDb(tmp_path / "rl.db")
+    repo.migrate()
+    u = repo.create_user(User(email="x@y.com", display_name="X"), "averylongpassword")
+    assert repo.recent_reset_token(u.id) is False        # none yet
+    repo.create_reset_token(u.id, "sha-abc", hours=1)
+    assert repo.recent_reset_token(u.id, within_min=15) is True   # just minted
+    assert repo.recent_reset_token(u.id, within_min=0) is False   # window elapsed

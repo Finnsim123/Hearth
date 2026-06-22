@@ -42,6 +42,9 @@ class UserRow(Base):
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)
     backoff_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    totp_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    recovery_codes_json: Mapped[str] = mapped_column(Text, default="[]")  # [{sha,used}]
 
 
 class SessionRow(Base):
@@ -609,8 +612,25 @@ class AppDb:
             r = s.scalars(select(UserRow).where(
                 UserRow.email == self._norm_email(email))).first()
             return (User(id=r.id, email=r.email, display_name=r.display_name,
-                         role=r.role, person_id=r.person_id, disabled=r.disabled)
+                         role=r.role, person_id=r.person_id, disabled=r.disabled,
+                         totp_enabled=r.totp_enabled)
                     if r is not None else None)
+
+    def recent_reset_token(self, user_id: int, within_min: int = 15) -> bool:
+        """True if a reset token was minted for this user within `within_min` —
+        the rate-limit guard so /auth/forgot can't be used to mailbomb an inbox
+        or burn the SMTP quota."""
+        from datetime import timedelta
+        with Session(self.engine) as s:
+            r = s.scalars(select(PasswordResetRow)
+                          .where(PasswordResetRow.user_id == user_id)
+                          .order_by(PasswordResetRow.created_at.desc())).first()
+            if r is None:
+                return False
+            ca = r.created_at
+            if ca.tzinfo is None:
+                ca = ca.replace(tzinfo=timezone.utc)
+            return (_now() - ca) < timedelta(minutes=within_min)
 
     def create_reset_token(self, user_id: int, token_sha256: str, hours: int = 1) -> None:
         from datetime import timedelta
@@ -680,7 +700,8 @@ class AppDb:
             if u is None or u.disabled:
                 return None
             return User(id=u.id, email=u.email, display_name=u.display_name,
-                        role=u.role, person_id=u.person_id, disabled=u.disabled)
+                        role=u.role, person_id=u.person_id, disabled=u.disabled,
+                        totp_enabled=u.totp_enabled)
 
     def delete_session(self, token_sha256: str) -> None:
         with Session(self.engine) as s:
@@ -740,7 +761,75 @@ class AppDb:
                 r.password_hash = new_hash
             s.commit()
             return User(id=r.id, email=r.email, display_name=r.display_name,
-                        role=r.role, person_id=r.person_id, disabled=r.disabled)
+                        role=r.role, person_id=r.person_id, disabled=r.disabled,
+                        totp_enabled=r.totp_enabled)
+
+    def check_password(self, user_id: int, password: str) -> bool:
+        """Verify a password with NO side effects (no lockout counters) — for
+        re-auth on sensitive actions like disabling 2FA."""
+        with Session(self.engine) as s:
+            r = s.get(UserRow, user_id)
+            if r is None:
+                return False
+            ok, _ = security.verify_password(password, r.password_hash)
+            return ok
+
+    # ── two-factor (TOTP) ───────────────────────────────────────────────────
+    def set_totp_pending(self, user_id: int, secret_plain: str) -> None:
+        """Store a not-yet-confirmed TOTP secret (encrypted). Enabled stays off
+        until the user proves a code via enable_totp()."""
+        with Session(self.engine) as s:
+            r = s.get(UserRow, user_id)
+            if r is None:
+                return
+            r.totp_secret_encrypted = security.encrypt_secret(secret_plain)
+            r.totp_enabled = False
+            s.commit()
+
+    def totp_secret(self, user_id: int) -> str | None:
+        with Session(self.engine) as s:
+            r = s.get(UserRow, user_id)
+            if r is None or not r.totp_secret_encrypted:
+                return None
+            try:
+                return security.decrypt_secret(r.totp_secret_encrypted)
+            except Exception:
+                return None
+
+    def enable_totp(self, user_id: int, recovery_shas: list[str]) -> None:
+        with Session(self.engine) as s:
+            r = s.get(UserRow, user_id)
+            if r is None:
+                return
+            r.totp_enabled = True
+            r.recovery_codes_json = json.dumps([{"sha": h, "used": False} for h in recovery_shas])
+            s.commit()
+
+    def disable_totp(self, user_id: int) -> None:
+        with Session(self.engine) as s:
+            r = s.get(UserRow, user_id)
+            if r is None:
+                return
+            r.totp_enabled = False
+            r.totp_secret_encrypted = None
+            r.recovery_codes_json = "[]"
+            s.commit()
+
+    def consume_recovery_code(self, user_id: int, code_plain: str) -> bool:
+        """Mark a matching unused recovery code used. True if one matched."""
+        sha = security.recovery_sha(code_plain)
+        with Session(self.engine) as s:
+            r = s.get(UserRow, user_id)
+            if r is None:
+                return False
+            codes = json.loads(r.recovery_codes_json or "[]")
+            for c in codes:
+                if c.get("sha") == sha and not c.get("used"):
+                    c["used"] = True
+                    r.recovery_codes_json = json.dumps(codes)
+                    s.commit()
+                    return True
+            return False
 
 
 class FileModelStore:

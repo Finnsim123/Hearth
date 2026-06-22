@@ -93,6 +93,50 @@ def decrypt_secret(ciphertext: str) -> str:
     return _get_fernet().decrypt(ciphertext.encode()).decode()
 
 
+# ── TOTP 2FA (RFC 6238, stdlib only — no extra dependency) ──────────────────
+def new_totp_secret() -> str:
+    """A fresh base32 secret (160-bit) for authenticator apps."""
+    return base64.b32encode(_secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def _hotp(secret_b32: str, counter: int, digits: int = 6) -> str:
+    pad = "=" * ((8 - len(secret_b32) % 8) % 8)
+    key = base64.b32decode(secret_b32.upper() + pad)
+    import struct
+    h = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    o = h[-1] & 0x0F
+    num = (int.from_bytes(h[o:o + 4], "big") & 0x7FFFFFFF) % (10 ** digits)
+    return str(num).zfill(digits)
+
+
+def verify_totp(secret_b32: str, code: str, *, window: int = 1, step: int = 30) -> bool:
+    """True if `code` matches the current time-step (±`window` for clock skew)."""
+    import time
+    code = (code or "").strip().replace(" ", "")
+    if not (secret_b32 and code.isdigit()):
+        return False
+    counter = int(time.time() // step)
+    return any(hmac.compare_digest(_hotp(secret_b32, counter + w), code.zfill(6))
+               for w in range(-window, window + 1))
+
+
+def totp_uri(secret_b32: str, account: str, issuer: str = "Hearth") -> str:
+    """otpauth:// URI for QR enrollment in Google/Microsoft/Authy etc."""
+    from urllib.parse import quote
+    label = quote(f"{issuer}:{account}", safe="")
+    return (f"otpauth://totp/{label}?secret={secret_b32}&issuer={quote(issuer)}"
+            "&algorithm=SHA1&digits=6&period=30")
+
+
+def new_recovery_codes(n: int = 8) -> list[str]:
+    """Human-typable one-time backup codes, e.g. 'a1b2-c3d4'."""
+    return [f"{_secrets.token_hex(2)}-{_secrets.token_hex(2)}" for _ in range(n)]
+
+
+def recovery_sha(code: str) -> str:
+    return _sha256((code or "").strip().lower().replace(" ", ""))
+
+
 # ── redaction ──────────────────────────────────────────────────────────────
 def mask(value: str) -> str:
     """For logs and UI: 'hrt_a1b2****'. Never log unmasked secrets."""

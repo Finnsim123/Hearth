@@ -51,6 +51,27 @@ class Transition(BaseModel):
     prob: float                    # count / all changes leaving `src` (0..1)
 
 
+class Session(BaseModel):
+    activity: str
+    count: int                     # number of episodes
+    mean_min: float                # average episode length
+    median_min: float
+    longest_min: float
+
+
+class Consistency(BaseModel):
+    """Regularity of the trustworthy daily events (wake/bed), from sleep facts.
+    Times are local minute-of-day; spread is the std-dev across nights, banded
+    into plain language. None until there are at least 2 qualifying nights."""
+    nights: int
+    wake_avg_min: float | None = None
+    wake_spread_min: float | None = None
+    wake_band: str | None = None
+    bed_avg_min: float | None = None
+    bed_spread_min: float | None = None
+    bed_band: str | None = None
+
+
 class BehaviourSummary(BaseModel):
     person_id: str
     start: str
@@ -69,6 +90,8 @@ class BehaviourSummary(BaseModel):
     away_per_day_min: dict[str, float]
     rhythm: list[RhythmCell]       # 24h x day-of-week grid (when things happen)
     sequences: list[Transition]    # observed "what follows what" (self-loops excluded)
+    sessions: list[Session]        # per-activity episode stats (count, length)
+    consistency: Consistency       # wake/bed regularity from sleep facts
 
 
 def _basis(model_version: str | None) -> str:
@@ -107,6 +130,7 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
     rhythm: dict[tuple[int, int], dict[str, float]] = {}
     trans: dict[tuple[str, str], int] = {}
     prev: tuple[datetime, str] | None = None
+    seq_all: list[tuple[datetime, str]] = []
 
     parsed = sorted(((_parse(r["time"]), r) for r in rows if r.get("time")),
                     key=lambda t: t[0])
@@ -115,6 +139,7 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
         date = local.date().isoformat()
         state = _state(r)
         basis = _basis(r.get("model_version"))
+        seq_all.append((local, state))
         # rhythm grid + sequences (classified windows only)
         if state != UNKNOWN:
             cell = rhythm.setdefault((local.weekday(), local.hour), {})
@@ -165,6 +190,10 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
          for (a, b), c in trans.items()),
         key=lambda x: (-x.count, x.src, x.dst))[:24]
 
+    episodes = _episodes(seq_all, window_min)
+    sessions = _sessions(episodes)
+    consistency = _consistency(episodes, sleep_slug)
+
     return BehaviourSummary(
         person_id=person_id, start=start, end=end, window_min=window_min,
         totals=totals, total_min=total_min, classified_min=classified_min,
@@ -172,7 +201,68 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
         known_fraction=round(known_fraction, 4), per_day=per_day,
         today=_segments(today_rows, window_min),
         sleep_per_day_min=sleep_day, away_per_day_min=away_day,
-        rhythm=rhythm_cells, sequences=sequences)
+        rhythm=rhythm_cells, sequences=sequences,
+        sessions=sessions, consistency=consistency)
+
+
+def _episodes(seq: list[tuple[datetime, str]], window_min: int
+              ) -> list[tuple[str, datetime, datetime]]:
+    """Merge contiguous same-state windows into episodes (state, start, end).
+    A time gap or a state change starts a new episode; unknown is kept (it breaks
+    runs) and filtered by callers."""
+    out: list[list] = []
+    for local, state in seq:
+        end = local + timedelta(minutes=window_min)
+        if out and out[-1][0] == state and out[-1][2] == local:
+            out[-1][2] = end
+        else:
+            out.append([state, local, end])
+    return [(s, a, b) for s, a, b in out]
+
+
+def _sessions(episodes: list[tuple[str, datetime, datetime]]) -> list[Session]:
+    by: dict[str, list[float]] = {}
+    for state, start, end in episodes:
+        if state == UNKNOWN:
+            continue
+        by.setdefault(state, []).append((end - start).total_seconds() / 60.0)
+    out = [Session(activity=a, count=len(ds), mean_min=round(mean(ds), 1),
+                   median_min=round(median(ds), 1), longest_min=round(max(ds), 1))
+           for a, ds in by.items()]
+    out.sort(key=lambda s: -s.count)
+    return out
+
+
+def _band(spread: float) -> str:
+    if spread <= 20:
+        return "very regular"
+    if spread <= 45:
+        return "fairly regular"
+    if spread <= 90:
+        return "varies"
+    return "irregular"
+
+
+def _consistency(episodes: list[tuple[str, datetime, datetime]],
+                 sleep_slug: str, min_sleep_min: float = 180.0) -> Consistency:
+    """Wake/bed regularity from night-sleep episodes (>= min_sleep_min). Bedtimes
+    are measured as minutes since 18:00 so they don't wrap at midnight; wake times
+    are plain minute-of-day (mornings don't wrap)."""
+    beds, wakes = [], []
+    for state, start, end in episodes:
+        if state != sleep_slug or (end - start).total_seconds() / 60.0 < min_sleep_min:
+            continue
+        beds.append(((start.hour * 60 + start.minute) - 18 * 60) % 1440)
+        wakes.append(end.hour * 60 + end.minute)
+    nights = len(wakes)
+    if nights < 2:
+        return Consistency(nights=nights)
+    wake_sd, bed_sd = pstdev(wakes), pstdev(beds)
+    return Consistency(
+        nights=nights,
+        wake_avg_min=round(mean(wakes)), wake_spread_min=round(wake_sd), wake_band=_band(wake_sd),
+        bed_avg_min=round((mean(beds) + 18 * 60) % 1440), bed_spread_min=round(bed_sd),
+        bed_band=_band(bed_sd))
 
 
 class TrendCallout(BaseModel):

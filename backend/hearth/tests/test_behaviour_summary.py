@@ -60,10 +60,39 @@ def test_rule_basis_counts_as_inferred_not_fact():
     assert s.fact_min == 0 and s.inferred_min == 60
 
 
+def test_sessions_count_and_length():
+    # two cooking episodes (60m, 30m) separated by an away block
+    rows = _rows([(0, 60, "cooking", "m-v1"), (60, 120, "away", "fact-v0"),
+                  (120, 150, "cooking", "m-v1")])
+    s = summarize("alice", rows, tz="UTC", now=BASE + timedelta(hours=3))
+    cook = next(x for x in s.sessions if x.activity == "cooking")
+    assert cook.count == 2
+    assert cook.longest_min == 60
+    assert cook.mean_min == 45            # (60 + 30) / 2
+
+
+def test_consistency_bands_from_sleep():
+    # 3 nights, each ~23:00 -> ~07:00, very regular
+    rows = []
+    for d in range(3):
+        day = BASE + timedelta(days=d)
+        bed = day + timedelta(hours=23)
+        t = bed
+        while t < day + timedelta(days=1, hours=7):
+            rows.append({"time": t.isoformat(), "smoothed": "asleep",
+                         "predicted": "asleep", "model_version": "fact-v0"})
+            t += timedelta(minutes=30)
+    s = summarize("alice", rows, tz="UTC", now=BASE + timedelta(days=4))
+    assert s.consistency.nights == 3
+    assert s.consistency.wake_band == "very regular"
+    assert s.consistency.wake_avg_min == 7 * 60     # 07:00
+
+
 def test_empty_is_safe():
     s = summarize("alice", [], tz="UTC", now=BASE)
     assert s.total_min == 0 and s.coverage == 0.0 and s.per_day == [] and s.today == []
     assert s.rhythm == [] and s.sequences == []
+    assert s.sessions == [] and s.consistency.nights == 0
 
 
 def test_rhythm_grid_bins_by_local_dow_and_hour():

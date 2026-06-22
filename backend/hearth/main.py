@@ -155,7 +155,7 @@ def create_app() -> FastAPI:
     # the wizard's probe + setup endpoints. The SPA itself is public; it
     # gates itself on /api/auth/me.
     from .api.scopes import integration_allowed
-    PUBLIC = {"/api/health", "/api/auth/login", "/api/auth/reset"}
+    PUBLIC = {"/api/health", "/api/auth/login", "/api/auth/reset", "/api/auth/forgot"}
     SETUP_ONLY = {"/api/setup/complete", "/api/ha/test", "/api/ha/inventory",
                   "/api/influx/inspect", "/api/tokens", "/api/feature-spec/estimate",
                   "/api/triage/preview"}
