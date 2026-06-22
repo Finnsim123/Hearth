@@ -8,7 +8,8 @@ import pandas as pd
 import pytest
 
 from hearth.domain.discovery.clustering import (
-    _is_duplicate, discover_person, run_discovery, signature)
+    _is_duplicate, discover_person, gmm_rescue, reduce_dims, run_discovery,
+    signature)
 from hearth.domain.schemas import ClusterCard, Person
 
 
@@ -142,3 +143,31 @@ def test_drafted_rule_from_signature_is_disabled_and_positive_only():
     feats = {c["feat"] for c in rule.predicate["all"]}
     assert feats == {"sofa_presence_frac", "media_playing"}  # negatives excluded
     assert rule.origin == "discovered"
+
+
+def test_reduce_dims_keeps_signal_drops_dims():
+    """PCA front-end: a 20-col matrix with 2 real factors reduces to few
+    components while preserving the variance (audit F2)."""
+    rng = np.random.default_rng(0)
+    f1 = rng.normal(0, 1, 300)
+    f2 = rng.normal(0, 1, 300)
+    cols = {f"c{i}": (f1 if i % 2 else f2) + rng.normal(0, 0.01, 300) for i in range(20)}
+    Xs = pd.DataFrame(cols)
+    Xr = reduce_dims(Xs, var=0.9)
+    assert Xr.shape[0] == 300 and 2 <= Xr.shape[1] <= 5
+    # low-dim input passes through untouched
+    small = pd.DataFrame({"a": f1, "b": f2})
+    assert reduce_dims(small).shape[1] == 2
+
+
+def test_gmm_rescue_recovers_rare_state_from_noise():
+    """A tight rare cluster HDBSCAN would call noise gets its own GMM id (F2)."""
+    rng = np.random.default_rng(1)
+    bulk = rng.normal(0, 1, (200, 4))
+    rare = rng.normal(8, 0.1, (15, 4))              # tight, far, small
+    Xr = np.vstack([bulk, rare])
+    labels = np.full(len(Xr), -1)                   # pretend HDBSCAN found nothing
+    out, gmm_ids = gmm_rescue(Xr, labels, floor=8)
+    assert gmm_ids                                  # at least one rescued cluster
+    rescued = out[200:]                             # the rare rows
+    assert (rescued != -1).sum() >= 10              # most of the rare state recovered

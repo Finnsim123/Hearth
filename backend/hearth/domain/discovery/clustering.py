@@ -41,6 +41,57 @@ def signature(cluster_rows: pd.DataFrame, global_mean: pd.Series,
     return [(feat, round(float(z[feat]), 2)) for feat in top.index]
 
 
+def reduce_dims(Xs: pd.DataFrame, var: float = 0.9, max_components: int = 30) -> np.ndarray:
+    """PCA before density clustering (audit F2). In raw high-dim sensor space
+    distances concentrate (curse of dimensionality) and HDBSCAN's density
+    estimate degrades; reducing to the components that capture ~`var` of the
+    variance denoises and concentrates signal. Pass-through when already low-dim."""
+    from sklearn.decomposition import PCA
+    n = min(len(Xs), Xs.shape[1], max_components)
+    if Xs.shape[1] <= 3 or n < 2:
+        return Xs.to_numpy()
+    pca = PCA(n_components=n, random_state=42).fit(Xs.to_numpy())
+    k = int(np.searchsorted(np.cumsum(pca.explained_variance_ratio_), var) + 1)
+    k = max(2, min(k, n))
+    return pca.transform(Xs.to_numpy())[:, :k]
+
+
+def gmm_rescue(Xr: np.ndarray, labels: np.ndarray, floor: int,
+               max_k: int = 6) -> tuple[np.ndarray, set[int]]:
+    """Second pass over HDBSCAN noise (audit F2). Soft, elliptical GMM components
+    surface rare/subtle states (cooking, reading) that density clustering buries
+    as -1. K chosen by BIC. Returns (labels, ids_from_gmm); coherent components
+    (>= floor members) get fresh cluster ids beyond HDBSCAN's."""
+    from sklearn.mixture import GaussianMixture
+    noise = np.where(labels == -1)[0]
+    if len(noise) < floor * 2:
+        return labels, set()
+    Xn = Xr[noise]
+    best, best_bic = None, np.inf
+    for k in range(1, min(max_k, len(noise) // floor) + 1):
+        try:
+            gm = GaussianMixture(n_components=k, covariance_type="full",
+                                 random_state=42).fit(Xn)
+        except Exception:
+            continue
+        bic = gm.bic(Xn)
+        if bic < best_bic:
+            best, best_bic = gm, bic
+    if best is None:
+        return labels, set()
+    comp = best.predict(Xn)
+    out = labels.copy()
+    next_id = int(labels.max()) + 1 if labels.max() >= 0 else 0
+    gmm_ids: set[int] = set()
+    for c in range(best.n_components):
+        members = noise[comp == c]
+        if len(members) >= floor:
+            out[members] = next_id
+            gmm_ids.add(next_id)
+            next_id += 1
+    return out, gmm_ids
+
+
 def _hour_histogram(index: pd.DatetimeIndex, tz: str) -> list[int]:
     hist = [0] * 24
     try:
@@ -90,9 +141,13 @@ def discover_person(person_id: str, tsdb, repo, days: int = 30) -> list[ClusterC
         return []
     g_mean, g_std = X.mean(), X.std()
     Xs = ((X - g_mean) / g_std).fillna(0.0)
+    Xr = reduce_dims(Xs)                            # PCA front-end (audit F2)
 
-    min_size = max(8, len(Xs) // 40)               # small installs still find patterns
-    labels = HDBSCAN(min_cluster_size=min_size).fit_predict(Xs.to_numpy())
+    min_size = max(8, len(Xr) // 40)               # small installs still find patterns
+    labels = HDBSCAN(min_cluster_size=min_size).fit_predict(Xr)
+    # rare states allowed below the HDBSCAN floor; signatures still computed on
+    # the ORIGINAL feature space so cards stay interpretable ('sofa ↑ · …')
+    labels, gmm_ids = gmm_rescue(Xr, labels, floor=max(8, min_size // 2))
 
     tz = repo.get_setting("timezone", "UTC") or "UTC"
     handled = [c for c in repo.clusters() if c.status != "new"]
@@ -104,7 +159,8 @@ def discover_person(person_id: str, tsdb, repo, days: int = 30) -> list[ClusterC
             continue
         members = list(rows.index[:MAX_MEMBER_WINDOWS])
         cards.append(ClusterCard(
-            person_id=person_id, algo="hdbscan", n_windows=int(len(rows)),
+            person_id=person_id, algo="gmm" if cl in gmm_ids else "hdbscan",
+            n_windows=int(len(rows)),
             signature=sig, hour_histogram=_hour_histogram(rows.index, tz),
             example_windows=[ts.to_pydatetime() for ts in members]))
     log.info("[discovery:%s] %d windows → %d pattern candidates",
