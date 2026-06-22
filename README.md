@@ -21,12 +21,12 @@ automate on. Everything runs on your own hardware.
 </p>
 
 <p align="center">
-  <a href="#-quickstart">Quickstart</a> ·
-  <a href="#-the-setup-wizard">Setup</a> ·
-  <a href="#-living-with-hearth">The app</a> ·
-  <a href="#-the-ai-assistant-optional">AI assistant</a> ·
-  <a href="#-privacy--control">Privacy</a> ·
-  <a href="#-documentation">Docs</a>
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#the-setup-wizard">Setup</a> ·
+  <a href="#living-with-hearth">The app</a> ·
+  <a href="#the-ai-assistant-optional">AI assistant</a> ·
+  <a href="#privacy--control">Privacy</a> ·
+  <a href="#documentation">Docs</a>
 </p>
 
 ```
@@ -37,40 +37,40 @@ HA sensors ──► Hearth pipeline ──► features ──► model ──�
 
 ---
 
-## 🔥 Why Hearth
+## Why Hearth
 
-- **🏠 Local-first.** Everything runs on your own box. Your accounts, your data, no
+- **Local-first.** Everything runs on your own box. Your accounts, your data, no
   cloud to depend on, no account to sign up for. The only outbound traffic is opt-in
   and yours: the setup LLM (if you add a key) and the weekly email (if you turn it on).
-- **🗣️ Your activities, not ours.** Define your own taxonomy (cooking, gaming,
+- **Your activities, not ours.** Define your own taxonomy (cooking, gaming,
   chilling…) in the UI. Hearth clusters patterns it finds in your data and you name
   them, in a tap.
-- **🧱 A fact beats a guess.** Some things never need a model: when your presence says
+- **A fact beats a guess.** Some things never need a model: when your presence says
   you're out, Hearth marks you *away* and skips inference entirely. Bind a reliable
   sleep or presence sensor and those states become facts — checked for reliability
   before they're trusted, and cheaper and surer than any prediction.
-- **🔍 Glass-box ML.** The UI shows accuracy with confidence intervals, per-class F1
+- **Glass-box ML.** The UI shows accuracy with confidence intervals, per-class F1
   and AUC, confusion matrices, the sensors behind every prediction, and how the model
   trends across versions. A model stays *provisional* until enough of your own
   confirmations have validated it.
-- **🧠 AI sets up, you stay in control.** An optional language-model assistant reads
+- **AI sets up, you stay in control.** An optional language-model assistant reads
   your sensors *once* — it picks what's worth using, classifies each signal, designs
   the features (with reasons you can read), and flags sensors that look broken. New
   sensors are never pulled in silently. After the first model trains, predictions are
   100% local and the key is dead weight.
-- **📰 A weekly recap, if you want it.** An opt-in, per-member email summarises the
+- **A weekly recap, if you want it.** An opt-in, per-member email summarises the
   week's habits — designed in three detail levels, written from your own data (with an
   optional AI summary). Off by default.
-- **📦 Shippable stack.** One command brings up the Hearth backend, web UI and a
+- **Shippable stack.** One command brings up the Hearth backend, web UI and a
   bundled InfluxDB, with optional Mosquitto. All dashboards are custom and live in the
   app — no Grafana.
-- **🕯️ Calm by design.** Warm ember on cool slate, one accent that always means
+- **Calm by design.** Warm ember on cool slate, one accent that always means
   something, dark/light/system themes. The full design language lives in
   [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ---
 
-## 📋 Requirements
+## Requirements
 
 | Need | Why |
 |---|---|
@@ -85,7 +85,7 @@ A typical homelab box (a NAS, a mini-PC, a Pi 4/5) is plenty. No GPU. Classical 
 
 ---
 
-## 🚀 Quickstart
+## Quickstart
 
 ```bash
 git clone https://github.com/Finnsim123/Hearth && cd Hearth
@@ -113,7 +113,7 @@ macOS keep the user logged in (Docker Desktop is per-user) so the updater can ru
 
 ---
 
-## 🧭 The setup wizard
+## The setup wizard
 
 An eleven-step, resumable wizard walks you through everything. Each step explains
 itself in plain language, and you can close the tab and pick up where you left off.
@@ -148,7 +148,7 @@ trains its first model.
 
 ---
 
-## 🛋️ Living with Hearth
+## Living with Hearth
 
 After setup, the UI is insight, settings and a feedback loop:
 
@@ -170,7 +170,7 @@ After setup, the UI is insight, settings and a feedback loop:
 with `sensor.hearth_<person>_activity` (state = the predicted activity, or `unknown`
 when Hearth isn't confident enough to commit). For instant automations it also fires
 a `hearth_activity_changed` event the moment a state flips, so you can dim the lights
-*as* the movie starts, with no polling lag. Tapping ✓/✗ on a notification feeds the
+*as* the movie starts, with no polling lag. Tapping yes/no on a notification feeds the
 answer straight back into training. This path needs no MQTT broker.
 
 **Other hubs, or broker-based setups (MQTT).** Configure an MQTT broker and Hearth
@@ -191,7 +191,7 @@ that leaves your box — so the choice is yours, and clearly labelled.
 
 ---
 
-## 🧠 The AI assistant (optional)
+## The AI assistant (optional)
 
 Hearth works fully without an LLM — heuristics map sensors to roles and a fixed set
 of feature recipes drives the model. Add a key and the assistant becomes a one-time
@@ -215,7 +215,7 @@ enable the newsletter's AI summary, that's the only other place a key is used.)
 
 ---
 
-## 🔒 Privacy & control
+## Privacy & control
 
 - **Your hardware is the boundary.** No cloud service, no telemetry, no account to
   create. The only traffic that ever leaves the box is opt-in and yours: the setup LLM
@@ -245,7 +245,7 @@ enable the newsletter's AI summary, that's the only other place a key is used.)
 
 ---
 
-## 🔄 Updating
+## Updating
 
 Hearth updates itself from within the app (Settings → System), or by hand:
 
@@ -255,7 +255,7 @@ git pull && docker compose up -d --build
 
 ---
 
-## 🩹 Troubleshooting
+## Troubleshooting
 
 - **The URL won't load.** Check `docker compose logs -f hearth`. From the host you can
   always use `http://localhost:8420`.
@@ -276,7 +276,7 @@ git pull && docker compose up -d --build
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 | Doc | What's in it |
 |---|---|
@@ -291,7 +291,7 @@ git pull && docker compose up -d --build
 
 ---
 
-## 🛠️ Tech & development
+## Tech & development
 
 Python backend (FastAPI + APScheduler, scikit-learn), React + TypeScript SPA, InfluxDB
 for time series and SQLite for application state. Hexagonal core: pure domain logic
@@ -318,7 +318,7 @@ cd frontend && npm install && npm run typecheck && npm run build
 
 ---
 
-## 👤 Author
+## Author
 
 Built and maintained by **Finn** ([@Finnsim123](https://github.com/Finnsim123)).
 Contributions, issues and ideas are welcome.
