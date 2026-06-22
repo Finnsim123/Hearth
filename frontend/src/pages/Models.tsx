@@ -876,6 +876,22 @@ function WhatIfProbe({ personId }: { personId: string }) {
   );
 }
 
+/** Plain-language model-health line (UX10), from /buddy/insight. */
+function InsightLine({ personId }: { personId: string }) {
+  const [summary, setSummary] = useState("");
+  useEffect(() => {
+    fetch(`/api/buddy/insight?person=${encodeURIComponent(personId)}`).then(j)
+      .then((r) => setSummary(r.summary || "")).catch(() => {});
+  }, [personId]);
+  if (!summary) return null;
+  return (
+    <p style={{ margin: 0, fontSize: 13, color: "var(--text-dim)", display: "flex",
+                alignItems: "flex-start", gap: 8 }}>
+      <Icon name="models" size={14} /> <span>{summary}</span>
+    </p>
+  );
+}
+
 export default function Models() {
   const [models, setModels] = useState<Model[] | null>(null);
   const [persons, setPersons] = useState<{ id: string; name: string }[]>([]);
@@ -932,6 +948,7 @@ export default function Models() {
                 {training === pid ? "Training…" : "Train now"}
               </button>
             </div>
+            <InsightLine personId={pid} />
             <PersonHistory models={sorted} onAction={load} />
             {sorted.some((m) => m.promoted) && <WhatIfProbe personId={pid} />}
             {sorted.slice(0, 6).map((m) => <ModelCard key={m.id} m={m} onAction={load} personName={name} />)}

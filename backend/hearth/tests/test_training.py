@@ -465,3 +465,31 @@ def test_compute_drift_flags_shifted_features():
     report = compute_drift("alice", _Tsdb(), _Repo())
     assert report["psi"]["temp"] > 0.2 and "temp" in report["drifted"]
     assert report["psi"]["co2"] < 0.2 and "co2" not in report["drifted"]
+
+
+def test_model_insight_summary():
+    """model_insight (UX10) builds an honest plain-language health summary from
+    the stored metrics, including drift and the weakest slice."""
+    from hearth.domain.insight import model_insight
+
+    rec = ModelRecord(person_id="alice", version="alice-v3", node="root",
+                      feature_set="fs1", promoted=True, trained_at=None,
+                      metrics={"accuracy_gold": 0.86, "n_gold": 40,
+                               "calibration": {"ece": 0.05, "brier": 0.2, "n_check": 50},
+                               "slices": {"dayparts": ["night", "morning", "afternoon", "evening"],
+                                          "by_activity_daypart": [
+                                              {"activity": "cooking",
+                                               "cells": [{"acc": None, "n": 0}, {"acc": 0.4, "n": 12},
+                                                         {"acc": 0.9, "n": 20}, {"acc": 0.95, "n": 30}]}]}})
+
+    class _Repo:
+        def models(self, person=None): return [rec]
+        def get_setting(self, k, d=None):
+            return {"drifted": ["co2_mean", "temp"]} if k == "drift.alice" else d
+
+    out = model_insight("alice", _Repo())
+    assert "86%" in out["summary"]
+    assert out["facts"]["accuracy_gold"] == 0.86
+    assert "co2_mean" in out["facts"]["drifted"]
+    assert out["facts"]["weakest_slice"]["activity"] == "cooking"
+    assert out["facts"]["weakest_slice"]["daypart"] == "morning"

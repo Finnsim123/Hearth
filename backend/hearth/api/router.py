@@ -856,6 +856,17 @@ def build_api_router(deps: dict) -> APIRouter:
             return {"phase": "live", "tone": "live", "title": "Watching & predicting",
                     "detail": "", "progress": None, "cta": None}
 
+    @api.get("/buddy/insight")
+    def buddy_insight(person: str | None = None) -> dict:
+        """Plain-language model-health summary (UX10): honest accuracy, whether
+        confidence is trustworthy, drift, and the weakest slice — for the buddy
+        to explain and the UI to show."""
+        from ..domain.insight import model_insight
+        pid = person or next((p.id for p in repo.persons()), None)
+        if not pid:
+            return {"summary": "No household members yet.", "facts": {}}
+        return model_insight(pid, repo)
+
     @api.get("/flow")
     def flow() -> dict:
         """Live pipeline map (nodes + edges + this instance's numbers) for the
@@ -997,6 +1008,27 @@ def build_api_router(deps: dict) -> APIRouter:
                             "person_alive": alive})
         return {"bindings": out, "classes": classes, "hours": hours, "members": members,
                 "rooms_known": repo.get_setting("ha.areas") or []}
+
+    @api.get("/bindings/coactivation")
+    def bindings_coactivation(hours: int = 168) -> dict:
+        """Group live sensors by how they FIRE TOGETHER, not by their room label
+        — surfaces functional zones (a morning route, a hob+extractor pair) the
+        config can't express. Backs the Sensor coverage map's 'By behaviour'
+        lens. Layout coords (0..1) come from an MDS embedding of the
+        co-activation distance, so clusters drawn near each other really do
+        behave alike. Empty clusters → frontend keeps the room grouping."""
+        tsdb = deps.get("tsdb")
+        if tsdb is None:
+            return {"clusters": [], "assign": {}, "note": "InfluxDB not connected"}
+        from datetime import datetime, timedelta, timezone
+
+        from ..domain.discovery.coactivation import cluster_sensors
+        hours = max(1, min(int(hours), 168 * 4))   # clamp 1h .. 4w
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=hours)
+        bindings = [b for b in repo.bindings() if b.enabled]
+        raw = tsdb.read_raw(bindings, start, end)
+        return cluster_sensors(raw)
 
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:

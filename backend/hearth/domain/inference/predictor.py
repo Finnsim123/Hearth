@@ -22,6 +22,10 @@ log = logging.getLogger(__name__)
 
 RULES_VERSION = "rules-v0"
 RULES_CONFIDENCE = 0.55  # below ask-threshold by design: rules want feedback
+FACT_VERSION = "fact-v0"  # foundational ground-truth gate (away/asleep): basis is
+                          # carried in model_version, mirroring RULES_VERSION — no
+                          # schema change. The model is SKIPPED for these windows
+                          # (foundational_facts_design §5 cascade; presence.py).
 
 
 def _rules_predict(repo, feats: pd.DataFrame, person_id: str):
