@@ -26,7 +26,7 @@ _RESERVED: dict[str, set[str]] = {
 # Single tokens distinctive enough to fold into a reserved state on their own.
 _RESERVED_TOKENS: dict[str, set[str]] = {
     "away": {"away", "out", "gone", "absent", "outside"},
-    "asleep": {"asleep", "sleeping", "sleep", "napping"},
+    "asleep": {"asleep", "sleeping", "sleep", "napping", "nap"},
     "home": set(),                              # too ambiguous to match on one token
 }
 

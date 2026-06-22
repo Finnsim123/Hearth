@@ -1585,7 +1585,10 @@ def build_api_router(deps: dict) -> APIRouter:
             for c in cards:
                 try:
                     ev = build_evidence(c, repo, tsdb)
-                    c.suggestions = await adv.suggest_cluster_names(c, ev, acts)
+                    from ..domain.labeling.dedupe import dedupe_suggestions
+                    c.suggestions = dedupe_suggestions(
+                        await adv.suggest_cluster_names(c, ev, acts), acts,
+                        [p.name for p in repo.persons()])
                     c.suggested_slug = next(
                         (s["slug"] for s in c.suggestions if s.get("slug")), None)
                     if c.suggestions:
@@ -1608,8 +1611,11 @@ def build_api_router(deps: dict) -> APIRouter:
         from ..adapters.openrouter_llm import OpenRouterAdvisor
         from ..domain.discovery.evidence import build_evidence
         ev = build_evidence(card, repo, deps.get("tsdb"))
-        card.suggestions = await OpenRouterAdvisor(repo).suggest_cluster_names(
-            card, ev, repo.activities())
+        from ..domain.labeling.dedupe import dedupe_suggestions
+        acts = repo.activities()
+        card.suggestions = dedupe_suggestions(
+            await OpenRouterAdvisor(repo).suggest_cluster_names(card, ev, acts),
+            acts, [p.name for p in repo.persons()])
         card.suggested_slug = next(
             (s["slug"] for s in card.suggestions if s.get("slug")), None)
         repo.save_cluster(card)

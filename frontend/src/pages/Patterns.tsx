@@ -158,8 +158,11 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
     setBusy(true); setMsg("");
     try {
       const r = await post(`/api/clusters/${c.id}/name`, body).then(j);
-      setMsg(`Labeled ${r.labeled_windows} windows as “${r.activity}” — next training run learns from them.`);
-      cheerBuddy({ title: `“${r.activity}” — that has a name now`, detail: `${r.labeled_windows} windows labeled for the next run.` });
+      setMsg(r.merged_into
+        ? `That's the same as “${r.activity}” — merged into it instead of creating a duplicate. Labeled ${r.labeled_windows} windows.`
+        : `Labeled ${r.labeled_windows} windows as “${r.activity}” — next training run learns from them.`);
+      cheerBuddy({ title: r.merged_into ? `Merged into “${r.activity}”` : `“${r.activity}” — that has a name now`,
+                   detail: `${r.labeled_windows} windows labeled for the next run.` });
       setTimeout(onChange, 1600);
     } catch { setMsg(`Couldn't save “${label}” — check logs.`); }
     setBusy(false);

@@ -176,6 +176,12 @@ PROMPT_DEFS: dict[str, dict] = {
             "EXISTING activity when the pattern plausibly IS one (set its slug). If "
             "the pattern looks like everyday unlabelled downtime rather than a "
             "distinct activity, you may say so with low confidence.\n"
+            "CRITICAL — never invent a duplicate of an existing activity. If the "
+            "pattern is really an existing one, return that activity's slug, not a "
+            "new synonym. Watch the reserved states especially: anything meaning "
+            "out/not-home is 'away'; sleeping/in-bed is 'asleep'; at-home is 'home'. "
+            "Activities are about the STATE, not the person — never make it "
+            "person-specific (no 'Alex out of the house'; that is just 'away').\n"
             "Reply ONLY JSON: {\"suggestions\": [{\"name\": str, \"slug\": str|null "
             "(an existing slug, or null for a new activity), \"rationale\": str (one "
             "short clause citing the evidence), \"confidence\": 0..1}]}, best first."),
