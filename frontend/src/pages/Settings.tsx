@@ -358,6 +358,30 @@ function ConnectionCard({ kind, title, sub, fields }: {
           </Row>
         ))}
       </div>
+      {kind === "influx" && (conn.url ?? "").includes("influxdb:8086") && (() => {
+        const webUrl = `${window.location.protocol}//${window.location.hostname}:8086`;
+        const org = conn.org || "hearth";
+        return (
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12,
+                        display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Bundled database access</div>
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+              Log in to InfluxDB directly to browse raw data, run Flux, or add buckets.
+            </span>
+            {[["Web UI", <a key="u" href={webUrl} target="_blank" rel="noreferrer"
+                            style={{ color: "var(--accent)" }}>{webUrl} ↗</a>],
+              ["Username", <code key="n">hearth</code>],
+              ["Organization", <code key="o">{org}</code>],
+              ["Password", <span key="p" style={{ color: "var(--text-dim)" }}>the <code>INFLUX_PASSWORD</code> you set in your <code>.env</code> — Hearth doesn't store it</span>]]
+              .map(([k, v]) => (
+              <div key={k as string} style={{ display: "flex", gap: 10, fontSize: 12.5 }}>
+                <span style={{ color: "var(--text-dim)", minWidth: 96 }}>{k}</span>
+                <span>{v}</span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
       {kind === "llm" && usage && usage.calls > 0 && (
         <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12,
                       display: "flex", flexDirection: "column", gap: 8 }}>
