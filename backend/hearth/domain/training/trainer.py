@@ -388,6 +388,30 @@ def promotion_gate(new: ModelRecord, current: ModelRecord | None,
     return a is None or b is None or a >= b - margin
 
 
+def promotion_explain(new: ModelRecord, current: ModelRecord | None,
+                      margin: float = 0.02) -> dict:
+    """Plain-language WHY behind promotion_gate's decision (UX9): which metric it
+    compared on and the CI arithmetic, so a rejection isn't a black box."""
+    if current is None:
+        return {"promoted": True, "basis": "first",
+                "reason": "First model for this person — promoted by default."}
+    for key, n_key, lbl in (("accuracy_gold", "n_gold", "real-world"),
+                            ("accuracy_confirmed", "n_confirmed", "confirmed")):
+        n_new, n_cur = new.metrics.get(n_key, 0), current.metrics.get(n_key, 0)
+        if n_new and n_cur:
+            new_lo, _ = wilson_interval(round(new.metrics[key] * n_new), n_new)
+            cur_lo, _ = wilson_interval(round(current.metrics[key] * n_cur), n_cur)
+            ok = new_lo >= cur_lo - margin
+            return {"promoted": ok, "basis": lbl,
+                    "reason": f"{lbl} accuracy CI lower bound {new_lo:.0%} "
+                              f"{'≥' if ok else '<'} live {cur_lo:.0%} − margin {margin:.0%}"}
+    a, b = new.metrics.get("accuracy_bootstrap"), current.metrics.get("accuracy_bootstrap")
+    ok = a is None or b is None or a >= b - margin
+    return {"promoted": ok, "basis": "bootstrap",
+            "reason": "Compared on bootstrap agreement (no confirmed labels yet) — "
+                      f"{a if a is not None else '—'} vs live {b if b is not None else '—'}."}
+
+
 def rollback(person_id: str, repo) -> ModelRecord | None:
     """Repoint to the previous (non-promoted) model with the highest id."""
     models = sorted((m for m in repo.models(person_id) if m.node == "root"),

@@ -522,8 +522,31 @@ function MiniTrend({ accs, aucs }: { accs: (number | null)[]; aucs: (number | nu
 
 /** Per-person version history: a trend of confirmed-accuracy + AUC across model
  *  versions (the honest "drift over time" view) plus a compact compare table. */
-function PersonHistory({ models }: { models: Model[] }) {
+type Gate = {
+  live?: string; candidate?: string;
+  deltas?: Record<string, { candidate: number | null; live: number | null }>;
+  gate?: { promoted: boolean; basis: string; reason: string };
+};
+
+function PersonHistory({ models, onAction }: { models: Model[]; onAction: () => void }) {
   const [open, setOpen] = useState(false);
+  const [gate, setGate] = useState<Gate | null>(null);
+  const [rolling, setRolling] = useState(false);
+  const pid = models[0]?.person_id;
+  useEffect(() => {
+    if (open && pid && !gate)
+      fetch(`/api/models/gate?person=${encodeURIComponent(pid)}`).then(j).then(setGate).catch(() => {});
+  }, [open, pid, gate]);
+  const doRollback = async () => {
+    setRolling(true);
+    try {
+      await fetch("/api/models/rollback", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_id: pid }) }).then(j);
+      onAction();
+    } catch { /* refresh shows reality */ }
+    setRolling(false);
+  };
   if (models.length < 2) return null;
   const series = [...models].reverse();             // oldest -> newest
   const accs = series.map((m) => m.metrics?.accuracy_gold
@@ -547,6 +570,29 @@ function PersonHistory({ models }: { models: Model[] }) {
       {open && (
         <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12,
                       borderTop: "1px solid var(--border)" }}>
+          {gate?.gate && gate.candidate && (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px",
+                          display: "flex", flexDirection: "column", gap: 6,
+                          background: "var(--surface-2)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <Icon name={gate.gate.promoted ? "check" : "warning"} size={14} />
+                <strong style={{ fontSize: 13 }}>
+                  {gate.candidate} vs live {gate.live}</strong>
+                <span style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 99, fontWeight: 600,
+                  background: gate.gate.promoted
+                    ? "color-mix(in srgb, var(--ok, #34D399) 16%, transparent)"
+                    : "color-mix(in srgb, var(--danger) 16%, transparent)",
+                  color: gate.gate.promoted ? "var(--ok, #34D399)" : "var(--danger)" }}>
+                  {gate.gate.promoted ? "would promote" : "held back"}
+                </span>
+                <button className="btn btn-ghost" style={{ marginLeft: "auto" }}
+                        disabled={rolling} onClick={doRollback}>
+                  {rolling ? "…" : "Roll back"}
+                </button>
+              </div>
+              <p style={{ margin: 0, fontSize: 12, color: "var(--text-dim)" }}>{gate.gate.reason}</p>
+            </div>
+          )}
           <div>
             <MiniTrend accs={accs} aucs={aucs} />
             <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
@@ -886,7 +932,7 @@ export default function Models() {
                 {training === pid ? "Training…" : "Train now"}
               </button>
             </div>
-            <PersonHistory models={sorted} />
+            <PersonHistory models={sorted} onAction={load} />
             {sorted.some((m) => m.promoted) && <WhatIfProbe personId={pid} />}
             {sorted.slice(0, 6).map((m) => <ModelCard key={m.id} m={m} onAction={load} personName={name} />)}
             {sorted.length > 6 && (

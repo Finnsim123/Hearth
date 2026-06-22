@@ -1131,6 +1131,24 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(409, "nothing to roll back to")
         return {"ok": True, "version": record.version}
 
+    @api.get("/models/gate")
+    def models_gate(person: str) -> dict:
+        """Version diff + promotion-gate explanation (UX9): the newest candidate
+        vs the live model, with the deltas and WHY the gate decided as it did."""
+        from ..domain.training.trainer import load_training_config, promotion_explain
+        roots = sorted((m for m in repo.models(person) if m.node == "root"),
+                       key=lambda m: -(m.id or 0))
+        live = next((m for m in roots if m.promoted), None)
+        candidate = next((m for m in roots if m is not live), None)
+        if live is None or candidate is None:
+            return {}
+        margin = load_training_config(repo).promotion_margin
+        keys = ["accuracy_gold", "accuracy_confirmed", "accuracy_bootstrap", "auc_macro"]
+        deltas = {k: {"candidate": candidate.metrics.get(k), "live": live.metrics.get(k)}
+                  for k in keys}
+        return {"live": live.version, "candidate": candidate.version,
+                "deltas": deltas, "gate": promotion_explain(candidate, live, margin)}
+
     # ── labels: bulk range + question skip ────────────────────────────────
     @api.post("/labels/bulk")
     def labels_bulk(body: dict) -> dict:
