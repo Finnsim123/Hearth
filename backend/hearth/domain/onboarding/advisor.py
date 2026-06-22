@@ -147,6 +147,19 @@ def is_bindable(entity_id: str, role: Role, override: bool = False) -> bool:
     return override and domain in _STATE_DOMAINS
 
 
+def is_noise(entity: dict) -> bool:
+    """Diagnostics / stateless / blocklisted entities that should NEVER be a sensor
+    — correct to leave unassigned, so don't surface them for review (RSSI, uptime,
+    firmware, buttons, scenes, …)."""
+    eid = entity.get("entity_id", "")
+    domain = entity.get("domain") or (eid.split(".")[0] if eid else "")
+    if domain in _NEVER_DOMAINS:
+        return True
+    if _BLOCKLIST.search(f"{eid} {entity.get('friendly_name', '')}".lower()):
+        return True
+    return entity.get("device_class") in _BLOCK_DEVICE_CLASSES
+
+
 def suggest_role(entity: dict) -> Role | None:
     """entity: one inventory item (entity_id, domain, device_class, unit, name)."""
     text_all = f"{entity['entity_id']} {entity.get('friendly_name', '')}".lower()
