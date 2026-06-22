@@ -613,102 +613,72 @@ function PsiTrend({ trend }: { trend: number[] }) {
   );
 }
 
-/** Drift & Health (UX3 / audit F5): the Evidently-style "what to track / when to
- *  act" surface. Per-person PSI trend, drifted features, and the opt-in retrain. */
-function DriftHealth({ personName }: { personName: (id: string) => string }) {
-  const [reports, setReports] = useState<Record<string, DriftReport> | null>(null);
-  const [auto, setAuto] = useState(false);
-  const [busy, setBusy] = useState("");
-  const load = () => fetch("/api/drift").then(j).then(setReports).catch(() => setReports({}));
-  useEffect(() => {
-    load();
-    fetch("/api/drift/auto-retrain").then(j).then((d) => setAuto(!!d.enabled)).catch(() => {});
-  }, []);
-  const recompute = async () => {
-    setBusy("run");
-    try { await fetch("/api/drift/run", { method: "POST" }).then(j); load(); } catch { /* */ }
-    setBusy("");
-  };
-  const toggleAuto = async () => {
-    const next = !auto; setAuto(next);
-    try { await fetch("/api/drift/auto-retrain", { method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }) }).then(j); } catch { setAuto(!next); }
-  };
-  if (reports === null) return null;
-  const list = Object.values(reports);
+/** Drift & health body for ONE person (rendered inside a Fold): PSI trend,
+ *  drifted features, the opt-in auto-retrain (global setting), and Recompute. */
+function PersonDrift({ report, auto, onToggleAuto, onRecompute, busy }: {
+  report: DriftReport | null | undefined; auto: boolean;
+  onToggleAuto: () => void; onRecompute: () => void; busy: boolean;
+}) {
+  const drifted = report?.drifted ?? [];
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16,
-                  display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <Icon name="sensors" size={16} />
-        <strong style={{ fontSize: 14 }}>Drift &amp; health</strong>
-        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-          has the home changed since the model was trained?
-        </span>
-        <label style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--text-dim)",
-                        display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+        <label style={{ fontSize: 12.5, color: "var(--text-dim)", display: "inline-flex",
+                        alignItems: "center", gap: 6, cursor: "pointer" }}
                title="When a feature drifts severely, retrain automatically instead of just flagging it.">
-          <input type="checkbox" checked={auto} onChange={toggleAuto} /> auto-retrain on severe drift
+          <input type="checkbox" checked={auto} onChange={onToggleAuto} /> auto-retrain on severe drift
         </label>
-        <button className="btn btn-ghost" disabled={!!busy} onClick={recompute}>
-          {busy === "run" ? "Checking…" : "Recompute"}
+        <button className="btn btn-ghost" style={{ marginLeft: "auto" }} disabled={busy} onClick={onRecompute}>
+          {busy ? "Checking…" : "Recompute"}
         </button>
       </div>
-      {list.length === 0 && (
+      {!report ? (
         <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
-          No drift checks yet — they run daily once a model is live, or hit Recompute.
+          No drift check yet — runs daily once a model is live, or hit Recompute.
         </p>
-      )}
-      {list.map((r) => {
-        const drifted = r.drifted ?? [];
-        return (
-          <div key={r.person_id} style={{ display: "flex", flexDirection: "column", gap: 8,
-                                          borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <strong style={{ fontSize: 13 }}>{personName(r.person_id)}</strong>
-              <span style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 99, fontWeight: 600,
-                background: drifted.length === 0
-                  ? "color-mix(in srgb, var(--ok, #34D399) 16%, transparent)"
-                  : r.severe ? "color-mix(in srgb, var(--danger) 16%, transparent)"
-                             : "color-mix(in srgb, var(--accent) 16%, transparent)",
-                color: drifted.length === 0 ? "var(--ok, #34D399)"
-                  : r.severe ? "var(--danger)" : "var(--accent)" }}>
-                {drifted.length === 0 ? "stable" : r.severe ? "severe drift" : `${drifted.length} drifted`}
-              </span>
-              <span style={{ fontSize: 11.5, color: "var(--text-dim)", marginLeft: "auto" }}>
-                {r.computed_at ? new Date(r.computed_at).toLocaleDateString() : ""} · vs {r.model_version}
-              </span>
-            </div>
-            {r.trend && r.trend.length > 1 && (
-              <div>
-                <PsiTrend trend={r.trend} />
-                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                  worst-feature drift over recent checks · dashed line = investigate (0.2)
-                </div>
-              </div>
-            )}
-            {drifted.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                {drifted.slice(0, 6).map((f) => {
-                  const v = r.psi[f] ?? 0;
-                  return (
-                    <div key={f} style={{ display: "grid", gridTemplateColumns: "minmax(96px,200px) 1fr 44px",
-                                          gap: 10, alignItems: "center", fontSize: 12 }}>
-                      <code style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</code>
-                      <div style={{ height: 7, background: "var(--surface-2)", borderRadius: 4 }}>
-                        <div style={{ height: "100%", width: `${Math.min(100, (v / 0.5) * 100)}%`,
-                                      background: v > 0.5 ? "var(--danger)" : "var(--accent)", borderRadius: 4 }} />
-                      </div>
-                      <span style={{ color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{v.toFixed(2)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+      ) : (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 99, fontWeight: 600,
+              background: drifted.length === 0 ? "color-mix(in srgb, var(--ok, #34D399) 16%, transparent)"
+                : report.severe ? "color-mix(in srgb, var(--danger) 16%, transparent)"
+                                : "color-mix(in srgb, var(--accent) 16%, transparent)",
+              color: drifted.length === 0 ? "var(--ok, #34D399)"
+                : report.severe ? "var(--danger)" : "var(--accent)" }}>
+              {drifted.length === 0 ? "stable" : report.severe ? "severe drift" : `${drifted.length} drifted`}
+            </span>
+            <span style={{ fontSize: 11.5, color: "var(--text-dim)", marginLeft: "auto" }}>
+              {report.computed_at ? new Date(report.computed_at).toLocaleDateString() : ""} · vs {report.model_version}
+            </span>
           </div>
-        );
-      })}
+          {report.trend && report.trend.length > 1 && (
+            <div>
+              <PsiTrend trend={report.trend} />
+              <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                worst-feature drift over recent checks · dashed line = investigate (0.2)
+              </div>
+            </div>
+          )}
+          {drifted.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {drifted.slice(0, 6).map((f) => {
+                const v = report.psi[f] ?? 0;
+                return (
+                  <div key={f} style={{ display: "grid", gridTemplateColumns: "minmax(96px,200px) 1fr 44px",
+                                        gap: 10, alignItems: "center", fontSize: 12 }}>
+                    <code style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</code>
+                    <div style={{ height: 7, background: "var(--surface-2)", borderRadius: 4 }}>
+                      <div style={{ height: "100%", width: `${Math.min(100, (v / 0.5) * 100)}%`,
+                                    background: v > 0.5 ? "var(--danger)" : "var(--accent)", borderRadius: 4 }} />
+                    </div>
+                    <span style={{ color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{v.toFixed(2)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -722,8 +692,7 @@ type Probe = {
 
 /** What-If probe (UX8): perturb a feature, watch the live model's prediction
  *  move. The Google What-If Tool / LIT idiom — the standout trust-builder. */
-function WhatIfProbe({ personId }: { personId: string }) {
-  const [open, setOpen] = useState(false);
+function WhatIfBody({ personId }: { personId: string }) {
   const [p, setP] = useState<Probe | null>(null);
   const [ov, setOv] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
@@ -737,26 +706,12 @@ function WhatIfProbe({ personId }: { personId: string }) {
     } catch { setP({ error: "probe_failed" }); }
     setBusy(false);
   };
-  const toggle = () => { const n = !open; setOpen(n); if (n && !p) probe({}); };
+  useEffect(() => { probe({}); /* lazy: runs when the fold first mounts */ // eslint-disable-next-line
+  }, [personId]);
   const reset = () => { setOv({}); probe({}); };
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-      <button onClick={toggle}
-              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none",
-                       background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
-                       color: "var(--text)", padding: "10px 14px", textAlign: "left" }}>
-        <Icon name="models" size={15} />
-        <strong style={{ fontSize: 13.5 }}>What-if</strong>
-        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-          change a signal, watch the guess move
-        </span>
-        <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--text-dim)" }}>
-          {open ? "Hide" : "Try it"}
-        </span>
-      </button>
-      {open && (
-        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14,
-                      borderTop: "1px solid var(--border)" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {!p && <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>Loading…</p>}
           {p?.error && <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
             {p.error === "no_model" ? "No live model yet." : p.error === "no_features"
               ? "No recent feature windows to probe." : "Probe failed."}</p>}
@@ -818,8 +773,6 @@ function WhatIfProbe({ personId }: { personId: string }) {
               )}
             </>
           )}
-        </div>
-      )}
     </div>
   );
 }
@@ -840,15 +793,120 @@ function InsightLine({ personId }: { personId: string }) {
   );
 }
 
+/** One household member = one collapsible panel. Collapsed: a clean status row
+ *  (name + live accuracy + badge + Train). Expanded: the live model's chips and
+ *  every deep view as a named fold — all content preserved, progressively
+ *  disclosed. */
+function PersonPanel({ person, models, drift, auto, onToggleAuto, onRecompute, driftBusy,
+                       onAction, onTrain, training }: {
+  person: { id: string; name: string };
+  models: Model[]; drift: DriftReport | null | undefined; auto: boolean;
+  onToggleAuto: () => void; onRecompute: () => void; driftBusy: boolean;
+  onAction: () => void; onTrain: (pid: string) => void; training: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const sorted = [...models].sort((a, b) => (b.trained_at ?? "").localeCompare(a.trained_at ?? ""));
+  const live = sorted.find((m) => m.promoted) ?? sorted[0];
+  const mt = live?.metrics ?? {};
+  const nGold = mt.n_gold ?? 0;
+  const goldReady = nGold >= GOLD_MIN && mt.accuracy_gold != null;
+  const headline = goldReady ? `${pct(mt.accuracy_gold)} real-world`
+    : mt.accuracy_confirmed != null ? `${pct(mt.accuracy_confirmed)} so far`
+    : `gathering ${nGold}/${GOLD_MIN}`;
+  const hasPerf = mt.per_class || mt.confusion || (mt.slices?.by_activity_daypart.length ?? 0) > 0;
+  const hasEvidence = (mt.evidence_profile && Object.keys(mt.evidence_profile).length > 0)
+    || mt.feature_importances;
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden",
+                  ...(live?.promoted ? { borderColor: "color-mix(in srgb, var(--accent) 55%, var(--border))" } : {}) }}>
+      <div onClick={() => setOpen(!open)}
+        style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+                 cursor: "pointer", background: open ? "var(--surface-2)" : "transparent" }}>
+        <span style={{ color: "var(--text-dim)", display: "inline-flex", transition: "transform .15s",
+                       transform: open ? "rotate(90deg)" : "none", fontSize: 12 }}>▶</span>
+        <strong style={{ fontSize: 16 }}>{person.name}</strong>
+        <span style={{ fontSize: 14, fontWeight: 600,
+                       color: goldReady ? "var(--accent)" : "var(--text-dim)",
+                       fontVariantNumeric: "tabular-nums" }}>{headline}</span>
+        <StatusBadge status={mt.validation_status} nConfirmed={mt.n_confirmed ?? 0} />
+        <button className="btn btn-secondary" style={{ marginLeft: "auto" }}
+                disabled={training === person.id}
+                onClick={(e) => { e.stopPropagation(); onTrain(person.id); }}>
+          {training === person.id ? "Training…" : "Train now"}
+        </button>
+      </div>
+      {open && (
+        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12,
+                      borderTop: "1px solid var(--border)" }}>
+          {live ? <LiveChips m={live} />
+                : <p style={{ margin: 0, color: "var(--text-dim)" }}>No model yet.</p>}
+          <InsightLine personId={person.id} />
+          {hasPerf && (
+            <Fold title="Performance detail" hint="per-class · confusion · where it does well & badly">
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {mt.per_class && <PerClassTable per={mt.per_class} />}
+                {mt.confusion && <Confusion c={mt.confusion} />}
+                {mt.slices && mt.slices.by_activity_daypart.length > 0 && <SliceHeatmap slices={mt.slices} />}
+              </div>
+            </Fold>
+          )}
+          {mt.calibration && (mt.calibration.reliability?.length ?? 0) > 0 && (
+            <Fold title="Confidence" hint="is its confidence honest?">
+              <Calibration cal={mt.calibration} />
+            </Fold>
+          )}
+          {hasEvidence && (
+            <Fold title="What it looks at" hint="evidence tiers · feature importances">
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {mt.evidence_profile && Object.keys(mt.evidence_profile).length > 0 &&
+                  <EvidenceBar profile={mt.evidence_profile} />}
+                {mt.feature_importances && (
+                  <div>
+                    <h4 style={{ margin: "0 0 8px", fontSize: 13.5 }}>What the model looks at</h4>
+                    <Importances imp={mt.feature_importances} />
+                  </div>
+                )}
+              </div>
+            </Fold>
+          )}
+          {live && (
+            <Fold title="Model card" hint="printable summary">
+              <ModelCardSheet m={live} personName={person.name} />
+            </Fold>
+          )}
+          {live?.promoted && (
+            <Fold title="What-if" hint="change a signal, watch the guess move">
+              <WhatIfBody personId={person.id} />
+            </Fold>
+          )}
+          <Fold title="Drift & health" hint="has the home changed since training?">
+            <PersonDrift report={drift} auto={auto} onToggleAuto={onToggleAuto}
+                         onRecompute={onRecompute} busy={driftBusy} />
+          </Fold>
+          <Fold title="History & versions" hint={`${models.length} version${models.length === 1 ? "" : "s"}`}>
+            <HistoryBody models={sorted} onAction={onAction} />
+          </Fold>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Models() {
   const [models, setModels] = useState<Model[] | null>(null);
   const [persons, setPersons] = useState<{ id: string; name: string }[]>([]);
   const [training, setTraining] = useState("");
   const [trainMsg, setTrainMsg] = useState("");
+  const [drift, setDrift] = useState<Record<string, DriftReport>>({});
+  const [auto, setAuto] = useState(false);
+  const [driftBusy, setDriftBusy] = useState(false);
   const load = () => fetch("/api/models").then(j).then(setModels).catch(() => setModels([]));
+  const loadDrift = () => fetch("/api/drift").then(j).then(setDrift).catch(() => setDrift({}));
   useEffect(() => {
     load();
     fetch("/api/persons").then(j).then(setPersons).catch(() => {});
+    loadDrift();
+    fetch("/api/drift/auto-retrain").then(j).then((d) => setAuto(!!d.enabled)).catch(() => {});
   }, []);
   const train = async (pid: string) => {
     setTraining(pid); setTrainMsg("");
@@ -861,51 +919,44 @@ export default function Models() {
     } catch { setTrainMsg("Training failed — check logs"); }
     setTraining("");
   };
+  const recompute = async () => {
+    setDriftBusy(true);
+    try { await fetch("/api/drift/run", { method: "POST" }).then(j); loadDrift(); } catch { /* */ }
+    setDriftBusy(false);
+  };
+  const toggleAuto = async () => {
+    const next = !auto; setAuto(next);
+    try { await fetch("/api/drift/auto-retrain", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }) }).then(j); } catch { setAuto(!next); }
+  };
   const byPerson = (models ?? []).reduce<Record<string, Model[]>>((acc, m) => {
     (acc[m.person_id] = acc[m.person_id] ?? []).push(m); return acc;
   }, {});
   return (
-    <section style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 860 }}>
+    <section style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 860 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <Icon name="models" size={22} />
         <h2 style={{ margin: 0 }}>Models</h2>
       </div>
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)", maxWidth: 640 }}>
-        Every model Hearth has trained, with honest numbers. <strong>Real-world accuracy</strong> is
-        measured on random spot-checks — an unbiased sample, so it's the fair headline; the
-        "tricky moments" number is on the hard windows Hearth asked about and reads lower by design.
-        Bootstrap agreement just says how much the model echoes the starter rules. New models go
-        live only when the promotion gate says they're not credibly worse than the current one.
+        One panel per person — open it for the live model and every detail.
+        <strong> Real-world accuracy</strong> is measured on random spot-checks (the fair headline);
+        "tricky moments" is the harder windows Hearth asked about. New models go live only when the
+        promotion gate says they're not credibly worse than the current one.
       </p>
       {trainMsg && <p style={{ margin: 0, fontSize: 13.5, color: "var(--accent)" }}>{trainMsg}</p>}
-      <DriftHealth personName={(id) => persons.find((p) => p.id === id)?.name ?? id} />
       {models === null && <p style={{ color: "var(--text-dim)" }}>Loading…</p>}
       {models !== null && Object.keys(byPerson).length === 0 && (
         <p style={{ color: "var(--text-dim)" }}>No models yet — they appear after the first training run.</p>
       )}
       {Object.entries(byPerson).map(([pid, list]) => {
         const name = persons.find((p) => p.id === pid)?.name ?? pid;
-        const sorted = [...list].sort((a, b) => (b.trained_at ?? "").localeCompare(a.trained_at ?? ""));
         return (
-          <div key={pid} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>{name}</h3>
-              <button className="btn btn-secondary" style={{ marginLeft: "auto" }}
-                      disabled={training === pid}
-                      onClick={() => train(pid)}>
-                {training === pid ? "Training…" : "Train now"}
-              </button>
-            </div>
-            <InsightLine personId={pid} />
-            <PersonHistory models={sorted} onAction={load} />
-            {sorted.some((m) => m.promoted) && <WhatIfProbe personId={pid} />}
-            {sorted.slice(0, 6).map((m) => <ModelCard key={m.id} m={m} onAction={load} personName={name} />)}
-            {sorted.length > 6 && (
-              <p style={{ fontSize: 12.5, color: "var(--text-dim)", margin: 0 }}>
-                + {sorted.length - 6} older versions kept for rollback.
-              </p>
-            )}
-          </div>
+          <PersonPanel key={pid} person={{ id: pid, name }} models={list}
+                       drift={drift[pid]} auto={auto} onToggleAuto={toggleAuto}
+                       onRecompute={recompute} driftBusy={driftBusy}
+                       onAction={() => { load(); loadDrift(); }} onTrain={train} training={training} />
         );
       })}
     </section>
