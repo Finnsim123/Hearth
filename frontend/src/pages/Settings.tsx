@@ -1157,7 +1157,7 @@ const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }
   { key: "model", icon: "models", title: "Model",
     desc: "Ground-truth facts, data sharing, feature power, model family, clock trust, commit threshold and history retention." },
   { key: "integrations", icon: "flow", title: "Integrations",
-    desc: "Home Assistant, InfluxDB, the AI assistant, and API tokens for the HA integration." },
+    desc: "Home Assistant, InfluxDB, the AI assistant, email, and API tokens for the HA integration." },
   { key: "prompts", icon: "models", title: "AI prompts",
     desc: "Read and edit every system prompt Hearth sends to the language model." },
   { key: "logs", icon: "monitor", title: "Logs",
@@ -1169,6 +1169,69 @@ const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }
   { key: "methodology", icon: "info", title: "How it works",
     desc: "The Hearth pipeline, end to end." },
 ];
+
+const TLS_OPTS: [string, string][] = [
+  ["starttls", "STARTTLS (587)"], ["ssl", "SSL/TLS (465)"], ["none", "None"],
+];
+
+// SMTP relay for the weekly newsletter + password recovery. Outbound only — not
+// a mail server. More fields + a test-send than the generic ConnectionCard, so
+// it's its own panel hitting /api/settings/email.
+function EmailSettings() {
+  const [cfg, setCfg] = useState<Record<string, any> | null>(null);
+  const [state, setState] = useState<SaveState>("idle");
+  const [note, setNote] = useState("");
+  const [testTo, setTestTo] = useState("");
+  const load = () => fetch("/api/settings/email").then(j).then(setCfg).catch(() => setCfg({}));
+  useEffect(() => { load(); }, []);
+  const up = (k: string, v: any) => setCfg((c) => ({ ...(c ?? {}), [k]: v }));
+  const save = async () => {
+    if (!cfg) return;
+    setState("saving"); setNote("");
+    try {
+      await post("/api/settings/email", {
+        host: cfg.host, port: Number(cfg.port) || 587, username: cfg.username,
+        from: cfg.from, from_name: cfg.from_name, tls: cfg.tls,
+        // a value with "****" is the masked existing secret — send blank to keep it
+        password: cfg.password && !String(cfg.password).includes("****") ? cfg.password : "",
+      }).then(j);
+      setState("ok"); setNote("Saved ✓"); load();
+    } catch { setState("fail"); setNote("Couldn't save"); }
+  };
+  const test = async () => {
+    setNote("Sending…");
+    try { await post("/api/settings/email/test", { to: testTo }).then(j); setNote("Sent ✓ — check the inbox"); }
+    catch { setNote("Send failed — check host/port/credentials"); }
+  };
+  if (!cfg) return null;
+  return (
+    <Card title="Email (SMTP relay)"
+          sub="Sends the weekly newsletter and password-recovery mail through your own provider — e.g. Gmail with an app-password. Outbound only, not a mail server; the password is encrypted at rest.">
+      <Row label="SMTP host" hint="e.g. smtp.gmail.com">
+        <input value={cfg.host || ""} onChange={(e) => up("host", e.target.value)} placeholder="smtp.gmail.com" />
+      </Row>
+      <Row label="Port"><input value={cfg.port ?? 587} onChange={(e) => up("port", e.target.value)} style={{ maxWidth: 120 }} /></Row>
+      <Row label="Encryption">
+        <select value={cfg.tls || "starttls"} onChange={(e) => up("tls", e.target.value)}>
+          {TLS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </Row>
+      <Row label="Username"><input value={cfg.username || ""} onChange={(e) => up("username", e.target.value)} placeholder="you@gmail.com" /></Row>
+      <Row label="App password" hint="Gmail → Security → App passwords. Leave blank to keep the current one.">
+        <input type="password" value={cfg.password || ""} onChange={(e) => up("password", e.target.value)}
+               placeholder={cfg.configured ? "•••• (unchanged)" : ""} />
+      </Row>
+      <Row label="From address"><input value={cfg.from || ""} onChange={(e) => up("from", e.target.value)} placeholder="you@gmail.com" /></Row>
+      <Row label="From name"><input value={cfg.from_name || "Hearth"} onChange={(e) => up("from_name", e.target.value)} /></Row>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
+        <button className="btn btn-primary" onClick={save} disabled={state === "saving"}>Save</button>
+        <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="test@address" style={{ maxWidth: 200 }} />
+        <button className="btn btn-ghost" onClick={test} disabled={!cfg.configured || !testTo}>Send test</button>
+        <span style={{ fontSize: 12.5, color: state === "fail" ? "var(--danger)" : "var(--text-dim)" }}>{note}</span>
+      </div>
+    </Card>
+  );
+}
 
 function ConnectionsSection() {
   return (
@@ -1193,6 +1256,7 @@ function ConnectionsSection() {
           { key: "model", label: "Model", fromOptions: true },
           { key: "token", label: "API key", hint: "Leave empty to keep the current one." },
         ]} />
+      <EmailSettings />
       <ApiTokens />
     </>
   );
