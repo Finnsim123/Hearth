@@ -88,6 +88,29 @@ values have `__repr__` redaction; tokens are masked `hrt_****…` in UI and logs
   can't OOM the box. All outbound clients also carry timeouts.
 - Remote InfluxDB bucket names are escaped (`_flux_tag`) before Flux interpolation.
 
+## Outbound email (SMTP relay)
+
+- Not a mail server — Hearth authenticates to the operator's existing SMTP
+  (Gmail app-password, Fastmail, SES…) and hands off one message. Credentials
+  are stored as the encrypted `smtp` connection (password via `HEARTH_SECRET`,
+  same path as other tokens) and masked in API responses.
+- TLS: STARTTLS or implicit SSL with `ssl.create_default_context()` (certificate
+  verification on). A `none` (plaintext) option exists for a trusted-LAN relay —
+  avoid it; it sends the relay password in clear.
+- **Header-injection guard**: every recipient is validated by
+  `security.valid_email` (rejects CR/LF/tab/NUL, commas, and non-address shapes)
+  and the From name/address + Subject are CR/LF-stripped, so a crafted address
+  can't smuggle a `Bcc:` or extra headers through the relay. Addresses are also
+  validated at input (`POST /persons`, test-send).
+- **`/auth/forgot`**: public (a locked-out user must reach it), but it always
+  returns `ok` (no account enumeration), only mails a known address, and is
+  rate-limited to one recovery mail per user per 15 min (mailbomb / quota guard).
+  The reset link is built from the configured `hearth_base_url`, not the request
+  Host header, so it can't be poisoned. Token is high-entropy, hashed, single-use,
+  1-hour TTL. The `python -m hearth.recover` CLI remains the no-SMTP fallback.
+- The newsletter renderer HTML-escapes all member/activity strings; the optional
+  LLM intro is escaped before insertion.
+
 ## Operator hardening notes (security audit, June 2026)
 
 Residual items that are deployment/ops concerns, not code holes:
