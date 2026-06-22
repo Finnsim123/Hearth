@@ -397,7 +397,13 @@ const roleColor = (r: string) => ROLE_COLORS[r] ?? ROLE_COLORS.custom;
 type Leaf = C & { tier: number; name: string; role: string; per_day: number; recent: boolean };
 type Room = { x: number; y: number; r: number; key: string; label: string;
               leaves: Leaf[]; total: number; sparse: boolean; tiers: Record<number, number>;
-              live: number; blind?: boolean };
+              live: number; blind?: boolean; seed?: { x: number; y: number } };
+
+// Co-activation grouping from /api/bindings/coactivation — sensors that fire
+// together, with an MDS layout seed (0..1) per cluster so the map's position
+// carries meaning. Empty `clusters` → we keep the room grouping.
+type CoData = { clusters: { id: number; x: number; y: number; n: number }[];
+                assign: Record<string, number> };
 
 // Merge key for case / separator variants ("Living_room" == "livingroom").
 const roomKey = (room: string | null) =>
@@ -414,55 +420,47 @@ const prettyRoom = (originals: string[]) => {
 
 const LABEL_H = 24;
 
-/** Pack each room's sensors into a disc, then let the room-discs flow into an
- *  organic, non-overlapping cloud that fills the width `W` (svg units; a
- *  narrower W on mobile keeps the bubbles legible once scaled to the screen). */
-function layoutRooms(rows: Health[], W: number, blind: string[] = []): { rooms: Room[]; width: number; height: number } {
-  const groups: Record<string, { label: string; list: Health[]; originals: Set<string> }> = {};
-  for (const b of rows) {
-    const k = roomKey(b.room);
-    (groups[k] ??= { label: "", list: [], originals: new Set() });
-    groups[k].list.push(b);
-    groups[k].originals.add(b.room || "Unassigned");
-  }
-  const maxPD = Math.max(1, ...rows.map((b) => b.per_day ?? 0));
-  const leafR = (b: Health) => 5 + Math.sqrt((b.per_day ?? 0) / maxPD) * 9;   // 5–14px
+const leafOf = (b: Health, maxPD: number): Leaf => ({
+  x: 0, y: 0, r: 5 + Math.sqrt((b.per_day ?? 0) / maxPD) * 9,   // 5–14px
+  tier: b.tier || 2, name: b.name, role: b.role, per_day: b.per_day ?? 0,
+  recent: !!b.recent });
 
-  const rooms: Room[] = Object.entries(groups).map(([key, g]) => {
-    const leaves: Leaf[] = g.list.map((b) => ({
-      x: 0, y: 0, r: leafR(b), tier: b.tier || 2, name: b.name,
-      role: b.role, per_day: b.per_day ?? 0, recent: !!b.recent }));
-    packSiblings(leaves);
-    const e = enclose(leaves);
-    for (const l of leaves) { l.x -= e.x; l.y -= e.y; }
-    const tiers: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
-    for (const l of leaves) tiers[l.tier] = (tiers[l.tier] || 0) + 1;
-    return { x: 0, y: 0, r: e.r + 7, key, label: prettyRoom([...g.originals]),
-             leaves, total: leaves.length, sparse: leaves.length <= 1, tiers,
-             live: leaves.filter((l) => l.recent).length };
-  });
-  // blind spots: HA areas with no usable sensor — small dashed ghost discs
-  for (const area of blind) {
-    rooms.push({ x: 0, y: 0, r: 20, key: `blind:${roomKey(area)}`, label: prettyRoom([area]),
-                 leaves: [], total: 0, sparse: true, tiers: { 1: 0, 2: 0, 3: 0 },
-                 live: 0, blind: true });
-  }
+/** Pack one group of sensors into a disc (leaves centred on the disc origin).
+ *  `seed` (0..1) optionally fixes where the disc starts in the cloud. */
+function packRoom(key: string, label: string, list: Health[], maxPD: number,
+                  seed?: { x: number; y: number }): Room {
+  const leaves = list.map((b) => leafOf(b, maxPD));
+  packSiblings(leaves);
+  const e = enclose(leaves);
+  for (const l of leaves) { l.x -= e.x; l.y -= e.y; }
+  const tiers: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
+  for (const l of leaves) tiers[l.tier] = (tiers[l.tier] || 0) + 1;
+  return { x: 0, y: 0, r: e.r + 7, key, label, leaves, total: leaves.length,
+           sparse: leaves.length <= 1, tiers,
+           live: leaves.filter((l) => l.recent).length, seed };
+}
+
+/** Flow discs into an organic, non-overlapping cloud filling width `W`. Discs
+ *  with a `seed` (0..1 coords from the co-activation MDS embedding) start there,
+ *  so position carries meaning; the rest fall on a phyllotaxis spiral. Collisions
+ *  ONLY remove overlap — no centre-of-mass gravity (that collapses the cloud
+ *  onto a line or into a central clump). */
+function spread(rooms: Room[], W: number): { rooms: Room[]; width: number; height: number } {
   rooms.sort((a, b) => b.r - a.r);
-
-  // A wide 2D cloud, not a row. Seed on a phyllotaxis spiral stretched to fill
-  // a wide ellipse (biggest room near the centre), then resolve ONLY collisions.
-  // No centre-of-mass gravity — that's what collapsed everything onto one line
-  // (vertical pull) or into a central clump (symmetric pull). The spiral seed
-  // does the spreading; collisions just remove overlaps and preserve it.
   const maxR = Math.max(...rooms.map((rm) => rm.r), 1);
   const H = Math.max(2 * maxR + 50, 320);
   const cx = W / 2, cy = H / 2, PAD = 9;
   const GA = Math.PI * (3 - Math.sqrt(5));   // golden angle → even 2D spread
   const n = rooms.length;
   rooms.forEach((rm, i) => {
-    const rad = Math.sqrt(i / Math.max(n - 1, 1));   // 0 (centre) … 1 (edge)
-    rm.x = cx + Math.cos(i * GA) * rad * (W * 0.44);
-    rm.y = cy + Math.sin(i * GA) * rad * (H * 0.42);
+    if (rm.seed) {                           // embedding coords → meaningful xy
+      rm.x = rm.r + rm.seed.x * Math.max(W - 2 * rm.r, 1);
+      rm.y = rm.r + rm.seed.y * Math.max(H - 2 * rm.r, 1);
+    } else {
+      const rad = Math.sqrt(i / Math.max(n - 1, 1));   // 0 (centre) … 1 (edge)
+      rm.x = cx + Math.cos(i * GA) * rad * (W * 0.44);
+      rm.y = cy + Math.sin(i * GA) * rad * (H * 0.42);
+    }
   });
   for (let it = 0; it < 500; it++) {
     let moved = false;
@@ -488,6 +486,63 @@ function layoutRooms(rows: Health[], W: number, blind: string[] = []): { rooms: 
   return { rooms, width: W, height: H + LABEL_H };
 }
 
+/** Default lens: group sensors by their room label. */
+function layoutRooms(rows: Health[], W: number, blind: string[] = []) {
+  const groups: Record<string, { list: Health[]; originals: Set<string> }> = {};
+  for (const b of rows) {
+    const k = roomKey(b.room);
+    (groups[k] ??= { list: [], originals: new Set() });
+    groups[k].list.push(b);
+    groups[k].originals.add(b.room || "Unassigned");
+  }
+  const maxPD = Math.max(1, ...rows.map((b) => b.per_day ?? 0));
+  const rooms = Object.entries(groups).map(([key, g]) =>
+    packRoom(key, prettyRoom([...g.originals]), g.list, maxPD));
+  // blind spots: HA areas with no usable sensor — small dashed ghost discs
+  for (const area of blind) {
+    rooms.push({ x: 0, y: 0, r: 20, key: `blind:${roomKey(area)}`, label: prettyRoom([area]),
+                 leaves: [], total: 0, sparse: true, tiers: { 1: 0, 2: 0, 3: 0 },
+                 live: 0, blind: true });
+  }
+  return spread(rooms, W);
+}
+
+// Name a behaviour cluster from its members: the room a clear majority share,
+// else the dominant role ("Lighting", "Presence"). Keeps the short human
+// captions of the room lens instead of bare "Cluster 3".
+function clusterLabel(list: Health[]): string {
+  const tally = (key: (b: Health) => string | null) => {
+    const m: Record<string, number> = {};
+    for (const b of list) { const k = key(b); if (k) m[k] = (m[k] || 0) + 1; }
+    const top = Object.entries(m).sort((a, b) => b[1] - a[1])[0];
+    return top ? { name: top[0], frac: top[1] / list.length } : null;
+  };
+  const room = tally((b) => b.room || null);
+  if (room && room.frac >= 0.6) return prettyRoom([room.name]);
+  const role = tally((b) => b.role);
+  const r = role ? role.name : "mixed";
+  return r[0].toUpperCase() + r.slice(1);
+}
+
+/** 'By behaviour' lens: group sensors by co-activation cluster instead of room.
+ *  Each disc holds sensors that fire together; its seed comes from the MDS
+ *  embedding so similar clusters sit near each other. Sensors with no
+ *  co-activation signal are dropped (they'd be singletons either way). */
+function layoutClusters(rows: Health[], co: CoData, W: number) {
+  const maxPD = Math.max(1, ...rows.map((b) => b.per_day ?? 0));
+  const seedOf: Record<number, { x: number; y: number }> = {};
+  for (const c of co.clusters) seedOf[c.id] = { x: c.x, y: c.y };
+  const groups: Record<number, Health[]> = {};
+  for (const b of rows) {
+    const id = co.assign[b.name];
+    if (id == null) continue;
+    (groups[id] ??= []).push(b);
+  }
+  const rooms = Object.entries(groups).map(([id, list]) =>
+    packRoom(`cluster:${id}`, clusterLabel(list), list, maxPD, seedOf[Number(id)]));
+  return spread(rooms, W);
+}
+
 /** Sensor coverage bubble chart: rooms laid out across the width, each holding
  *  one dot per live sensor (size = how often it fires, colour = evidence tier).
  *  Click a room to list its sensors. Small/all-pink rooms = barely sensed. */
@@ -497,6 +552,8 @@ function SensorCoverage() {
   const [sel, setSel] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [colorBy, setColorBy] = useState<"value" | "role">("value");
+  const [groupBy, setGroupBy] = useState<"room" | "behavior">("room");
+  const [co, setCo] = useState<CoData | null>(null);
   const isMobile = useIsMobile();
   useEffect(() => {
     const load = () => fetch("/api/bindings/health").then((r) => r.json())
@@ -509,12 +566,23 @@ function SensorCoverage() {
     const id = setInterval(load, 30_000);   // live heartbeat: refresh recent-activity
     return () => clearInterval(id);
   }, []);
+  // co-activation is expensive (reads weeks of raw data) and slow-changing —
+  // fetch once, lazily, only when the user first opens the behaviour lens
+  useEffect(() => {
+    if (groupBy !== "behavior" || co) return;
+    fetch("/api/bindings/coactivation").then((r) => r.json())
+      .then((d) => setCo({ clusters: d.clusters ?? [], assign: d.assign ?? {} }))
+      .catch(() => setCo({ clusters: [], assign: {} }));
+  }, [groupBy, co]);
   if (!rows || rows.length === 0) return null;
 
   // HA areas with no usable sensor → blind-spot ghost bubbles
   const covered = new Set(rows.map((b) => roomKey(b.room)));
   const blind = known.filter((a) => !covered.has(roomKey(a)));
-  const { rooms } = layoutRooms(rows, isMobile ? 600 : 1040, blind);
+  // behaviour lens only when clustering actually returned groups, else fall back
+  const byBehavior = groupBy === "behavior" && !!co && co.clusters.length > 0;
+  const W = isMobile ? 600 : 1040;
+  const { rooms } = byBehavior ? layoutClusters(rows, co!, W) : layoutRooms(rows, W, blind);
   const selected = rooms.find((r) => r.key === sel) || null;
 
   // Fit the viewBox to the actual bubble cloud (incl. labels) so the chart fills
@@ -528,7 +596,9 @@ function SensorCoverage() {
 
   return (
     <Card icon="sensors" title="Sensor coverage"
-          sub="Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Dots pulsing green fired in the last few minutes; dashed rooms have no sensor Hearth can use. Click a room to see its sensors.">
+          sub={byBehavior
+            ? "Each bubble is a group of sensors that FIRE TOGETHER — a behavioural zone learned from the data, not the room labels. Nearby bubbles behave alike. Each dot is a sensor; bigger fires more often, colour is how directly it senses people. Click a bubble to see its sensors."
+            : "Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Dots pulsing green fired in the last few minutes; dashed rooms have no sensor Hearth can use. Click a room to see its sensors."}>
       <svg viewBox={`${minX} ${minY} ${vbW} ${vbH}`} role="img"
            style={{ width: "100%", display: "block" }}>
         <style>{`
@@ -622,6 +692,25 @@ function SensorCoverage() {
       )}
       <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 12, color: "var(--text-dim)",
                     justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", border: "1px solid var(--border)",
+                       borderRadius: 999, overflow: "hidden" }}>
+          {(["room", "behavior"] as const).map((m) => (
+            <button key={m} onClick={() => { setGroupBy(m); setSel(null); }}
+              title={m === "behavior" ? "Group sensors that fire together (learned from data)"
+                                      : "Group sensors by their room"}
+              style={{ border: "none", cursor: "pointer", padding: "3px 10px", fontSize: 11.5,
+                       fontWeight: 600, background: groupBy === m ? "var(--accent)" : "transparent",
+                       color: groupBy === m ? "#fff" : "var(--text-dim)" }}>
+              {m === "room" ? "By room" : "By behaviour"}
+            </button>
+          ))}
+        </span>
+        {groupBy === "behavior" && !co && (
+          <span style={{ color: "var(--text-dim)" }}>clustering…</span>
+        )}
+        {groupBy === "behavior" && co && co.clusters.length === 0 && (
+          <span style={{ color: "var(--text-dim)" }}>not enough data to cluster yet — showing rooms</span>
+        )}
         <span style={{ display: "inline-flex", border: "1px solid var(--border)",
                        borderRadius: 999, overflow: "hidden" }}>
           {(["value", "role"] as const).map((m) => (
