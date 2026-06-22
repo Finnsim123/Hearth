@@ -4,7 +4,7 @@
  * precision/recall/F1, confusion matrix, feature importances, and
  * train / promote actions. Spec: docs/UI_SPEC.md §Models.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "../icons";
 
 type PerClass = { precision: number; recall: number; f1: number; support: number };
@@ -30,6 +30,11 @@ type Metrics = {
     brier: number; ece: number; n_check: number;
     reliability?: { conf: number; acc: number; n: number }[];
   };
+  flat_baseline?: {
+    accuracy_gold?: number; accuracy_confirmed?: number;
+    accuracy_bootstrap?: number; n_gold?: number; n_confirmed?: number;
+  };
+  excluded_features?: string[];
 };
 
 const GOLD_MIN = 30;  // matches MIN_CONFIRMED_FOR_VALIDATED — below this the
@@ -250,8 +255,94 @@ function Importances({ imp }: { imp: Record<string, number> }) {
   );
 }
 
-function ModelCard({ m, onAction }: { m: Model; onAction: () => void }) {
+function Row({ k, v, hint }: { k: string; v: ReactNode; hint?: string }) {
+  return (
+    <div title={hint} style={{ display: "flex", justifyContent: "space-between", gap: 16,
+                               fontSize: 12.5, padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
+      <span style={{ color: "var(--text-dim)" }}>{k}</span>
+      <span style={{ fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{v}</span>
+    </div>
+  );
+}
+
+/** Model Card (UX4): a consolidated, printable "nutrition label" per model in the
+ *  Mitchell-2019 / IBM-FactSheets idiom — what it is, on what data, how well, with
+ *  what limits. Every field already exists in the registry; this just gathers the
+ *  scattered numbers into one honest, shareable artifact. */
+function ModelCardSheet({ m, personName }: { m: Model; personName: string }) {
+  const mt = m.metrics ?? {};
+  const fb = mt.flat_baseline;
+  const mine = mt.accuracy_gold ?? mt.accuracy_confirmed;
+  const flat = fb?.accuracy_gold ?? fb?.accuracy_confirmed;
+  const beatsFlat = mine != null && flat != null ? mine >= flat : null;
+  return (
+    <div style={{ border: "1px solid var(--accent)", borderRadius: 12, padding: 18,
+                  display: "flex", flexDirection: "column", gap: 14,
+                  background: "var(--surface)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Icon name="models" size={18} />
+        <div>
+          <strong style={{ fontSize: 15 }}>Model card · {personName}</strong>
+          <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+            {m.version} · {m.algo} · {m.trained_at ? new Date(m.trained_at).toLocaleString() : ""}
+          </div>
+        </div>
+        <button className="btn btn-ghost" style={{ marginLeft: "auto" }}
+                onClick={() => window.print()}>Print / Save PDF</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px" }}>
+        <div>
+          <h4 style={{ margin: "0 0 4px", fontSize: 13 }}>Trained on</h4>
+          <Row k="training windows" v={mt.n_train ?? "—"} />
+          <Row k="features" v={mt.feature_count ?? "—"} />
+          <Row k="human labels" v={m.label_counts?.confirmed ?? 0} />
+          <Row k="rule labels" v={m.label_counts?.bootstrap ?? 0}
+               hint="Windows labelled by the starter rules — used to bootstrap, not ground truth." />
+        </div>
+        <div>
+          <h4 style={{ margin: "0 0 4px", fontSize: 13 }}>How well</h4>
+          <Row k="real-world accuracy" hint="On random spot-checks — the fair headline."
+               v={mt.n_gold && mt.n_gold >= GOLD_MIN ? pct(mt.accuracy_gold)
+                  : `gathering (${mt.n_gold ?? 0}/${GOLD_MIN})`} />
+          <Row k="on tricky moments" v={pct(mt.accuracy_confirmed)}
+               hint="On the hard windows Hearth asked about — reads lower by design." />
+          <Row k="AUC (macro)" v={mt.auc_macro ? mt.auc_macro.toFixed(3) : "—"} />
+          <Row k="calibration (ECE)" v={mt.calibration ? mt.calibration.ece.toFixed(3) : "—"}
+               hint="Gap between stated confidence and real accuracy; 0 = perfect." />
+        </div>
+      </div>
+
+      {fb && mine != null && flat != null && (
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+          <strong>Earns its complexity?</strong> This model scores {pct(mine)} vs a plain
+          flat model's {pct(flat)} on the same split —{" "}
+          {beatsFlat ? "the hierarchy is pulling its weight." : "the flat model is as good; the hierarchy isn't helping here."}
+        </p>
+      )}
+
+      {mt.excluded_features && mt.excluded_features.length > 0 && (
+        <p style={{ margin: 0, fontSize: 12, color: "var(--text-dim)" }}>
+          <strong>Excluded:</strong> {mt.excluded_features.slice(0, 8).join(", ")}
+          {mt.excluded_features.length > 8 ? ` +${mt.excluded_features.length - 8} more` : ""} — dropped
+          as low-variance or another member's personal sensors.
+        </p>
+      )}
+
+      <p style={{ margin: 0, fontSize: 11.5, color: "var(--text-dim)", lineHeight: 1.5 }}>
+        <strong>Intended use:</strong> recognise this household member's everyday activities from
+        their own sensors, for automations and insight. <strong>Limits:</strong> trained only on
+        this home; accuracy is honest only once enough spot-checks back it (see status badge); rare
+        activities have few examples; predictions below the confidence threshold abstain rather than
+        guess.
+      </p>
+    </div>
+  );
+}
+
+function ModelCard({ m, onAction, personName }: { m: Model; onAction: () => void; personName: string }) {
   const [open, setOpen] = useState(false);
+  const [card, setCard] = useState(false);
   const [busy, setBusy] = useState("");
   const mt = m.metrics ?? {};
   const act = async (label: string, fn: () => Promise<Response>) => {
@@ -283,11 +374,16 @@ function ModelCard({ m, onAction }: { m: Model; onAction: () => void }) {
               {busy === "promote" ? "…" : "Promote"}
             </button>
           )}
+          <button className="btn btn-ghost" onClick={() => setCard(!card)}>
+            {card ? "Hide card" : "Model card"}
+          </button>
           <button className="btn btn-ghost" onClick={() => setOpen(!open)}>
             {open ? "Hide details" : "Details"}
           </button>
         </div>
       </div>
+
+      {card && <ModelCardSheet m={m} personName={personName} />}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch" }}>
         <HeroAccuracy mt={mt} />
@@ -630,7 +726,7 @@ export default function Models() {
               </button>
             </div>
             <PersonHistory models={sorted} />
-            {sorted.slice(0, 6).map((m) => <ModelCard key={m.id} m={m} onAction={load} />)}
+            {sorted.slice(0, 6).map((m) => <ModelCard key={m.id} m={m} onAction={load} personName={name} />)}
             {sorted.length > 6 && (
               <p style={{ fontSize: 12.5, color: "var(--text-dim)", margin: 0 }}>
                 + {sorted.length - 6} older versions kept for rollback.
