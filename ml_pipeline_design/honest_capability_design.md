@@ -85,10 +85,19 @@ Decisions taken: label-and-dim (not hide), **balanced** thresholds, panel on Mod
   with the remedy when anything is unreliable/blind → shows on the buddy + Activity.
 - "What I can and can't do" panel on the Models page: per-activity tier, plain reason,
   and the concrete fix.
-- **Deferred to the next slice:** reliability badges/dimming on the dashboard +
-  behaviour ribbons (label-and-dim per the decision), the blunt holding state when only
-  facts work, and the buddy live-line tone pass. The verdict engine + API are ready for
-  them to consume.
+## 6c. Status — SLICE 2 IMPLEMENTED (June 2026): honest predictions
+- **Dashboard** `PersonCard`: the current activity is hedged when its tier is
+  unreliable/blind ("possibly cooking · not reliable yet", dimmed) or learning
+  ("still learning — not sure"); facts (away/asleep) are never hedged. The week
+  heatmap dims cells of unreliable activities. A **holding note** appears when the
+  model has zero reliable activities ("I can't reliably predict … yet — facts still
+  hold · see what would help").
+- **Behaviour** Today ribbon dims unreliable activities (label-and-dim, fact windows
+  untouched). Both pages fetch `/api/capability` and build the unreliable set.
+- **Buddy/Activity**: already honest via the capability advisory wired in slice 1
+  (`advisory_scan._capability`) — it raises "Some activities aren't working … <remedy>".
+  A per-poll live-line hedge was intentionally NOT added (it would run the verdict on
+  every 15–60 s buddy poll for little gain over the advisory).
 
 ## 7. Decisions (for you)
 1. **Reliability bar** — strict or lenient? Lean: `reliable` = validated AND F1 ≥ 0.70

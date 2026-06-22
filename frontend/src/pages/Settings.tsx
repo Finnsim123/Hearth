@@ -1275,23 +1275,28 @@ function AiPrompts() {
 }
 
 type SectionKey =
-  | "household" | "model" | "integrations" | "prompts" | "logs" | "account" | "general" | "methodology";
+  | "household" | "model" | "data" | "privacy" | "integrations" | "prompts"
+  | "logs" | "account" | "general" | "methodology";
 
 const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }[] = [
   { key: "household", icon: "household", title: "Household",
-    desc: "People, avatars, notifications, the weekly newsletter, and daily question budgets." },
+    desc: "People, avatars, notifications, the weekly newsletter, and how often Hearth asks." },
   { key: "model", icon: "models", title: "Model",
-    desc: "Ground-truth facts, data sharing, feature power, model family, clock trust, commit threshold and history retention." },
+    desc: "How the model learns and commits: feature power, model family, clock trust, the confidence threshold, and advanced tuning." },
+  { key: "data", icon: "sensors", title: "Data & labels",
+    desc: "Ground-truth facts, transition markers, how long raw history is kept, and how far back training reaches." },
+  { key: "privacy", icon: "lock", title: "Privacy",
+    desc: "What, if anything, Hearth shares — anonymous aggregate stats to improve the defaults." },
   { key: "integrations", icon: "flow", title: "Integrations",
     desc: "Home Assistant, InfluxDB, the AI assistant, email, and API tokens for the HA integration." },
   { key: "prompts", icon: "models", title: "AI prompts",
     desc: "Read and edit every system prompt Hearth sends to the language model." },
-  { key: "logs", icon: "monitor", title: "Logs",
-    desc: "Recent backend activity, live." },
   { key: "account", icon: "user", title: "Account",
     desc: "Your password, two-factor authentication and sign-in." },
+  { key: "logs", icon: "monitor", title: "Logs",
+    desc: "Recent backend activity, live." },
   { key: "general", icon: "settings", title: "General",
-    desc: "Appearance, system info, updates and the danger zone." },
+    desc: "Appearance, version & updates, and the danger zone." },
   { key: "methodology", icon: "info", title: "How it works",
     desc: "The Hearth pipeline, end to end." },
 ];
@@ -1479,7 +1484,9 @@ function ConnectionsSection() {
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
     case "household": return (<><Household /><NewsletterDesign /><AdvancedAsking /></>);
-    case "model": return (<><FoundationalFacts /><TransitionMarkers /><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /><AdvancedTraining /></>);
+    case "model": return (<><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><AdvancedTraining /></>);
+    case "data": return (<><FoundationalFacts /><TransitionMarkers /><DataRetention /><TrainingWindow /></>);
+    case "privacy": return <StatsConsent />;
     case "integrations": return <ConnectionsSection />;
     case "prompts": return <AiPrompts />;
     case "logs": return <Logs />;

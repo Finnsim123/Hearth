@@ -121,8 +121,8 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 /** A week of activity: 7 day-rows × 24 hour-columns, each cell the dominant
  *  predicted activity that hour. Compact + tappable — tap a cell to correct
  *  that hour (replaces the old 24h ribbon). Fills in as the days roll by. */
-function WeekHeatmap({ preds, personId, ruleBased }:
-                     { preds: Pred[]; personId: string; ruleBased: boolean }) {
+function WeekHeatmap({ preds, personId, ruleBased, unreliable }:
+                     { preds: Pred[]; personId: string; ruleBased: boolean; unreliable?: Set<string> }) {
   const qc = useQueryClient();
   // selection is a SET of cell start-times (epoch ms) so a drag can mark many
   // hours at once; click = one cell, click-drag = a streak.
@@ -190,7 +190,8 @@ function WeekHeatmap({ preds, personId, ruleBased }:
              onPointerEnter={future ? undefined : () => { if (painting.current) addCell(t); }}
              title={`${d.label} ${String(h).padStart(2, "0")}:00 — ${st ? st.replace("_", " ") : "no data"}`}
              style={{ height: 14, borderRadius: 2, cursor: future ? "default" : "pointer",
-                      background: st ? color(st) : "var(--surface-2)", opacity: future ? 0.3 : 1,
+                      background: st ? color(st) : "var(--surface-2)",
+                      opacity: future ? 0.3 : (st && unreliable?.has(st) ? 0.4 : 1),
                       touchAction: "none",
                       outline: on ? "2px solid var(--accent)" : "none", outlineOffset: -1 }} />);
     });

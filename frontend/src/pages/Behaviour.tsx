@@ -81,6 +81,7 @@ export default function Behaviour() {
 
   const [household, setHousehold] = useState<Household | null>(null);
   const [why, setWhy] = useState<{ ts: string; activity: string; basis: string } | null>(null);
+  const [unreliable, setUnreliable] = useState<Set<string>>(new Set());
 
   const load = useCallback(() => {
     const q = new URLSearchParams({ days: String(days) });
@@ -92,6 +93,13 @@ export default function Behaviour() {
       setData(d);
       fetch(`/api/behaviour/household?${q}`).then(j).then(setHousehold).catch(() => setHousehold(null));
     }).catch(() => setData({ summary: null, trends: [], body: null, persons: [], activities: [] }));
+    // capability: which activities the model can't do reliably → dim them, so the
+    // ribbon never presents an unreliable guess as if it were solid.
+    fetch(`/api/capability${person ? `?person=${encodeURIComponent(person)}` : ""}`).then(j)
+      .then((c: { activities?: { slug: string; tier: string }[] }) =>
+        setUnreliable(new Set((c.activities ?? [])
+          .filter((a) => a.tier === "unreliable" || a.tier === "blind").map((a) => a.slug))))
+      .catch(() => setUnreliable(new Set()));
   }, [person, days]);
   useEffect(load, [load]);
 
@@ -187,7 +195,8 @@ export default function Behaviour() {
                     <div key={i} title={`${nameOf(seg.activity)} · ${fmtH(mins)} — click for why`}
                       onClick={() => setWhy({ ts: seg.start, activity: seg.activity, basis: seg.basis })}
                       style={{ flex: mins, background: colorOf(seg.activity), cursor: "pointer",
-                               opacity: seg.basis === "fact" ? 1 : seg.activity === "unknown" ? 0.5 : 0.62 }} />
+                               opacity: seg.basis === "fact" ? 1 : seg.activity === "unknown" ? 0.5
+                                 : unreliable.has(seg.activity) ? 0.3 : 0.62 }} />
                   );
                 })}
               </div>
