@@ -68,10 +68,42 @@ values have `__repr__` redaction; tokens are masked `hrt_****…` in UI and logs
   automatically when the request arrives over HTTPS.
 - CORS: same-origin only (SPA is served by the backend); the HA integration
   uses bearer tokens, not cookies, so CORS never needs widening.
-- CSRF: `SameSite=Lax` + custom-header check on mutating routes.
+- CSRF: `SameSite=Lax` session cookie + a JSON-only API (no cookie-authenticated
+  HTML form posts). No separate CSRF token; SameSite=Lax is the control.
 - Backups: `/data` volume contains hashes and Fernet ciphertexts — safe to
   back up as-is; restoring on a new host requires the same `HEARTH_SECRET`
   (documented prominently — lose the secret, re-enter third-party tokens).
+
+## SSRF / outbound requests
+
+- User-supplied connection URLs (HA, InfluxDB, LLM) and the setup-wizard probes
+  (`/api/ha/test`, `/api/ha/inventory`, `/api/influx/inspect`) are validated by
+  `urlguard.url_block_reason`: the host is resolved and **link-local
+  (incl. 169.254.169.254 cloud-metadata), unspecified, multicast and reserved**
+  addresses are refused. Loopback and RFC1918 private ranges are **allowed** —
+  they are legitimate homelab targets. (Python's `is_private` includes 169.254/16,
+  so link-local is checked explicitly rather than via an is_private allow-list.)
+- Outbound responses are size-capped (chunked reads via `adapters/_httpcap`):
+  LLM 8 MB, HA `/api/config` 4 MB, HA `/api/states` 32 MB — a hostile upstream
+  can't OOM the box. All outbound clients also carry timeouts.
+- Remote InfluxDB bucket names are escaped (`_flux_tag`) before Flux interpolation.
+
+## Operator hardening notes (security audit, June 2026)
+
+Residual items that are deployment/ops concerns, not code holes:
+
+- **Run setup on a trusted network.** While no admin exists, the wizard probe +
+  `/api/tokens` endpoints are reachable without a session (by design — there's no
+  credential to check yet). They close the moment the first admin is created.
+- **No app-level rate limiting** on expensive authenticated endpoints
+  (`/models/train`, `/discovery/run`, `/import/history`). Heavy jobs are already
+  gated by the resource governor; for internet-exposed deploys add a reverse-proxy
+  rate limit. Single-admin homelab risk is self-inflicted load only.
+- **Model artifacts are loaded with `joblib`/pickle.** Only load model files Hearth
+  itself wrote to `/data/models`; never import a `.joblib` from an untrusted source
+  (pickle deserialization can execute code). The stored path is server-generated.
+- **`/data` permissions** follow the container umask; keep the volume off shared
+  hosts — it holds the sqlite DB (hashes + Fernet ciphertexts) and model files.
 
 ## What we deliberately don't do (v1)
 
