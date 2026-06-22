@@ -882,6 +882,32 @@ def build_api_router(deps: dict) -> APIRouter:
         return inspect_influx(body.get("url", ""), body.get("org", ""),
                               body.get("token", ""))
 
+    @api.post("/influx/ui-password")
+    def influx_ui_password(body: dict) -> dict:
+        """Set the bundled InfluxDB web-UI password for the 'hearth' user, via the
+        admin token Hearth already holds — so a UI-only install (which never sees
+        .env) can log into the database to browse raw data. Hearth does NOT store
+        this password; the user picks it and can reset it again here anytime."""
+        pw = body.get("password") or ""
+        if len(pw) < 8:
+            raise HTTPException(400, "password must be at least 8 characters")
+        conn = repo.get_connection("influx")
+        if conn and conn.get("token"):
+            url, token = conn["url"], conn["token"]
+        else:                                   # bundled/env-only install (no saved conn)
+            from ..config import settings as cfg
+            if not cfg.influx_token:
+                raise HTTPException(409, "InfluxDB isn't configured")
+            url, token = cfg.influx_url, cfg.influx_token
+        username = body.get("username") or "hearth"
+        from ..adapters.influx_store import set_ui_password
+        try:
+            set_ui_password(url, token, username, pw)
+        except Exception as exc:
+            log.warning("influx ui-password set failed: %s", exc)
+            raise HTTPException(502, "Couldn't set the password — check the logs")
+        return {"ok": True, "username": username}
+
     # ── persons ────────────────────────────────────────────────────────────
     @api.get("/persons")
     def persons() -> list[Person]:
@@ -1157,6 +1183,24 @@ def build_api_router(deps: dict) -> APIRouter:
         if not pid:
             return {"summary": "No household members yet.", "facts": {}}
         return model_insight(pid, repo)
+
+    @api.get("/capability")
+    def capability(person: str | None = None) -> dict:
+        """Honest per-activity verdict: what the model can and can't actually do,
+        with remedies. Aggregates the metrics we already compute + coverage gaps."""
+        from ..domain.capability import assess_capability
+        from ..domain.coverage.advisor import gaps_from_home
+        pid = person or next((p.id for p in repo.persons()), None)
+        if not pid:
+            return {"person_id": None, "has_model": False, "activities": [],
+                    "overall": "No household members yet.", "reliable": [], "needs_help": []}
+        record = next((m for m in repo.models(pid)
+                       if m.promoted and m.node == "root"), None)
+        acts = repo.activities()
+        name_of = {a.slug: a.name for a in acts}
+        rep = assess_capability(pid, acts, record.metrics if record else None,
+                                gaps_from_home(repo), name_of=lambda s: name_of.get(s, s))
+        return rep.model_dump(mode="json")
 
     @api.get("/advisories")
     def advisories_list() -> dict:

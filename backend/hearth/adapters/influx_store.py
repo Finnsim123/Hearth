@@ -72,6 +72,32 @@ def coerce_value(binding: Binding, state) -> tuple[str, float | str | None]:
     return "str", str(state)
 
 
+def set_ui_password(url: str, token: str, username: str, new_password: str) -> None:
+    """Set the InfluxDB web-UI login password for `username`, using the admin
+    token (so it works even when the current password is unknown — the UI-only
+    install case). Raises on failure. Uses the InfluxDB 2.x REST API directly:
+    look up the user id, then POST the new password."""
+    import urllib.parse
+    import urllib.request
+
+    base = url.rstrip("/")
+    headers = {"Authorization": f"Token {token}", "Content-Type": "application/json"}
+
+    def _req(path: str, data: bytes | None = None) -> dict:
+        req = urllib.request.Request(f"{base}{path}", data=data, headers=headers,
+                                     method="POST" if data is not None else "GET")
+        with urllib.request.urlopen(req, timeout=10) as r:   # noqa: S310 (trusted internal URL)
+            body = r.read()
+            return json.loads(body) if body else {}
+
+    users = _req(f"/api/v2/users?name={urllib.parse.quote(username)}").get("users") or []
+    uid = next((u["id"] for u in users if u.get("name") == username), None)
+    if uid is None:
+        raise ValueError(f"no InfluxDB user named {username!r}")
+    _req(f"/api/v2/users/{uid}/password",
+         data=json.dumps({"password": new_password}).encode())
+
+
 def inspect_influx(url: str, org: str, token: str, max_buckets: int = 25) -> dict:
     """Staged connection check for the wizard: reachable -> authed -> buckets
     -> per-bucket data stats. Never raises; every stage reports its own truth.

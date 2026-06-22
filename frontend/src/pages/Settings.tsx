@@ -260,6 +260,13 @@ function ConnectionCard({ kind, title, sub, fields }: {
   const [retrying, setRetrying] = useState(false);
   const [llmStatus, setLlmStatus] = useState<{ ok: boolean; code: number } | null>(null);
   const [usage, setUsage] = useState<LlmUsage | null>(null);
+  const [uiPw, setUiPw] = useState("");
+  const [uiState, setUiState] = useState<SaveState>("idle");
+  const setInfluxUiPw = async () => {
+    setUiState("saving");
+    try { await post("/api/influx/ui-password", { password: uiPw }).then(j); setUiState("ok"); setUiPw(""); }
+    catch { setUiState("fail"); }
+  };
   const needsRestart = kind === "ha" || kind === "influx";
   const loadConn = () => fetch(`/api/connections/${kind}`).then(j).then((c) => {
     if (!c.configured) return;
@@ -371,14 +378,28 @@ function ConnectionCard({ kind, title, sub, fields }: {
             {[["Web UI", <a key="u" href={webUrl} target="_blank" rel="noreferrer"
                             style={{ color: "var(--accent)" }}>{webUrl} ↗</a>],
               ["Username", <code key="n">hearth</code>],
-              ["Organization", <code key="o">{org}</code>],
-              ["Password", <span key="p" style={{ color: "var(--text-dim)" }}>the <code>INFLUX_PASSWORD</code> you set in your <code>.env</code> — Hearth doesn't store it</span>]]
+              ["Organization", <code key="o">{org}</code>]]
               .map(([k, v]) => (
               <div key={k as string} style={{ display: "flex", gap: 10, fontSize: 12.5 }}>
                 <span style={{ color: "var(--text-dim)", minWidth: 96 }}>{k}</span>
                 <span>{v}</span>
               </div>
             ))}
+            <div style={{ display: "flex", gap: 10, fontSize: 12.5, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ color: "var(--text-dim)", minWidth: 96 }}>Password</span>
+              <input type="password" placeholder="set a web-UI password (min 8)" value={uiPw}
+                     onChange={(e) => { setUiPw(e.target.value); setUiState("idle"); }}
+                     style={{ flex: "1 1 180px", minWidth: 160 }} />
+              <button className="btn btn-secondary" style={{ fontSize: 12.5 }}
+                      disabled={uiPw.length < 8 || uiState === "saving"} onClick={setInfluxUiPw}>
+                {uiState === "saving" ? "Setting…" : "Set"}
+              </button>
+            </div>
+            <span style={{ fontSize: 11.5, color: uiState === "fail" ? "var(--danger)" : "var(--text-dim)" }}>
+              {uiState === "ok" ? "Password set — log in as “hearth” with it."
+                : uiState === "fail" ? "Couldn't set the password — check the logs."
+                : "Hearth sets this on the database for you (it doesn't store it). Reset it here anytime."}
+            </span>
           </div>
         );
       })()}
