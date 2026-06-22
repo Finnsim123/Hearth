@@ -99,3 +99,22 @@ def mask(value: str) -> str:
     if not value:
         return ""
     return (value[:8] + "****") if len(value) > 12 else "****"
+
+
+# ── email address validation (SMTP header-injection guard) ──────────────────
+import re as _re
+
+_EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def valid_email(addr: str) -> bool:
+    """True for a single, sane email address. Rejects anything with control
+    characters (CR/LF/tab/NUL) or commas — the vectors for SMTP header
+    injection and recipient smuggling — and requires a basic local@domain.tld
+    shape. Deliberately strict, not RFC-complete: an address we'd refuse to send
+    to is better than one that smuggles a Bcc header."""
+    if not addr or len(addr) > 254:
+        return False
+    if any(c in addr for c in "\r\n\t\0,"):
+        return False
+    return bool(_EMAIL_RE.match(addr.strip()))

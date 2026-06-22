@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from hearth.domain.behaviour.body import _deltas, summarize_body
+from hearth.domain.behaviour.body import (
+    active_sedentary_trends,
+    _deltas,
+    summarize_body,
+)
 
 BASE = datetime(2026, 6, 10, 0, 0, tzinfo=timezone.utc)   # Wednesday
 
@@ -80,8 +84,33 @@ def test_charging_windows_split_coverage_and_drop_from_activity():
     assert s.coverage == round(2 / 5, 4)
 
 
+def test_active_vs_sedentary_split():
+    # window deltas: 10 (sedentary), 500 (active), 5 (sedentary) → 1 active / 2 sed
+    counters = {"steps": _samples([(0, 0), (30, 10), (60, 510), (90, 515)])}
+    s = summarize_body("alice", counters, [], tz="UTC",
+                       now=BASE + timedelta(minutes=120), range_start=BASE)
+    assert s.active_min == 30
+    assert s.sedentary_min == 60
+
+
+def test_active_trend_flags_a_rise():
+    # active windows every day, more in the recent week than the prior week
+    now = datetime(2026, 6, 24, 12, 0, tzinfo=timezone.utc)
+    samples = []
+    for d in range(0, 7):                       # recent: 2 active windows/day
+        base = now - timedelta(days=d)
+        samples += [(base, 0.0), (base + timedelta(minutes=30), 600.0),
+                    (base + timedelta(minutes=60), 1200.0)]
+    for d in range(8, 15):                      # prior: 0 active (flat)
+        base = now - timedelta(days=d)
+        samples += [(base, 0.0), (base + timedelta(minutes=30), 5.0)]
+    cs = {c.activity: c for c in active_sedentary_trends({"steps": samples}, now=now)}
+    assert "active" in cs and cs["active"].direction in ("up", "new")
+
+
 def test_empty_is_safe():
     s = summarize_body("alice", {}, [], tz="UTC", now=BASE, range_start=BASE)
     assert s.signals == [] and s.primary is None and s.per_day == []
     assert s.coverage == 0.0 and s.by_activity == {}
     assert s.worn_min == 0 and s.charging_min == 0 and s.absent_min == 0
+    assert s.active_min == 0 and s.sedentary_min == 0 and s.trends == []

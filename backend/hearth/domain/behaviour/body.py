@@ -16,23 +16,30 @@ activity timeline via read_predictions(), then hands both here.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
-from .summary import UNKNOWN, RhythmCell, _parse, _state
+from .summary import UNKNOWN, RhythmCell, TrendCallout, _parse, _state, make_callout
 
 # A reset is only believed when the counter falls by more than this fraction of
 # its previous value — guards against tiny non-monotonic jitter being mistaken
 # for a midnight rollover.
 RESET_DROP_FRAC = 0.5
 
+# Steps accrued in a window above which it counts as "active" rather than
+# "sedentary" (worn-but-still). Coarse by design — a handful of steps is still
+# sedentary; real movement clears this easily.
+ACTIVE_STEP_WINDOW = 100.0
+
 
 class BodyDay(BaseModel):
     date: str
     totals: dict[str, float]       # signal label -> amount accrued that day
     covered_min: float             # minutes with sensor data (device worn)
+    active_min: float = 0.0        # worn minutes with real movement
+    sedentary_min: float = 0.0     # worn minutes, little/no movement
 
 
 class BodySummary(BaseModel):
@@ -45,9 +52,12 @@ class BodySummary(BaseModel):
     worn_min: float                # device worn & reporting movement
     charging_min: float            # on the charger / docked (steps≈0 is EXPECTED)
     absent_min: float              # no data and not charging — genuinely unknown
+    active_min: float = 0.0        # worn minutes with real movement (whole range)
+    sedentary_min: float = 0.0     # worn minutes, little/no movement
     per_day: list[BodyDay]
     rhythm: list[RhythmCell]       # 24h x dow grid of the PRIMARY signal
     by_activity: dict[str, float]  # activity slug -> primary-signal amount during it
+    trends: list[TrendCallout] = []  # WoW callouts for active/sedentary minutes
 
 
 def _deltas(samples: list[tuple[datetime, float]], window_min: int
@@ -158,7 +168,13 @@ def summarize_body(person_id: str, counters: dict[str, list[tuple[datetime, floa
             if label == primary:
                 cell = rhythm.setdefault((local.weekday(), local.hour), {})
                 cell[primary] = cell.get(primary, 0.0) + amt
+                if amt >= ACTIVE_STEP_WINDOW:
+                    day.active_min += window_min
+                else:
+                    day.sedentary_min += window_min
             covered_buckets.add(bucket)
+    active_min = sum(d.active_min for d in per_day.values())
+    sedentary_min = sum(d.sedentary_min for d in per_day.values())
 
     # covered minutes per day = distinct windows with ANY signal that day
     cov_by_day: dict[str, set[datetime]] = {}
@@ -208,6 +224,112 @@ def summarize_body(person_id: str, counters: dict[str, list[tuple[datetime, floa
         total={k: round(v, 2) for k, v in total.items()},
         coverage=round(coverage, 4), worn_min=worn_min,
         charging_min=charging_min, absent_min=absent_min,
+        active_min=active_min, sedentary_min=sedentary_min,
         per_day=[per_day[k] for k in sorted(per_day)],
         rhythm=[RhythmCell(dow=d, hour=h, totals=t) for (d, h), t in sorted(rhythm.items())],
         by_activity={k: round(v, 2) for k, v in by_activity.items()})
+
+
+def active_sedentary_trends(counters: dict[str, list[tuple[datetime, float]]],
+                            charging: list[tuple[datetime, object]] | None = None, *,
+                            tz: str = "UTC", now: datetime | None = None,
+                            window_min: int = 30, period_days: int = 7) -> list[TrendCallout]:
+    """WoW callouts for ACTIVE and SEDENTARY worn-minutes/day (last `period_days`
+    vs the prior `period_days`). Needs ~2*period_days of counter data."""
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    charge_set = _charge_buckets(charging or [], window_min)
+    primary = _pick_primary([
+        lbl for lbl, s in counters.items()
+        if s and any(b not in charge_set for b in _deltas(s, window_min))])
+    if primary is None:
+        return []
+    pdeltas = {b: v for b, v in _deltas(counters[primary], window_min).items()
+               if b not in charge_set}
+    recent_cut = now.timestamp() - period_days * 86400
+    prior_cut = now.timestamp() - 2 * period_days * 86400
+    r_act = r_sed = p_act = p_sed = 0.0
+    for bucket, amt in pdeltas.items():
+        ts = bucket.timestamp()
+        active = amt >= ACTIVE_STEP_WINDOW
+        if ts >= recent_cut:
+            r_act += window_min if active else 0.0
+            r_sed += 0.0 if active else window_min
+        elif ts >= prior_cut:
+            p_act += window_min if active else 0.0
+            p_sed += 0.0 if active else window_min
+    out = [make_callout("active", r_act, p_act, period_days, basis="inferred"),
+           make_callout("sedentary", r_sed, p_sed, period_days, basis="inferred")]
+    return [c for c in out if c is not None]
+
+
+def _samples_from_col(wide, name) -> list:
+    col = wide[name].dropna()
+    out = []
+    for ts, v in col.items():
+        out.append((ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts, v))
+    return out
+
+
+def _charging_samples(repo, tsdb, pid: str, start: datetime, end: datetime) -> list:
+    """Raw on/off samples from a bound charging sensor (entity/name mentions
+    'charg'), or [] when none is bound."""
+    try:
+        binds = [b for b in repo.bindings()
+                 if b.enabled and b.person_id in (None, pid)
+                 and "charg" in f"{b.entity_id} {b.name}".lower()]
+    except Exception:
+        binds = []
+    if not binds or tsdb is None:
+        return []
+    try:
+        wide = tsdb.read_raw(binds, start, end, freq="30m")
+    except Exception:
+        return []
+    if wide is None or getattr(wide, "empty", True):
+        return []
+    for b in binds:
+        if b.name in wide.columns:
+            return _samples_from_col(wide, b.name)
+    return []
+
+
+def read_body(repo, tsdb, pid: str, start: datetime, end: datetime, *,
+              tz: str = "UTC", activity_rows: list[dict] | None = None) -> BodySummary | None:
+    """Read the person's cumulative counters (Role.STEPS) + charging sensor and
+    aggregate. The display summary covers [start, end]; the active/sedentary TREND
+    always uses ≥14d so it's independent of the view range. None when nothing bound."""
+    from ..schemas import Role
+    try:
+        binds = [b for b in repo.bindings()
+                 if b.role == Role.STEPS and b.enabled and b.person_id in (None, pid)]
+    except Exception:
+        binds = []
+    if not binds or tsdb is None:
+        return None
+    lookback_start = min(start, end - timedelta(days=14))
+    try:
+        wide = tsdb.read_raw(binds, lookback_start, end, freq="30m")
+    except Exception:
+        return None
+    if wide is None or getattr(wide, "empty", True):
+        return None
+    counters_full = {b.name: _samples_from_col(wide, b.name)
+                     for b in binds if b.name in wide.columns}
+    counters_full = {k: v for k, v in counters_full.items() if v}
+    if not counters_full:
+        return None
+    charging_full = _charging_samples(repo, tsdb, pid, lookback_start, end)
+
+    def _after(samples, cut):
+        return [(ts, v) for ts, v in samples
+                if (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)) >= cut]
+
+    cstart = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
+    counters_disp = {k: _after(v, cstart) for k, v in counters_full.items()}
+    counters_disp = {k: v for k, v in counters_disp.items() if v}
+    charging_disp = _after(charging_full, cstart)
+
+    summary = summarize_body(pid, counters_disp, activity_rows or [], tz=tz,
+                             now=end, range_start=start, charging=charging_disp)
+    summary.trends = active_sedentary_trends(counters_full, charging_full, tz=tz, now=end)
+    return summary

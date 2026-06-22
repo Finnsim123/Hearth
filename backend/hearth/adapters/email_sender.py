@@ -55,14 +55,25 @@ class EmailSender:
         if not conf:
             log.warning("email send skipped — SMTP not configured")
             return False
-        recipients = [to] if isinstance(to, str) else [r for r in to if r]
+        from ..security import valid_email
+        raw = [to] if isinstance(to, str) else list(to or [])
+        recipients = [r.strip() for r in raw if r and valid_email(r)]
+        dropped = len(raw) - len(recipients)
+        if dropped:
+            log.warning("email: dropped %d invalid recipient address(es)", dropped)
         if not recipients:
+            log.warning("email send skipped — no valid recipients")
             return False
 
+        # strip any CR/LF/control chars from header-bound values: an injected
+        # newline in From/Subject is the classic header-injection vector.
+        def _clean(v: str) -> str:
+            return "".join(c for c in str(v) if c not in "\r\n\t\0")
+
         msg = EmailMessage()
-        msg["From"] = formataddr((conf["from_name"], conf["from_addr"]))
+        msg["From"] = formataddr((_clean(conf["from_name"]), _clean(conf["from_addr"])))
         msg["To"] = ", ".join(recipients)
-        msg["Subject"] = subject
+        msg["Subject"] = _clean(subject)
         msg.set_content(text or "This message needs an HTML-capable mail client.")
         msg.add_alternative(html, subtype="html")
 

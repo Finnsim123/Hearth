@@ -12,7 +12,8 @@ Everything is timezone-aware and quantised to `window_min`. No I/O here.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from statistics import mean, median, pstdev
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
@@ -184,6 +185,34 @@ class TrendCallout(BaseModel):
     basis: str                     # fact | mixed | inferred (of the recent period)
 
 
+def make_callout(activity: str, recent_total: float, prior_total: float,
+                 period_days: int, *, basis: str = "inferred",
+                 min_delta_min: float = 20.0, min_pct: float = 0.25) -> TrendCallout | None:
+    """Turn a recent-vs-prior pair of TOTAL minutes into a notable callout, or None.
+    Notable = a clean start/stop with a sizeable side, or a move clearing both an
+    absolute (min_delta_min/day) and relative (min_pct) floor. Shared by activity
+    trends and body (active/sedentary) trends."""
+    r_avg = recent_total / period_days
+    p_avg = prior_total / period_days
+    delta = r_avg - p_avg
+    if p_avg == 0 and r_avg == 0:
+        return None
+    if p_avg == 0:
+        direction, pct = "new", 1.0
+    elif r_avg == 0:
+        direction, pct = "stopped", -1.0
+    else:
+        direction = "up" if delta > 0 else "down"
+        pct = delta / p_avg
+    sizeable = max(r_avg, p_avg) >= min_delta_min
+    moved = abs(delta) >= min_delta_min and abs(pct) >= min_pct
+    if not ((direction in ("new", "stopped") and sizeable) or moved):
+        return None
+    return TrendCallout(activity=activity, recent_avg_min=round(r_avg, 1),
+                        prior_avg_min=round(p_avg, 1), delta_min=round(delta, 1),
+                        pct=round(pct, 4), direction=direction, basis=basis)
+
+
 def trends(person_id: str, rows: list[dict], *, tz: str = "UTC",
            now: datetime | None = None, window_min: int = 30, period_days: int = 7,
            min_delta_min: float = 20.0, min_pct: float = 0.25) -> list[TrendCallout]:
@@ -216,31 +245,14 @@ def trends(person_id: str, rows: list[dict], *, tz: str = "UTC",
 
     out: list[TrendCallout] = []
     for act in set(recent) | set(prior):
-        r_avg = recent.get(act, 0.0) / period_days
-        p_avg = prior.get(act, 0.0) / period_days
-        delta = r_avg - p_avg
-        if p_avg == 0 and r_avg == 0:
-            continue
-        if p_avg == 0:
-            direction, pct = "new", 1.0
-        elif r_avg == 0:
-            direction, pct = "stopped", -1.0
-        else:
-            direction = "up" if delta > 0 else "down"
-            pct = delta / p_avg
-        # notability: a clean start/stop counts if the active side is sizeable;
-        # an up/down move must clear both an absolute and a relative floor.
-        sizeable = max(r_avg, p_avg) >= min_delta_min
-        moved = abs(delta) >= min_delta_min and abs(pct) >= min_pct
-        if not ((direction in ("new", "stopped") and sizeable) or moved):
-            continue
-        ftot = fact_recent.get(act, 0.0)
         rtot = recent.get(act, 0.0)
+        ftot = fact_recent.get(act, 0.0)
         frac = (ftot / rtot) if rtot else 0.0
         basis = "fact" if frac >= 0.8 else "inferred" if frac <= 0.05 else "mixed"
-        out.append(TrendCallout(
-            activity=act, recent_avg_min=round(r_avg, 1), prior_avg_min=round(p_avg, 1),
-            delta_min=round(delta, 1), pct=round(pct, 4), direction=direction, basis=basis))
+        c = make_callout(act, rtot, prior.get(act, 0.0), period_days, basis=basis,
+                         min_delta_min=min_delta_min, min_pct=min_pct)
+        if c is not None:
+            out.append(c)
     out.sort(key=lambda t: -abs(t.delta_min))
     return out[:6]
 

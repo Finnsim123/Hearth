@@ -10,9 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
 
-from ..domain.behaviour.body import summarize_body
+from ..domain.behaviour.body import read_body
 from ..domain.behaviour.summary import summarize, trends
-from ..domain.schemas import Role
 
 router = APIRouter(prefix="/api/behaviour", tags=["behaviour"])
 
@@ -59,66 +58,29 @@ def behaviour(person: str | None = None, days: int = 7) -> dict:
     disp_rows = [r for r in rows if _after(r, disp_cut)]
     s = summarize(pid, disp_rows, tz=tz)
     t = trends(pid, rows, tz=tz)
-    body = _body(pid, disp_rows, end - timedelta(days=days), end, tz)
+    try:
+        body = read_body(_repo, _tsdb, pid, end - timedelta(days=days), end,
+                         tz=tz, activity_rows=disp_rows)
+    except Exception:
+        body = None
     return {"summary": s.model_dump(mode="json"),
             "trends": [c.model_dump(mode="json") for c in t],
             "body": body.model_dump(mode="json") if body else None,
             "persons": plist, "activities": acts}
 
 
-def _body(pid: str, disp_rows: list, start, end, tz: str):
-    """Read the person's cumulative counter sensors (Role.STEPS) and aggregate
-    them into the body-activity band. Returns None when nothing is bound."""
-    try:
-        binds = [b for b in _repo.bindings()
-                 if b.role == Role.STEPS and b.enabled
-                 and b.person_id in (None, pid)]
-    except Exception:
-        binds = []
-    if not binds or _tsdb is None:
-        return None
-    try:
-        wide = _tsdb.read_raw(binds, start, end, freq="30m")
-    except Exception:
-        return None
-    if wide is None or getattr(wide, "empty", True):
-        return None
-    counters: dict[str, list] = {}
-    for b in binds:
-        if b.name not in wide.columns:
-            continue
-        col = wide[b.name].dropna()
-        counters[b.name] = [(ts.to_pydatetime(), float(v)) for ts, v in col.items()]
-    if not any(counters.values()):
-        return None
-    charging = _charging_samples(pid, start, end)
-    return summarize_body(pid, counters, disp_rows, tz=tz,
-                          now=end, range_start=start, charging=charging)
+@router.get("/digest")
+def get_digest() -> dict:
+    en = bool(_repo.get_setting("behaviour.digest.enabled")) if _repo else False
+    return {"enabled": en}
 
 
-def _charging_samples(pid: str, start, end) -> list:
-    """Read a bound phone-charging sensor (binary charging state — any binding
-    whose entity/name mentions 'charg'). Raw on/off samples; the aggregator
-    interprets truthiness. Returns [] when none is bound."""
-    try:
-        binds = [b for b in _repo.bindings()
-                 if b.enabled and b.person_id in (None, pid)
-                 and "charg" in f"{b.entity_id} {b.name}".lower()]
-    except Exception:
-        binds = []
-    if not binds or _tsdb is None:
-        return []
-    try:
-        wide = _tsdb.read_raw(binds, start, end, freq="30m")
-    except Exception:
-        return []
-    if wide is None or getattr(wide, "empty", True):
-        return []
-    for b in binds:
-        if b.name in wide.columns:
-            col = wide[b.name].dropna()
-            return [(ts.to_pydatetime(), v) for ts, v in col.items()]
-    return []
+@router.post("/digest")
+def set_digest(body: dict) -> dict:
+    enabled = bool(body.get("enabled"))
+    if _repo is not None:
+        _repo.set_setting("behaviour.digest.enabled", enabled)
+    return {"enabled": enabled}
 
 
 def _after(row: dict, cut_ts: float) -> bool:
