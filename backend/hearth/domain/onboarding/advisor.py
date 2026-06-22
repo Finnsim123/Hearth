@@ -13,14 +13,18 @@ from ..ports import LlmAdvisor
 from ..schemas import Activity, Binding, Role, Rule
 
 _NAME_HINTS: list[tuple[str, Role]] = [
-    (r"bed|mattress|sleep_sensor", Role.BED),
-    (r"presence|occupancy|motion|mmwave|pir", Role.PRESENCE),
-    (r"power|vermogen|wattage|consumption|_watts?", Role.POWER),
-    (r"focus|do_not_disturb|dnd", Role.FOCUS),
-    (r"steps", Role.STEPS),
-    (r"alarm|wecker|wake", Role.ALARM_TIME),
-    (r"door|window|opening|contact", Role.DOOR),
-    (r"co2|pm2|pm10|voc|humidity|temperature|lux|illuminance", Role.ENV),
+    (r"bed|mattress|sleep_sensor|slaap|matras", Role.BED),
+    (r"presence|occupancy|motion|mmwave|pir|radar|beweging|aanwezig|"
+     r"human_present|ld2410|fp2", Role.PRESENCE),
+    (r"power|vermogen|wattage|consumption|verbruik|_watts?|kwh|energie|"
+     r"\benergy\b|stopcontact|smartplug|stekker", Role.POWER),
+    (r"focus|do_not_disturb|dnd|niet_storen", Role.FOCUS),
+    (r"steps|stappen|schritte", Role.STEPS),
+    (r"alarm|wecker|wekker|wake_?up|alarmtijd", Role.ALARM_TIME),
+    (r"door|window|opening|contact|deur|raam|magnet|reed", Role.DOOR),
+    (r"co2|pm1|pm2|pm10|voc|tvoc|nox|no2|aqi|air_?quality|luchtkwaliteit|"
+     r"humidity|vochtigheid|temperature|temperatuur|lux|illuminance|"
+     r"light_?level|lichtsterkte|brightness", Role.ENV),
     # household-occupancy proxies from the network: a router's connected-device
     # count rises when people are home (CUSTOM = numeric mean/max/delta, the
     # model decides the threshold). Generic per-device trackers stay excluded.
@@ -31,15 +35,24 @@ _NAME_HINTS: list[tuple[str, Role]] = [
     # threshold learned), NEVER the PERSON role — see _NOT_A_TRACKER below.
     (r"distance|proximity|afstand|nearest", Role.CUSTOM),
 ]
-_UNIT_ROLES = {"W": Role.POWER, "kW": Role.POWER, "ppm": Role.ENV, "µg/m³": Role.ENV,
+_UNIT_ROLES = {"W": Role.POWER, "kW": Role.POWER, "mW": Role.POWER, "Wh": Role.POWER,
+               "kWh": Role.POWER, "A": Role.POWER, "mA": Role.POWER,
+               "ppm": Role.ENV, "ppb": Role.ENV, "µg/m³": Role.ENV, "g/m³": Role.ENV,
                "°C": Role.ENV, "°F": Role.ENV, "%": Role.ENV, "lx": Role.ENV,
-               "steps": Role.STEPS, "V": Role.CUSTOM}
+               "klx": Role.ENV, "dB": Role.ENV, "steps": Role.STEPS, "V": Role.CUSTOM}
 _DEVICE_CLASS_ROLES = {"occupancy": Role.PRESENCE, "motion": Role.PRESENCE,
-                       "presence": Role.PRESENCE, "door": Role.DOOR, "window": Role.DOOR,
-                       "opening": Role.DOOR, "power": Role.POWER, "energy": Role.POWER,
-                       "battery": Role.BATTERY, "temperature": Role.ENV,
-                       "humidity": Role.ENV, "carbon_dioxide": Role.ENV,
-                       "illuminance": Role.ENV, "pm25": Role.ENV, "timestamp": Role.ALARM_TIME}
+                       "presence": Role.PRESENCE, "moving": Role.PRESENCE,
+                       "vibration": Role.PRESENCE, "door": Role.DOOR, "window": Role.DOOR,
+                       "garage_door": Role.DOOR, "opening": Role.DOOR,
+                       "power": Role.POWER, "energy": Role.POWER, "current": Role.POWER,
+                       "apparent_power": Role.POWER, "reactive_power": Role.POWER,
+                       "outlet": Role.POWER, "battery": Role.BATTERY,
+                       "temperature": Role.ENV, "humidity": Role.ENV,
+                       "carbon_dioxide": Role.ENV, "carbon_monoxide": Role.ENV,
+                       "illuminance": Role.ENV, "pm1": Role.ENV, "pm10": Role.ENV,
+                       "pm25": Role.ENV, "nitrogen_dioxide": Role.ENV, "ozone": Role.ENV,
+                       "volatile_organic_compounds": Role.ENV, "aqi": Role.ENV,
+                       "timestamp": Role.ALARM_TIME}
 # device_tracker is deliberately ABSENT: homes have dozens of network
 # trackers (laptops, cameras, IoT) — only person.* entities mean a human.
 _DOMAIN_ROLES = {"light": Role.LIGHT, "media_player": Role.MEDIA, "person": Role.PERSON,
