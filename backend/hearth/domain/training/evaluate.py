@@ -41,11 +41,16 @@ def reliability_metrics(probs: pd.DataFrame, y_true: pd.Series, bins: int = 10) 
     edges = np.linspace(0.0, 1.0, bins + 1)
     n = len(conf)
     ece = 0.0
+    reliability = []      # per-bin points for the reliability diagram (UX2)
     for i in range(bins):
         m = (conf > edges[i]) & (conf <= edges[i + 1])
         if m.sum():
             ece += (m.sum() / n) * abs(acc[m].mean() - conf[m].mean())
-    return {"brier": round(brier, 4), "ece": round(float(ece), 4), "n_check": int(n)}
+            reliability.append({"conf": round(float(conf[m].mean()), 4),
+                                "acc": round(float(acc[m].mean()), 4),
+                                "n": int(m.sum())})
+    return {"brier": round(brier, 4), "ece": round(float(ece), 4),
+            "n_check": int(n), "reliability": reliability}
 
 
 def population_stability_index(expected: pd.Series, actual: pd.Series, bins: int = 10) -> float:

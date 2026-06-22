@@ -26,6 +26,10 @@ type Metrics = {
   evidence_profile?: Record<string, number>;
   hyperparams?: Record<string, unknown>;
   validation_status?: "validated" | "provisional";
+  calibration?: {
+    brier: number; ece: number; n_check: number;
+    reliability?: { conf: number; acc: number; n: number }[];
+  };
 };
 
 const GOLD_MIN = 30;  // matches MIN_CONFIRMED_FOR_VALIDATED — below this the
@@ -181,6 +185,53 @@ function EvidenceBar({ profile }: { profile: Record<string, number> }) {
   );
 }
 
+function Calibration({ cal }: { cal: NonNullable<Metrics["calibration"]> }) {
+  // Reliability diagram (UX2): predicted confidence (x) vs observed accuracy (y).
+  // The diagonal is perfect calibration; points below = overconfident, above =
+  // underconfident. ECE/Brier measured out-of-sample (audit F4).
+  const S = 150, pad = 22;
+  const pts = cal.reliability ?? [];
+  const x = (v: number) => pad + v * (S - 2 * pad);
+  const y = (v: number) => S - pad - v * (S - 2 * pad);
+  const example = pts.find((p) => p.conf >= 0.55) ?? pts[pts.length - 1];
+  return (
+    <div>
+      <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>Is its confidence honest?</h4>
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center" }}>
+        <svg viewBox={`0 0 ${S} ${S}`} width={S} height={S} aria-label="reliability diagram"
+             style={{ border: "1px solid var(--border)", borderRadius: 8 }}>
+          <line x1={x(0)} y1={y(0)} x2={x(1)} y2={y(1)} stroke="var(--text-dim)"
+                strokeWidth="1" strokeDasharray="3 3" />
+          <polyline points={pts.map((p) => `${x(p.conf).toFixed(1)},${y(p.acc).toFixed(1)}`).join(" ")}
+                    fill="none" stroke="var(--accent)" strokeWidth="2" />
+          {pts.map((p, i) => (
+            <circle key={i} cx={x(p.conf)} cy={y(p.acc)} r={2.5 + Math.min(3, p.n / 20)}
+                    fill="var(--accent)" opacity={0.8}><title>{`says ${(p.conf * 100).toFixed(0)}% · right ${(p.acc * 100).toFixed(0)}% (n=${p.n})`}</title></circle>
+          ))}
+          <text x={S / 2} y={S - 4} fontSize="8" textAnchor="middle" fill="var(--text-dim)">says →</text>
+          <text x={6} y={S / 2} fontSize="8" textAnchor="middle" fill="var(--text-dim)"
+                transform={`rotate(-90 6 ${S / 2})`}>is right →</text>
+        </svg>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            <MetricChip label="ECE" value={cal.ece.toFixed(3)}
+              hint="Expected Calibration Error — mean gap between stated confidence and actual accuracy. 0 = perfect." />
+            <MetricChip label="Brier" value={cal.brier.toFixed(3)}
+              hint="Brier score — overall probability error (lower is sharper & truer)." />
+          </div>
+          {example && (
+            <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)", maxWidth: 260 }}>
+              When Hearth says <strong>{(example.conf * 100).toFixed(0)}%</strong> it's right about{" "}
+              <strong>{(example.acc * 100).toFixed(0)}%</strong> of the time. Measured on a held-out
+              slice it never calibrated on, so it's a fair check.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Importances({ imp }: { imp: Record<string, number> }) {
   const entries = Object.entries(imp);
   const max = Math.max(...entries.map(([, v]) => v), 0.0001);
@@ -279,6 +330,9 @@ function ModelCard({ m, onAction }: { m: Model; onAction: () => void }) {
           {mt.confusion && <Confusion c={mt.confusion} />}
           {mt.evidence_profile && Object.keys(mt.evidence_profile).length > 0 && (
             <EvidenceBar profile={mt.evidence_profile} />
+          )}
+          {mt.calibration && (mt.calibration.reliability?.length ?? 0) > 0 && (
+            <Calibration cal={mt.calibration} />
           )}
           {mt.feature_importances ? (
             <div>
