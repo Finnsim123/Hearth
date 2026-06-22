@@ -64,6 +64,20 @@ def set_mode(body: dict) -> dict:
     return {"state": s.name.lower()}
 
 
+@router.get("/history")
+def get_history() -> dict:
+    """Rolling vitals history the governor tick records (last ~180 samples) — for
+    the System page's sparkline. Each point: {t, cpu, temp, mem, watts, h, state}."""
+    hist = []
+    if _repo is not None:
+        try:
+            h = _repo.get_setting("system.vitals.history")
+            hist = h if isinstance(h, list) else []
+        except Exception:
+            hist = []
+    return {"history": hist}
+
+
 @router.get("/coverage")
 def get_coverage() -> dict:
     """Blind-spot advisor — ranked 'add a sensor' recommendations from the promoted

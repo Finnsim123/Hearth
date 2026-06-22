@@ -1228,7 +1228,7 @@ function AiPrompts() {
 }
 
 type SectionKey =
-  | "household" | "model" | "integrations" | "prompts" | "logs" | "account" | "general" | "methodology";
+  | "household" | "model" | "integrations" | "prompts" | "logs" | "account" | "general" | "methodology" | "system";
 
 const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }[] = [
   { key: "household", icon: "household", title: "Household",
@@ -1243,6 +1243,8 @@ const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }
     desc: "Recent backend activity, live." },
   { key: "account", icon: "user", title: "Account",
     desc: "Your password, two-factor authentication and sign-in." },
+  { key: "system", icon: "monitor", title: "System",
+    desc: "Live load — CPU, temperature, memory, power, and what Hearth pauses under pressure." },
   { key: "general", icon: "settings", title: "General",
     desc: "Appearance, system info, updates and the danger zone." },
   { key: "methodology", icon: "info", title: "How it works",
@@ -1423,6 +1425,97 @@ function ConnectionsSection() {
   );
 }
 
+type Vital = { t: string; cpu: number | null; temp: number | null;
+               mem: number | null; watts: number | null; h: number | null; state: string };
+
+const STATE_COPY: Record<string, { label: string; color: string; note: string }> = {
+  normal: { label: "Normal", color: "var(--ok, #34D399)", note: "Running comfortably — everything's on." },
+  elevated: { label: "Elevated", color: "var(--accent)", note: "A bit busy — optional jobs (discovery, tuning) may wait. Predictions stay live." },
+  high: { label: "High", color: "#fbbf24", note: "Under load — training is paused and parallelism reduced. Predictions stay live." },
+  critical: { label: "Critical", color: "var(--danger)", note: "Safe mode — only live predictions run until load eases." },
+};
+
+function VitalSpark({ hist }: { hist: Vital[] }) {
+  const W = 320, H = 44, pad = 3;
+  const pts = hist.map((v) => v.h).filter((x): x is number => x != null);
+  if (pts.length < 2) return null;
+  const x = (i: number) => pad + (i / (pts.length - 1)) * (W - 2 * pad);
+  const y = (v: number) => H - pad - Math.min(1, v) * (H - 2 * pad);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" style={{ maxWidth: W }}>
+      {[0.7, 0.85].map((g) => (
+        <line key={g} x1={pad} x2={W - pad} y1={y(g)} y2={y(g)} stroke="var(--border)"
+              strokeWidth="0.5" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
+      ))}
+      <polyline points={pts.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")}
+                fill="none" stroke="var(--accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+function SystemVitals() {
+  const [data, setData] = useState<{ latest: Vital | null; history: Vital[];
+                                     state: string; monitored: boolean } | null>(null);
+  const load = () => fetch("/api/system/vitals").then(j).then(setData).catch(() => setData(null));
+  useEffect(() => { load(); const id = setInterval(load, 10000); return () => clearInterval(id); }, []);
+  const v = data?.latest;
+  const st = STATE_COPY[data?.state ?? "normal"] ?? STATE_COPY.normal;
+  const kpi = (label: string, val: string) => (
+    <div style={{ padding: "10px 14px", border: "1px solid var(--border)", borderRadius: 10,
+                  textAlign: "center", minWidth: 86 }}>
+      <div style={{ fontSize: 18, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{val}</div>
+      <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{label}</div>
+    </div>
+  );
+  const pctv = (x: number | null | undefined) => x == null ? "—" : `${Math.round(x)}%`;
+  return (
+    <Card title="System load"
+          sub="What Hearth is asking of the box right now. It throttles itself before things get hot or slow — predictions never stop.">
+      {data && !data.monitored && (
+        <p style={{ margin: 0, fontSize: 13, color: "var(--text-dim)" }}>
+          No readings yet — the monitor samples every minute, so this fills in shortly after start-up.
+        </p>
+      )}
+      {v && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, padding: "3px 10px", borderRadius: 99, fontWeight: 600,
+                           background: `color-mix(in srgb, ${st.color} 16%, transparent)`, color: st.color }}>
+              {st.label}
+            </span>
+            <span style={{ fontSize: 13, color: "var(--text-dim)" }}>{st.note}</span>
+          </div>
+          {v.h != null && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12,
+                            color: "var(--text-dim)", marginBottom: 4 }}>
+                <span>load index</span><span>{Math.round((v.h ?? 0) * 100)}%</span>
+              </div>
+              <div style={{ height: 10, background: "var(--surface-2)", borderRadius: 5 }}>
+                <div style={{ height: "100%", width: `${Math.min(100, (v.h ?? 0) * 100)}%`,
+                              background: st.color, borderRadius: 5 }} />
+              </div>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {kpi("CPU", pctv(v.cpu))}
+            {kpi("Temp", v.temp == null ? "—" : `${Math.round(v.temp)}°C`)}
+            {kpi("Memory", pctv(v.mem))}
+            {kpi("Power", v.watts == null ? "—" : `${Math.round(v.watts)} W`)}
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 2 }}>load over recent samples</div>
+            <VitalSpark hist={data!.history} />
+          </div>
+          <p style={{ margin: 0, fontSize: 11.5, color: "var(--text-dim)" }}>
+            “—” means no sensor for that metric (temperature and power need a thermal sensor or a smart-plug reading).
+          </p>
+        </>
+      )}
+    </Card>
+  );
+}
+
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
     case "household": return (<><Household /><NewsletterDesign /><AdvancedAsking /></>);
@@ -1431,6 +1524,7 @@ function SectionBody({ section }: { section: SectionKey }) {
     case "prompts": return <AiPrompts />;
     case "logs": return <Logs />;
     case "account": return (<><Account /><TwoFactor /></>);
+    case "system": return <SystemVitals />;
     case "general": return (<><Appearance /><System /><DangerZone /></>);
     case "methodology": return <Methodology />;
   }
