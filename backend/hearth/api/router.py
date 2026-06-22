@@ -107,8 +107,13 @@ def build_api_router(deps: dict) -> APIRouter:
     def set_connection(kind: str, body: dict) -> dict:
         if kind not in ("ha", "influx", "mqtt", "llm"):
             raise HTTPException(400, "unknown connection kind")
-        repo.set_connection(kind, body.get("url", ""), body.get("token", ""),
-                            body.get("options"))
+        url = body.get("url", "")
+        if url and kind in ("ha", "influx", "llm"):
+            from ..urlguard import url_block_reason
+            reason = url_block_reason(url)
+            if reason:
+                raise HTTPException(400, reason)
+        repo.set_connection(kind, url, body.get("token", ""), body.get("options"))
         return {"ok": True, "note": "restart-free reconnect lands in Phase 2; "
                                     "restart the container to apply for now"}
 
@@ -692,16 +697,24 @@ def build_api_router(deps: dict) -> APIRouter:
         # warm start always runs now (external bucket or HA recorder)
         return {"ok": True, "restarting": True, "fasttrack": True}
 
+    def _guard_url(url: str) -> None:
+        from ..urlguard import url_block_reason
+        reason = url_block_reason(url)
+        if reason:
+            raise HTTPException(400, reason)
+
     @api.post("/ha/test")
     async def ha_test(body: dict) -> dict:
         """Staged wizard check; body {url, token}. Read-only, saves nothing."""
         from ..adapters.ha_probe import probe
+        _guard_url(body.get("url", ""))
         return await probe(body.get("url", ""), body.get("token", ""))
 
     @api.post("/ha/inventory")
     async def ha_inventory(body: dict) -> dict:
         """Pre-save inventory scan: full metadata + heuristic suggestions count."""
         from ..adapters.ha_probe import rest_inventory
+        _guard_url(body.get("url", ""))
         inventory = await rest_inventory(body.get("url", ""), body.get("token", ""))
         suggested = heuristic_bindings(inventory)
         return {"count": len(inventory),
@@ -717,6 +730,7 @@ def build_api_router(deps: dict) -> APIRouter:
         if body.get("mode") == "bundled":
             from ..config import settings as cfg
             return inspect_influx(cfg.influx_url, cfg.influx_org, cfg.influx_token)
+        _guard_url(body.get("url", ""))
         return inspect_influx(body.get("url", ""), body.get("org", ""),
                               body.get("token", ""))
 
