@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
 
-from ..domain.behaviour.summary import summarize
+from ..domain.behaviour.summary import summarize, trends
 
 router = APIRouter(prefix="/api/behaviour", tags=["behaviour"])
 
@@ -45,10 +45,31 @@ def behaviour(person: str | None = None, days: int = 7) -> dict:
     days = max(1, min(int(days or 7), 92))
     tz = (_repo.get_setting("timezone", "UTC") or "UTC") if _repo else "UTC"
     end = datetime.now(timezone.utc)
-    start = end - timedelta(days=days)
+    # Trends always compare the last 7d vs the prior 7d, independent of the view
+    # toggle, so fetch at least 14d and scope the display aggregation to `days`.
+    lookback = max(days, 14)
+    start = end - timedelta(days=lookback)
     try:
         rows = _tsdb.read_predictions(pid, start, end)
     except Exception:
         rows = []
-    s = summarize(pid, rows, tz=tz)
-    return {"summary": s.model_dump(mode="json"), "persons": plist, "activities": acts}
+    disp_cut = (end - timedelta(days=days)).timestamp()
+    disp_rows = [r for r in rows if _after(r, disp_cut)]
+    s = summarize(pid, disp_rows, tz=tz)
+    t = trends(pid, rows, tz=tz)
+    return {"summary": s.model_dump(mode="json"),
+            "trends": [c.model_dump(mode="json") for c in t],
+            "persons": plist, "activities": acts}
+
+
+def _after(row: dict, cut_ts: float) -> bool:
+    ts = row.get("time")
+    if not ts:
+        return False
+    try:
+        d = datetime.fromisoformat(ts)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d.timestamp() >= cut_ts
+    except Exception:
+        return False

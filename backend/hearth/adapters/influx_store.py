@@ -99,14 +99,15 @@ def inspect_influx(url: str, org: str, token: str, max_buckets: int = 25) -> dic
                 continue
             info = {"name": b.name, "measurements": None,
                     "points_24h": None, "earliest": None}
+            name = _flux_tag(b.name)   # bucket names come from the remote Influx — escape
             try:
                 flux = (f'import "influxdata/influxdb/schema" '
-                        f'schema.measurements(bucket: "{b.name}")')
+                        f'schema.measurements(bucket: "{name}")')
                 info["measurements"] = sum(len(t.records) for t in q.query(flux))
             except Exception:
                 pass
             try:
-                flux = (f'from(bucket: "{b.name}") |> range(start: -24h) '
+                flux = (f'from(bucket: "{name}") |> range(start: -24h) '
                         f'|> group() |> count()')
                 for t in q.query(flux):
                     for rec in t.records:
@@ -114,7 +115,7 @@ def inspect_influx(url: str, org: str, token: str, max_buckets: int = 25) -> dic
             except Exception:
                 pass
             try:
-                flux = (f'from(bucket: "{b.name}") |> range(start: -2y) '
+                flux = (f'from(bucket: "{name}") |> range(start: -2y) '
                         f'|> group() |> first() |> keep(columns: ["_time"])')
                 for t in q.query(flux):
                     for rec in t.records:

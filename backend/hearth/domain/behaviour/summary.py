@@ -37,6 +37,19 @@ class Segment(BaseModel):
     basis: str                     # fact | model | rule | unknown
 
 
+class RhythmCell(BaseModel):
+    dow: int                       # 0=Mon .. 6=Sun (local)
+    hour: int                      # 0..23 (local)
+    totals: dict[str, float]       # activity -> minutes observed in this cell
+
+
+class Transition(BaseModel):
+    src: str                       # activity you were in
+    dst: str                       # activity you moved to
+    count: int                     # times this change was observed
+    prob: float                    # count / all changes leaving `src` (0..1)
+
+
 class BehaviourSummary(BaseModel):
     person_id: str
     start: str
@@ -53,6 +66,8 @@ class BehaviourSummary(BaseModel):
     today: list[Segment]           # merged segments for the current local day
     sleep_per_day_min: dict[str, float]
     away_per_day_min: dict[str, float]
+    rhythm: list[RhythmCell]       # 24h x day-of-week grid (when things happen)
+    sequences: list[Transition]    # observed "what follows what" (self-loops excluded)
 
 
 def _basis(model_version: str | None) -> str:
@@ -88,6 +103,9 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
     away_day: dict[str, float] = {}
     today_local = now.date().isoformat()
     today_rows: list[tuple[datetime, str, str]] = []
+    rhythm: dict[tuple[int, int], dict[str, float]] = {}
+    trans: dict[tuple[str, str], int] = {}
+    prev: tuple[datetime, str] | None = None
 
     parsed = sorted(((_parse(r["time"]), r) for r in rows if r.get("time")),
                     key=lambda t: t[0])
@@ -96,6 +114,17 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
         date = local.date().isoformat()
         state = _state(r)
         basis = _basis(r.get("model_version"))
+        # rhythm grid + sequences (classified windows only)
+        if state != UNKNOWN:
+            cell = rhythm.setdefault((local.weekday(), local.hour), {})
+            cell[state] = cell.get(state, 0.0) + w
+            if prev is not None:
+                pts, pstate = prev
+                if (ts - pts).total_seconds() == w * 60 and pstate != state:
+                    trans[(pstate, state)] = trans.get((pstate, state), 0) + 1
+            prev = (ts, state)
+        else:
+            prev = None        # a gap/unknown breaks the consecutive chain
         day = days.get(date) or DaySummary(date=date, totals={}, unknown_min=0.0,
                                            fact_min=0.0, inferred_min=0.0)
         if state == UNKNOWN:
@@ -125,13 +154,95 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
     start = per_day[0].date if per_day else today_local
     end = per_day[-1].date if per_day else today_local
 
+    rhythm_cells = [RhythmCell(dow=d, hour=h, totals=t)
+                    for (d, h), t in sorted(rhythm.items())]
+    src_tot: dict[str, int] = {}
+    for (a, _b), c in trans.items():
+        src_tot[a] = src_tot.get(a, 0) + c
+    sequences = sorted(
+        (Transition(src=a, dst=b, count=c, prob=round(c / src_tot[a], 4))
+         for (a, b), c in trans.items()),
+        key=lambda x: (-x.count, x.src, x.dst))[:24]
+
     return BehaviourSummary(
         person_id=person_id, start=start, end=end, window_min=window_min,
         totals=totals, total_min=total_min, classified_min=classified_min,
         coverage=round(coverage, 4), fact_min=fact_min, inferred_min=inferred_min,
         known_fraction=round(known_fraction, 4), per_day=per_day,
         today=_segments(today_rows, window_min),
-        sleep_per_day_min=sleep_day, away_per_day_min=away_day)
+        sleep_per_day_min=sleep_day, away_per_day_min=away_day,
+        rhythm=rhythm_cells, sequences=sequences)
+
+
+class TrendCallout(BaseModel):
+    activity: str
+    recent_avg_min: float          # avg minutes/day over the recent period
+    prior_avg_min: float           # avg minutes/day over the period before that
+    delta_min: float               # recent - prior (minutes/day)
+    pct: float                     # delta / prior (0..; 1.0 when prior was 0)
+    direction: str                 # up | down | new | stopped
+    basis: str                     # fact | mixed | inferred (of the recent period)
+
+
+def trends(person_id: str, rows: list[dict], *, tz: str = "UTC",
+           now: datetime | None = None, window_min: int = 30, period_days: int = 7,
+           min_delta_min: float = 20.0, min_pct: float = 0.25) -> list[TrendCallout]:
+    """Week-over-week "what changed": average minutes/day per activity in the last
+    `period_days` vs the `period_days` before that. Only NOTABLE changes are
+    returned (|delta| >= min_delta_min AND |pct| >= min_pct, or a clean
+    start/stop), so it's signal, not noise. Pure; needs ~2*period_days of rows."""
+    zone = ZoneInfo(tz) if tz else timezone.utc
+    now = (now or datetime.now(timezone.utc)).astimezone(zone)
+    w = float(window_min)
+    recent_cut = now.timestamp() - period_days * 86400
+    prior_cut = now.timestamp() - 2 * period_days * 86400
+
+    recent: dict[str, float] = {}
+    prior: dict[str, float] = {}
+    fact_recent: dict[str, float] = {}
+    for r in rows:
+        if not r.get("time"):
+            continue
+        state = _state(r)
+        if state == UNKNOWN:
+            continue
+        ts = _parse(r["time"]).timestamp()
+        if ts >= recent_cut:
+            recent[state] = recent.get(state, 0.0) + w
+            if _basis(r.get("model_version")) == "fact":
+                fact_recent[state] = fact_recent.get(state, 0.0) + w
+        elif ts >= prior_cut:
+            prior[state] = prior.get(state, 0.0) + w
+
+    out: list[TrendCallout] = []
+    for act in set(recent) | set(prior):
+        r_avg = recent.get(act, 0.0) / period_days
+        p_avg = prior.get(act, 0.0) / period_days
+        delta = r_avg - p_avg
+        if p_avg == 0 and r_avg == 0:
+            continue
+        if p_avg == 0:
+            direction, pct = "new", 1.0
+        elif r_avg == 0:
+            direction, pct = "stopped", -1.0
+        else:
+            direction = "up" if delta > 0 else "down"
+            pct = delta / p_avg
+        # notability: a clean start/stop counts if the active side is sizeable;
+        # an up/down move must clear both an absolute and a relative floor.
+        sizeable = max(r_avg, p_avg) >= min_delta_min
+        moved = abs(delta) >= min_delta_min and abs(pct) >= min_pct
+        if not ((direction in ("new", "stopped") and sizeable) or moved):
+            continue
+        ftot = fact_recent.get(act, 0.0)
+        rtot = recent.get(act, 0.0)
+        frac = (ftot / rtot) if rtot else 0.0
+        basis = "fact" if frac >= 0.8 else "inferred" if frac <= 0.05 else "mixed"
+        out.append(TrendCallout(
+            activity=act, recent_avg_min=round(r_avg, 1), prior_avg_min=round(p_avg, 1),
+            delta_min=round(delta, 1), pct=round(pct, 4), direction=direction, basis=basis))
+    out.sort(key=lambda t: -abs(t.delta_min))
+    return out[:6]
 
 
 def _segments(rows: list[tuple[datetime, str, str]], window_min: int) -> list[Segment]:
