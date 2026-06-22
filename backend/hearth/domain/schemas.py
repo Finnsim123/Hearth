@@ -103,6 +103,11 @@ class Binding(BaseModel):
     person_id: str | None = None  # personal sensors (bed side, phone focus)
     options: dict[str, Any] = Field(default_factory=dict)  # role-specific (thresholds…)
     enabled: bool = True
+    model_excluded: bool = False  # built into features + seen by DISCOVERY, but
+                                  # dropped before TRAINING. Lets the unsupervised
+                                  # clusterer see sensors the supervised selector
+                                  # pruned, so it can surface activities the current
+                                  # taxonomy doesn't cover (discovery⟂model split).
 
 
 class Activity(BaseModel):

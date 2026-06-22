@@ -148,6 +148,22 @@ def train_person(person_id: str, tsdb, repo, store,
     feats, excluded = drop_foreign_personal(
         feats, repo.bindings(), repo.persons(), person_id)
 
+    # discovery⟂model split: sensors flagged model_excluded stay in the feature
+    # store (so unsupervised DISCOVERY still sees them and can surface activities
+    # the taxonomy doesn't cover) but are dropped from the SUPERVISED training
+    # matrix here. No-op until the selection step sets the flag.
+    model_excluded = [b.name for b in repo.bindings()
+                      if getattr(b, "model_excluded", False)]
+    if model_excluded:
+        drop = [c for c in feats.columns
+                if any(c == n or c.startswith(f"{n}_") for n in model_excluded)]
+        if drop:
+            feats = feats.drop(columns=drop)
+            try:
+                excluded = set(excluded) | set(drop)
+            except Exception:
+                pass
+
     default_activity = repo.get_setting("default_activity", "home") or "home"
     bootstrap = bootstrap_labels(repo.rules(), feats, person_id, default_activity)
     events = tsdb.read_labels(person_id, start, end)

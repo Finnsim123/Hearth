@@ -30,6 +30,45 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="UTC")
     repo, tsdb, events = deps.get("repo"), deps.get("tsdb"), deps.get("events")
 
+    # ── governor: sense load, gate heavy jobs, alert on sustained pressure ──
+    from .domain.system import runtime as gov_runtime
+    from .domain.system.governor import DISCOVERY, IMPORT, TRAINING, GovernorState, admit
+    from .domain.system.vitals import heaviness_index
+
+    def _governor_tick() -> None:
+        try:
+            v, state = gov_runtime.refresh()
+        except Exception:
+            return
+        try:                                   # rolling history for the Vitals page
+            hist = repo.get_setting("system.vitals.history")
+            hist = hist if isinstance(hist, list) else []
+            hist.append({"t": v.ts.isoformat(), "cpu": round(v.cpu_pct, 1),
+                         "temp": v.temp_c, "mem": round(v.mem_pct, 1), "watts": v.watts,
+                         "h": round(heaviness_index(v, gov_runtime.config()), 3),
+                         "state": state.name.lower()})
+            repo.set_setting("system.vitals.history", hist[-180:])
+        except Exception:
+            pass
+        from .domain.health import clear_issue, record_issue
+        if state >= GovernorState.HIGH:        # surface on the buddy (same channel)
+            record_issue(repo, "system_heavy", "Hearth is running heavy",
+                         f"System load is {state.name.lower()} — I've paused heavy work "
+                         "and kept predictions live. It resumes automatically when load "
+                         "eases.", cta={"label": "System", "href": "/settings#system"})
+        else:
+            clear_issue(repo, "system_heavy")
+
+    scheduler.add_job(_governor_tick, "interval", seconds=60,
+                      id="governor", max_instances=1, coalesce=True)
+
+    def _admit(kind: str) -> bool:
+        """Gate a heavy job on the current governor state (inference is never gated)."""
+        try:
+            return admit(kind, gov_runtime.state())
+        except Exception:
+            return True
+
     def _influx_down(exc: Exception) -> bool:
         """Does this look like InfluxDB being unreachable / timing out (vs a real
         bug)? Match on the connectivity vocabulary urllib3/influxdb raise."""
@@ -82,6 +121,10 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
 
         def _train_all() -> None:
             from .domain.health import clear_issue, record_issue
+            if not _admit(TRAINING):
+                log.info("weekly training deferred — system %s",
+                         gov_runtime.state().name.lower())
+                return
             _set_training(True)
             tried = ok = 0
             try:
@@ -110,6 +153,8 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
             """Cold-start accelerator: a fresh no-history install shouldn't wait
             until Sunday for its first model. As soon as a person has enough
             feature windows, train + promote — then this becomes a no-op."""
+            if not _admit(TRAINING):
+                return
             from .domain.features.registry import active_feature_set_version
             from .domain.training.trainer import MIN_TRAIN_WINDOWS
             fset = active_feature_set_version(repo)
@@ -146,6 +191,9 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
                           id="drift_check", max_instances=1, coalesce=True)
 
         def _discover_all() -> None:
+            if not _admit(DISCOVERY):
+                log.info("discovery deferred — system %s", gov_runtime.state().name.lower())
+                return
             from .domain.discovery.clustering import run_discovery
             run_discovery(tsdb, repo)
 
@@ -158,6 +206,8 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
 
         if events is not None:
             async def _sync_inventory() -> None:
+                if not _admit(IMPORT):
+                    return
                 from .domain.onboarding.inventory_sync import sync_inventory
                 await sync_inventory(repo, events, use_llm=False)
 

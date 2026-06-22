@@ -124,6 +124,18 @@ def create_app() -> FastAPI:
     app.state.deps = deps
     app.include_router(build_api_router(deps), prefix="/api")
 
+    # system self-awareness: vitals + governor + blind-spot coverage. The monitor
+    # is best-effort (psutil/RAPL/Pi); absent psutil it just yields empty vitals.
+    import os as _os
+
+    from .adapters.psutil_monitor import PsutilResourceMonitor
+    from .api import system_routes
+    system_routes.bind(
+        PsutilResourceMonitor(data_path=_os.getenv("HEARTH_DATA_DIR", "/data"),
+                              influx_health=deps.get("tsdb")),
+        deps["repo"])
+    app.include_router(system_routes.router)
+
     # ── auth middleware (docs/SECURITY.md) ──────────────────────────────────
     # /api/* requires a session, except: health, login, the integration
     # webhook (TODO: bearer scope check), and — ONLY while no users exist —
