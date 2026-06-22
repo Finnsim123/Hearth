@@ -489,115 +489,102 @@ type Gate = {
   gate?: { promoted: boolean; basis: string; reason: string };
 };
 
-function PersonHistory({ models, onAction }: { models: Model[]; onAction: () => void }) {
-  const [open, setOpen] = useState(false);
+/** History & versions body (rendered inside a Fold): promotion-gate verdict,
+ *  accuracy trend, and every version as a row with Promote / Roll back. */
+function HistoryBody({ models, onAction }: { models: Model[]; onAction: () => void }) {
   const [gate, setGate] = useState<Gate | null>(null);
-  const [rolling, setRolling] = useState(false);
+  const [busy, setBusy] = useState("");
   const pid = models[0]?.person_id;
   useEffect(() => {
-    if (open && pid && !gate)
-      fetch(`/api/models/gate?person=${encodeURIComponent(pid)}`).then(j).then(setGate).catch(() => {});
-  }, [open, pid, gate]);
-  const doRollback = async () => {
-    setRolling(true);
-    try {
-      await fetch("/api/models/rollback", { method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ person_id: pid }) }).then(j);
-      onAction();
-    } catch { /* refresh shows reality */ }
-    setRolling(false);
+    if (pid) fetch(`/api/models/gate?person=${encodeURIComponent(pid)}`).then(j).then(setGate).catch(() => {});
+  }, [pid]);
+  const act = async (label: string, fn: () => Promise<Response>) => {
+    setBusy(label);
+    try { await fn().then(j); onAction(); } catch { /* refresh shows reality */ }
+    setBusy("");
   };
-  if (models.length < 2) return null;
   const series = [...models].reverse();             // oldest -> newest
   const accs = series.map((m) => m.metrics?.accuracy_gold
     ?? m.metrics?.accuracy_confirmed ?? m.metrics?.accuracy_bootstrap ?? null);
   const aucs = series.map((m) => m.metrics?.auc_macro ?? null);
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-      <button onClick={() => setOpen(!open)}
-              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none",
-                       background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
-                       color: "var(--text)", padding: "10px 14px", textAlign: "left" }}>
-        <Icon name="models" size={15} />
-        <strong style={{ fontSize: 13.5 }}>History &amp; trend</strong>
-        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-          {models.length} versions
-        </span>
-        <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--text-dim)" }}>
-          {open ? "Hide" : "Compare"}
-        </span>
-      </button>
-      {open && (
-        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12,
-                      borderTop: "1px solid var(--border)" }}>
-          {gate?.gate && gate.candidate && (
-            <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px",
-                          display: "flex", flexDirection: "column", gap: 6,
-                          background: "var(--surface-2)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <Icon name={gate.gate.promoted ? "check" : "warning"} size={14} />
-                <strong style={{ fontSize: 13 }}>
-                  {gate.candidate} vs live {gate.live}</strong>
-                <span style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 99, fontWeight: 600,
-                  background: gate.gate.promoted
-                    ? "color-mix(in srgb, var(--ok, #34D399) 16%, transparent)"
-                    : "color-mix(in srgb, var(--danger) 16%, transparent)",
-                  color: gate.gate.promoted ? "var(--ok, #34D399)" : "var(--danger)" }}>
-                  {gate.gate.promoted ? "would promote" : "held back"}
-                </span>
-                <button className="btn btn-ghost" style={{ marginLeft: "auto" }}
-                        disabled={rolling} onClick={doRollback}>
-                  {rolling ? "…" : "Roll back"}
-                </button>
-              </div>
-              <p style={{ margin: 0, fontSize: 12, color: "var(--text-dim)" }}>{gate.gate.reason}</p>
-            </div>
-          )}
-          <div>
-            <MiniTrend accs={accs} aucs={aucs} />
-            <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <span style={{ width: 14, height: 2, background: "var(--accent)" }} /> confirmed accuracy
-              </span>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <span style={{ width: 14, height: 0, borderTop: "2px dashed var(--text-dim)" }} /> AUC
-              </span>
-              <span>oldest → newest · watch for a downward drift</span>
-            </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {gate?.gate && gate.candidate && (
+        <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px",
+                      display: "flex", flexDirection: "column", gap: 6, background: "var(--surface-2)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Icon name={gate.gate.promoted ? "check" : "warning"} size={14} />
+            <strong style={{ fontSize: 13 }}>{gate.candidate} vs live {gate.live}</strong>
+            <span style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 99, fontWeight: 600,
+              background: gate.gate.promoted
+                ? "color-mix(in srgb, var(--ok, #34D399) 16%, transparent)"
+                : "color-mix(in srgb, var(--danger) 16%, transparent)",
+              color: gate.gate.promoted ? "var(--ok, #34D399)" : "var(--danger)" }}>
+              {gate.gate.promoted ? "would promote" : "held back"}
+            </span>
+            <button className="btn btn-ghost" style={{ marginLeft: "auto" }} disabled={!!busy}
+                    onClick={() => act("rollback", () => fetch("/api/models/rollback", { method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ person_id: pid }) }))}>
+              {busy === "rollback" ? "…" : "Roll back"}
+            </button>
           </div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", fontSize: 12.5, width: "100%" }}>
-              <thead><tr>
-                {["version", "trained", "confirmed", "bootstrap", "AUC", "windows", "status"].map((h) => (
-                  <th key={h} style={{ textAlign: h === "version" || h === "trained" ? "left" : "right",
-                                       padding: 6, color: "var(--text-dim)", fontWeight: 500 }}>{h}</th>))}
-              </tr></thead>
-              <tbody>
-                {models.map((m) => {
-                  const mt = m.metrics ?? {};
-                  const status = m.promoted ? "live" : (mt.validation_status ?? "");
-                  return (
-                    <tr key={m.id} style={{ borderTop: "1px solid var(--border)" }}>
-                      <td style={{ padding: 6 }}><code style={{ fontSize: 11.5 }}>{m.version}</code></td>
-                      <td style={{ padding: 6, color: "var(--text-dim)" }}>
-                        {m.trained_at ? new Date(m.trained_at).toLocaleDateString() : "—"}</td>
-                      <td style={{ padding: 6, textAlign: "right" }}>{pct(mt.accuracy_confirmed)}</td>
-                      <td style={{ padding: 6, textAlign: "right", color: "var(--text-dim)" }}>{pct(mt.accuracy_bootstrap)}</td>
-                      <td style={{ padding: 6, textAlign: "right" }}>{mt.auc_macro ? mt.auc_macro.toFixed(3) : "—"}</td>
-                      <td style={{ padding: 6, textAlign: "right", color: "var(--text-dim)" }}>{mt.n_train ?? "—"}</td>
-                      <td style={{ padding: 6, textAlign: "right",
-                                   color: status === "live" ? "var(--accent)"
-                                     : status === "provisional" ? "var(--danger)" : "var(--text-dim)" }}>
-                        {status}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--text-dim)" }}>{gate.gate.reason}</p>
+        </div>
+      )}
+      {models.length >= 2 && (
+        <div>
+          <MiniTrend accs={accs} aucs={aucs} />
+          <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 14, height: 2, background: "var(--accent)" }} /> accuracy
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 14, height: 0, borderTop: "2px dashed var(--text-dim)" }} /> AUC
+            </span>
+            <span>oldest → newest · watch for a downward drift</span>
           </div>
         </div>
       )}
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ borderCollapse: "collapse", fontSize: 12.5, width: "100%" }}>
+          <thead><tr>
+            {["version", "trained", "real-world", "AUC", "windows", "status", ""].map((h, i) => (
+              <th key={i} style={{ textAlign: i <= 1 ? "left" : i === 6 ? "right" : "right",
+                                   padding: 6, color: "var(--text-dim)", fontWeight: 500 }}>{h}</th>))}
+          </tr></thead>
+          <tbody>
+            {models.map((m) => {
+              const mt = m.metrics ?? {};
+              const status = m.promoted ? "live" : (mt.validation_status ?? "");
+              return (
+                <tr key={m.id} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: 6 }}><code style={{ fontSize: 11.5 }}>{m.version}</code></td>
+                  <td style={{ padding: 6, color: "var(--text-dim)" }}>
+                    {m.trained_at ? new Date(m.trained_at).toLocaleDateString() : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>
+                    {pct(mt.accuracy_gold ?? mt.accuracy_confirmed)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{mt.auc_macro ? mt.auc_macro.toFixed(3) : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: "var(--text-dim)" }}>{mt.n_train ?? "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right",
+                               color: status === "live" ? "var(--accent)"
+                                 : status === "provisional" ? "var(--danger)" : "var(--text-dim)" }}>{status}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>
+                    {!m.promoted && (
+                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: "2px 8px" }}
+                              disabled={!!busy}
+                              onClick={() => act(`promote-${m.id}`,
+                                () => fetch(`/api/models/${m.id}/promote`, { method: "POST" }))}>
+                        {busy === `promote-${m.id}` ? "…" : "Promote"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
