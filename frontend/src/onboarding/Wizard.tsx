@@ -9,7 +9,7 @@ import { PRESET_HUES } from "../components/Avatar";
 import FoundationalFacts from "../components/FoundationalFacts";
 import Welcome from "./Welcome";
 import BubbleCloud, { type TriageCluster } from "../components/BubbleCloud";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import {
   Callout, ChoiceCard, Field, FooterNav, Progress, StepShell, TestRow, type TestState,
 } from "./ui";
@@ -451,6 +451,70 @@ type Inv = { entity_id: string; friendly_name: string | null; domain: string | n
 type TriageResp = { by: string | null; total: number; kept_count: number;
                     clusters: TriageCluster[] };
 
+// A taste of what Hearth unlocks in Home Assistant — shown on a gentle loop
+// while the scan runs, so the wait sells the payoff instead of just spinning.
+const AUTOMATION_IDEAS: { icon: IconName; title: string; text: string }[] = [
+  { icon: "play", title: "Movie mode, instantly",
+    text: "Lights dim and the blinds drop the moment a movie starts — no remote, no scene button." },
+  { icon: "presence", title: "Wake up gently",
+    text: "As you stir awake, the lights fade up and the kettle clicks on." },
+  { icon: "power", title: "Away = armed and saving",
+    text: "Everyone out? Arm the alarm, drop the heating, cut standby power — automatically." },
+  { icon: "focus", title: "Deep-work mode",
+    text: "Sit down to work and phones go do-not-disturb while the desk light turns cool and bright." },
+  { icon: "env", title: "Cooking light",
+    text: "The kitchen jumps to full brightness while you cook, then eases back when you're done." },
+  { icon: "household", title: "Welcome home",
+    text: "First one through the door gets the hallway lit and their playlist going." },
+  { icon: "lock", title: "Goodnight, handled",
+    text: "Drift off and Hearth locks the doors, kills the lights, and sets the night temperature." },
+  { icon: "play", title: "Dinner together",
+    text: "Sitting down to eat pauses the TV and warms the lights." },
+  { icon: "alarm", title: "A heads-up on the unusual",
+    text: "Away at 3pm on a workday? A quiet nudge — only if you ask for one." },
+  { icon: "sensors", title: "Heat the room you're in",
+    text: "Warmth follows people and activity, not a dumb schedule." },
+  { icon: "info", title: "Reading nook",
+    text: "Pick up a book and one warm lamp glows while the rest of the room dims." },
+  { icon: "light", title: "Wind-down",
+    text: "Half an hour before your usual bedtime, the house softens and quietens on its own." },
+];
+
+function AutomationIdeas() {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setI((n) => (n + 1) % AUTOMATION_IDEAS.length), 4500);
+    return () => clearInterval(id);
+  }, []);
+  const idea = AUTOMATION_IDEAS[i];
+  return (
+    <div style={{ marginTop: 14 }}>
+      <p className="label" style={{ margin: "0 0 8px" }}>While you wait — what you'll be able to do</p>
+      <div className="card" style={{ display: "flex", gap: 12, alignItems: "flex-start",
+                                     padding: 16, minHeight: 84 }}>
+        <span style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 10, display: "flex",
+                       alignItems: "center", justifyContent: "center", color: "var(--accent)",
+                       background: "color-mix(in srgb, var(--accent) 14%, transparent)",
+                       border: "1px solid var(--accent)" }}>
+          <Icon name={idea.icon} size={20} />
+        </span>
+        <div key={i} style={{ animation: "hearth-idea-in .5s ease" }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600 }}>{idea.title}</div>
+          <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 2, lineHeight: 1.4 }}>{idea.text}</div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 5, justifyContent: "center", marginTop: 10 }}>
+        {AUTOMATION_IDEAS.map((_, k) => (
+          <span key={k} onClick={() => setI(k)} aria-label={`idea ${k + 1}`}
+            style={{ width: k === i ? 16 : 6, height: 6, borderRadius: 999, cursor: "pointer",
+                     background: k === i ? "var(--accent)" : "var(--border)", transition: "all .3s" }} />
+        ))}
+      </div>
+      <style>{`@keyframes hearth-idea-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }`}</style>
+    </div>
+  );
+}
+
 function StepInventory({ d, set, next, back }: StepProps & { back: () => void }) {
   const [state, setState] = useState<"scanning" | "grouping" | "done" | "error">("scanning");
   const [inventory, setInventory] = useState<Inv[]>([]);
@@ -529,6 +593,7 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
             )}
           </Callout>
         )}
+        {busy && <AutomationIdeas />}
         {state === "error" && (
           <Callout icon="warning">Scan failed — go back a step and re-test the HA connection.</Callout>
         )}

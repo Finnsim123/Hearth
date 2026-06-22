@@ -126,11 +126,12 @@ itself in plain language, and you can close the tab and pick up where you left o
 5. **Household** — add the people Hearth predicts for, each with optional phone
    notifications, an email (for recovery and the opt-in newsletter), a daily question
    budget and quiet hours.
-6. **Sensor inventory** — Hearth scans every entity and, where history exists,
-   computes per-sensor statistics. Downloadable so you can see exactly what's used.
-7. **AI assist** *(optional)* — paste a key to let the assistant design your setup,
+6. **AI assist** *(optional)* — paste a key to let the assistant design your setup,
    with an explicit data-sharing choice and a one-time cost estimate, or skip and use
    the built-in heuristics.
+7. **Scanning your home** — Hearth scans every entity, computes per-sensor statistics
+   where history exists, and groups them into categories you keep or skip (the AI's
+   picks if you added a key, else heuristics). Downloadable so you see exactly what's used.
 8. **Activities** — pick a starter set (sleeping/away/home, plus cooking/movie/…) or
    define your own. Fully editable later.
 9. **What I can know for sure** — bind a reliable presence/sleep sensor so *away* and
