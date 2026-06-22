@@ -1061,6 +1061,23 @@ def build_api_router(deps: dict) -> APIRouter:
         dismiss_advisory(repo, kind, days=days)
         return {"ok": True, "kind": kind}
 
+    @api.get("/host")
+    def host(request: Request) -> dict:
+        """The address Home Assistant should use to reach Hearth (wizard step 10).
+        Prefers the LAN IP the installer detected on the host (HEARTH_HOST_IP) —
+        correct even when the admin is browsing from the box itself on localhost —
+        and otherwise falls back to the address the browser used to get here."""
+        import os
+
+        from ..config import settings
+        ip = (os.getenv("HEARTH_HOST_IP") or "").strip()
+        if ip:
+            return {"url": f"http://{ip}:{settings.port}", "ip": ip, "source": "host"}
+        host_hdr = request.headers.get("host") or f"localhost:{settings.port}"
+        scheme = request.url.scheme or "http"
+        return {"url": f"{scheme}://{host_hdr}",
+                "ip": host_hdr.split(":")[0], "source": "request"}
+
     @api.get("/flow")
     def flow() -> dict:
         """Live pipeline map (nodes + edges + this instance's numbers) for the

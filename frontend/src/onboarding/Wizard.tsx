@@ -567,6 +567,7 @@ const fmtUsd = (u: number) => (u < 0.01 ? "<$0.01" : `$${u.toFixed(2)}`);
 function StepAiAssist({ d, set, next, back }: StepProps) {
   const [est, setEst] = useState<CostEst | null>(null);
   const [estErr, setEstErr] = useState(false);
+  const [acked, setAcked] = useState(false);
   const hasKey = !!d.llmKey;
   const nEst = d.haEntities || d.inventoryCount;
   useEffect(() => {
@@ -586,8 +587,31 @@ function StepAiAssist({ d, set, next, back }: StepProps) {
         explainer="Next, Hearth reads your whole entity list and groups it. With an AI key it clusters and judges relevance far better than rules — and later maps sensors to roles and writes starter rules. Built-in heuristics do all of this for free if you skip. You approve everything either way.">
         <Field label="OpenRouter or OpenAI-compatible API key (optional)"
           hint="Estimated one-time cost for a typical home: a few cents. Stored encrypted, removable in Settings, never needed again after first training.">
-          <input type="password" placeholder="sk-or-…" value={d.llmKey} onChange={(e) => set("llmKey", e.target.value)} />
+          <input type="password" placeholder="sk-or-…" value={d.llmKey} onChange={(e) => { setAcked(false); set("llmKey", e.target.value); }} />
         </Field>
+        {d.llmKey && (
+          <div style={{ padding: "12px 14px", borderRadius: "var(--radius-ctl)",
+                        background: "color-mix(in srgb, var(--danger) 9%, var(--surface))",
+                        border: "1px solid color-mix(in srgb, var(--danger) 45%, var(--border))",
+                        fontSize: 13.5, lineHeight: 1.5, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", gap: 9 }}>
+              <Icon name="lock" size={16} />
+              <span>
+                <strong>Before you continue.</strong> Using an API key sends your entity
+                metadata to a third-party AI provider (e.g. OpenRouter or OpenAI). Their
+                terms of service and privacy policy apply, and <strong>they — not Hearth —
+                will charge you</strong> for usage. The data leaves your machine and is
+                processed on their servers. Skip this step to keep everything 100% local
+                (Hearth's built-in heuristics do the same job for free).
+              </span>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                            fontWeight: 500 }}>
+              <input type="checkbox" checked={acked} onChange={(e) => setAcked(e.target.checked)} />
+              I understand and want to continue
+            </label>
+          </div>
+        )}
         {d.llmKey && (
           <Field label="Model"
             hint="Smarter models map unusual entity names and write better rules — for a few cents more. Any OpenRouter model id works.">
@@ -642,7 +666,7 @@ function StepAiAssist({ d, set, next, back }: StepProps) {
           trained, predictions are 100% local and the key is dead weight.
         </Callout>
       </StepShell>
-      <FooterNav onBack={back} onNext={next}
+      <FooterNav onBack={back} onNext={next} nextDisabled={!!d.llmKey && !acked}
         skip={d.llmKey ? undefined : { label: "Skip — use heuristics", onSkip: next }} />
     </>
   );
@@ -711,6 +735,14 @@ function StepOutput({ d, next, back }: StepProps) {
   const [token, setToken] = useState<string | null>(null);
   const [minting, setMinting] = useState(false);
   const [mintErr, setMintErr] = useState("");
+  const [hostUrl, setHostUrl] = useState("");
+  useEffect(() => {
+    fetch("/api/host").then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j?.url) setHostUrl(j.url); }).catch(() => {});
+  }, []);
+  // The address HA must use to reach Hearth: the host's LAN IP the installer
+  // detected (correct even on localhost), falling back to the address you're on.
+  const connectUrl = hostUrl || window.location.origin;
   const mint = async () => {
     setMinting(true); setMintErr("");
     try {
@@ -751,9 +783,19 @@ function StepOutput({ d, next, back }: StepProps) {
           </div>
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <span className="label" style={{ minWidth: 14 }}>3</span>
-            <span style={{ fontSize: 14, color: "var(--text-dim)" }}>Paste the token below when HA asks for it.</span>
+            <span style={{ fontSize: 14, color: "var(--text-dim)" }}>When HA asks, give it the address and token below.</span>
           </div>
         </div>
+        <Field label="Address (host) for Home Assistant"
+          hint="This is where Hearth runs on your network — enter it when HA's Hearth integration asks for the host.">
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <code style={{ flex: 1, padding: "10px 12px", background: "var(--surface-2)",
+                           border: "1px solid var(--border)", borderRadius: "var(--radius-ctl)",
+                           fontSize: 13 }}>{connectUrl}</code>
+            <button className="btn btn-secondary" onClick={() => navigator.clipboard.writeText(connectUrl)}
+                    aria-label="Copy address"><Icon name="copy" size={16} /></button>
+          </div>
+        </Field>
         {token ? (
           <>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -777,7 +819,7 @@ function StepOutput({ d, next, back }: StepProps) {
         <Callout>
           No HACS, or buttons not opening? Manual path: HACS → custom repositories → add this
           repo as “Integration”, then Settings → Devices &amp; services → Add integration → Hearth,
-          and enter {`${window.location.origin}`} plus the token.
+          and enter <code>{connectUrl}</code> plus the token.
         </Callout>
       </StepShell>
       <FooterNav onBack={back} onNext={next} nextLabel="Finish setup"

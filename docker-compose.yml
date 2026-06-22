@@ -52,6 +52,10 @@ services:
       HEARTH_INFLUX_ORG: ${HEARTH_INFLUX_ORG:-hearth}
       HEARTH_INFLUX_TOKEN: ${INFLUX_TOKEN:-}
       HEARTH_LOG_LEVEL: ${HEARTH_LOG_LEVEL:-INFO}
+      # LAN IP the installer detected on the host, so the wizard can tell the user
+      # which address to give the Home Assistant integration (the container itself
+      # can't see the host's LAN IP). Refreshed on every install.sh run.
+      HEARTH_HOST_IP: ${HEARTH_HOST_IP:-}
     ports:
       - "8420:8420"          # web UI + API
     healthcheck:

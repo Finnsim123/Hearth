@@ -105,6 +105,12 @@ That address is your own machine's LAN IP. Hearth listens on every interface, so
 `http://localhost:8420` works from the box itself too. Everything else happens in
 the browser.
 
+**Linux or macOS** — the installer detects the OS and adapts. On Linux it registers
+the self-updater as an `/etc/cron.d` job; on macOS (e.g. a Mac mini server) it
+installs a launchd LaunchAgent instead, and uses a portable lock so you don't need
+`flock`/`util-linux`. Just install Docker Desktop and run `bash install.sh`. On
+macOS keep the user logged in (Docker Desktop is per-user) so the updater can run.
+
 ---
 
 ## 🧭 The setup wizard

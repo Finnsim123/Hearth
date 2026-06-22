@@ -4,24 +4,28 @@
 # requested an update (flag file), pull + rebuild + swap the container.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+source "$(dirname "$0")/lib.sh"   # with_lock, hearth_iso (portable across Linux/macOS)
 SHARED=".hearth-shared"
 mkdir -p "$SHARED"
 LOG="$SHARED/updater.log"
 LOCK="$SHARED/deploy.lock"
 
 # ── 1. update requested from the UI? ────────────────────────────────────────
-# flock: never rebuild while install.sh (or a previous cron run) is mid-deploy
-# — concurrent `compose up` calls collide on the container name.
+# with_lock: never rebuild while install.sh (or a previous run) is mid-deploy —
+# concurrent `compose up` calls collide on the container name. Uses flock on
+# Linux, an mkdir lock on macOS (no util-linux/`brew install flock` needed).
+_do_update() {
+  echo "[$(hearth_iso)] update requested — pulling"
+  git pull --ff-only
+  export GIT_SHA="$(git rev-parse --short HEAD)"
+  docker compose up -d --build --remove-orphans
+  echo "[$(hearth_iso)] updated to $GIT_SHA"
+}
 if [[ -f "$SHARED/update_requested" ]]; then
   rm -f "$SHARED/update_requested"
-  {
-    flock -w 600 9 || { echo "[$(date -Is)] another deploy holds the lock — skipped"; exit 0; }
-    echo "[$(date -Is)] update requested — pulling"
-    git pull --ff-only
-    export GIT_SHA="$(git rev-parse --short HEAD)"
-    docker compose up -d --build --remove-orphans
-    echo "[$(date -Is)] updated to $GIT_SHA"
-  } 9>"$LOCK" >>"$LOG" 2>&1
+  if ! with_lock "$LOCK" 600 _do_update >>"$LOG" 2>&1; then
+    echo "[$(hearth_iso)] another deploy holds the lock — skipped" >>"$LOG"
+  fi
 fi
 
 # ── 2. report status for the UI ─────────────────────────────────────────────
@@ -42,5 +46,5 @@ cat > "$SHARED/update_status.json" <<JSON
  "deployed_sha": "${LOCAL}",
  "deployed_subject": $(jesc "$HEAD_SUBJECT"),
  "deployed_body": $(jesc "$HEAD_BODY"),
- "checked_at": "$(date -Is)"}
+ "checked_at": "$(hearth_iso)"}
 JSON
