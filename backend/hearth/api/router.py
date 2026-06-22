@@ -1387,6 +1387,17 @@ def build_api_router(deps: dict) -> APIRouter:
         from ..domain.training.drift import run_drift_check
         return {"reports": run_drift_check(tsdb, repo, deps.get("models"))}
 
+    @api.get("/drift/auto-retrain")
+    def drift_auto_retrain_get() -> dict:
+        return {"enabled": bool(repo.get_setting("drift.auto_retrain", False))}
+
+    @api.post("/drift/auto-retrain")
+    def drift_auto_retrain_set(body: dict) -> dict:
+        """Opt in to an automatic retrain when severe drift is detected (F5)."""
+        enabled = bool(body.get("enabled"))
+        repo.set_setting("drift.auto_retrain", enabled)
+        return {"enabled": enabled}
+
     # ── inbox (dashboard "needs you" preview + Inbox page) ────────────────
     @api.get("/inbox")
     def inbox(person: str | None = None) -> list:
