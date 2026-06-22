@@ -1319,7 +1319,8 @@ def build_api_router(deps: dict) -> APIRouter:
             child = repo.save_question(Question(
                 person_id=q.person_id, window_ts=q.window_ts, predicted=q.predicted,
                 confidence=q.confidence, probabilities=probs, alternatives=batch,
-                asked=list(q.asked) + batch, parent_id=qid, channel=q.channel))
+                asked=list(q.asked) + batch, parent_id=qid, channel=q.channel,
+                ask_reason=q.ask_reason))  # follow-up keeps the parent's gold status
             notifier = deps.get("notifier")
             person = next((p for p in repo.persons() if p.id == q.person_id), None)
             if notifier is not None and person is not None:
@@ -1343,7 +1344,8 @@ def build_api_router(deps: dict) -> APIRouter:
             from ..domain.schemas import LabelEvent, Provenance
             tsdb.write_label(LabelEvent(person_id=q.person_id, window_ts=q.window_ts,
                                         label=answer_slug, provenance=Provenance.CONFIRMED,
-                                        source="notification"))
+                                        source="notification",
+                                        gold=q.ask_reason == "explore"))
         return {"ok": True, "answer": answer_slug}
 
     # ── journey (cold-start dashboard) ─────────────────────────────────────
@@ -1385,7 +1387,7 @@ def build_api_router(deps: dict) -> APIRouter:
             from ..domain.schemas import LabelEvent, Provenance
             tsdb.write_label(LabelEvent(person_id=q.person_id, window_ts=q.window_ts,
                                         label=ans, provenance=Provenance.CONFIRMED,
-                                        source="inbox"))
+                                        source="inbox", gold=q.ask_reason == "explore"))
         return {"ok": True}
 
     # ── in-app updates (host updater writes status; we write the trigger) ──

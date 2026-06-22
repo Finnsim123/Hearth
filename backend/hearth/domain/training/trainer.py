@@ -151,7 +151,7 @@ def train_person(person_id: str, tsdb, repo, store,
     default_activity = repo.get_setting("default_activity", "home") or "home"
     bootstrap = bootstrap_labels(repo.rules(), feats, person_id, default_activity)
     events = tsdb.read_labels(person_id, start, end)
-    labels, provenance = merge_labels(bootstrap, events)
+    labels, provenance, gold = merge_labels(bootstrap, events)
 
     # ── hierarchy (LCPN, labeling/taxonomy.py) ────────────────────────────
     # root model: every label projected to its coarse state (eating → home);
@@ -163,7 +163,7 @@ def train_person(person_id: str, tsdb, repo, store,
     pmap = parent_map(activities)
     coarse_labels = labels.map(lambda lab: to_coarse(lab, pmap))
 
-    record = _fit_node(person_id, "root", feats, coarse_labels, provenance,
+    record = _fit_node(person_id, "root", feats, coarse_labels, provenance, gold,
                        repo, store, fset, end, excluded, force, cfg)
     if record is not None:
         from ..inference.smoothing import learn_transitions
@@ -179,11 +179,11 @@ def train_person(person_id: str, tsdb, repo, store,
                      person_id, parent, int(mask.sum()), n_fine_children)
             continue
         _fit_node(person_id, parent, feats[mask], fine[mask], provenance[mask],
-                  repo, store, fset, end, excluded, force, cfg)
+                  gold[mask], repo, store, fset, end, excluded, force, cfg)
     return record
 
 
-def _fit_node(person_id: str, node: str, feats, labels, provenance,
+def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
               repo, store, fset: str, end, excluded, force: bool,
               cfg: TrainingConfig) -> ModelRecord | None:
     """Fit + evaluate + register + gate ONE hierarchy node's classifier."""
@@ -204,11 +204,12 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
         return None
     X_train, y_train = feats[train_mask], labels[train_mask]
     X_val, y_val, prov_val = feats[~train_mask], labels[~train_mask], provenance[~train_mask]
+    gold_val = gold[~train_mask]
 
     # classes missing from train can't be learned — drop from val for metrics
     known = set(y_train.unique())
     keep = y_val.isin(known)
-    X_val, y_val, prov_val = X_val[keep], y_val[keep], prov_val[keep]
+    X_val, y_val, prov_val, gold_val = X_val[keep], y_val[keep], prov_val[keep], gold_val[keep]
 
     # tuning grid is RF-specific; other families train on their defaults for now
     params = (_hyperparams(repo, f"{person_id}.{node}", fset, X_train, y_train, force, cfg)
@@ -220,7 +221,7 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance,
         est.fit(X_train, y_train, sample_weight=weights.to_numpy())
     else:
         est.fit(X_train, y_train)
-    metrics = evaluate_model(est, X_val, y_val, prov_val)
+    metrics = evaluate_model(est, X_val, y_val, prov_val, gold_val)
     metrics["n_train"] = int(len(X_train))
     metrics["feature_count"] = int(X_train.shape[1])
     metrics["validation_status"] = validation_status(
@@ -295,19 +296,19 @@ def _hyperparams(repo, person_id: str, fset: str, X_train, y_train,
 
 def promotion_gate(new: ModelRecord, current: ModelRecord | None,
                    margin: float = 0.02) -> bool:
-    """Promote iff new's confirmed accuracy isn't credibly worse (CI overlap,
-    RESEARCH.md P6). No current model -> promote. No confirmed labels yet ->
-    fall back to bootstrap-agreement comparison. `margin` is the tolerated CI
-    slack (TrainingConfig.promotion_margin)."""
+    """Promote iff new's accuracy isn't credibly worse (CI overlap, RESEARCH.md
+    P6). Compares on the most trustworthy metric both models have: GOLD (unbiased
+    ε-explore) accuracy first (audit F1), else confirmed accuracy, else bootstrap
+    agreement. No current model -> promote. `margin` is the tolerated CI slack."""
     if current is None:
         return True
-    n_new, n_cur = new.metrics.get("n_confirmed", 0), current.metrics.get("n_confirmed", 0)
-    if n_new and n_cur:
-        new_lo, _ = wilson_interval(
-            round(new.metrics["accuracy_confirmed"] * n_new), n_new)
-        cur_lo, _ = wilson_interval(
-            round(current.metrics["accuracy_confirmed"] * n_cur), n_cur)
-        return new_lo >= cur_lo - margin
+    # prefer the unbiased gold metric, then confirmed, then bootstrap
+    for key, n_key in (("accuracy_gold", "n_gold"), ("accuracy_confirmed", "n_confirmed")):
+        n_new, n_cur = new.metrics.get(n_key, 0), current.metrics.get(n_key, 0)
+        if n_new and n_cur:
+            new_lo, _ = wilson_interval(round(new.metrics[key] * n_new), n_new)
+            cur_lo, _ = wilson_interval(round(current.metrics[key] * n_cur), n_cur)
+            return new_lo >= cur_lo - margin
     a, b = new.metrics.get("accuracy_bootstrap"), current.metrics.get("accuracy_bootstrap")
     return a is None or b is None or a >= b - margin
 

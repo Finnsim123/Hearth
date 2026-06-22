@@ -134,10 +134,30 @@ def test_merge_confirmed_beats_bootstrap():
                          provenance=Provenance.CONFIRMED),
               LabelEvent(person_id="a", window_ts=idx[2].to_pydatetime(), label="x",
                          activity="movie", provenance=Provenance.LLM)]
-    labels, prov = merge_labels(bootstrap, events)
+    labels, prov, gold = merge_labels(bootstrap, events)
     assert labels.iloc[1] == "cooking" and prov.iloc[1] == "confirmed"
     assert labels.iloc[2] == "movie"                   # leaf activity wins
     assert labels.iloc[0] == "home" and prov.iloc[0] == "bootstrap"
+    assert not gold.any()                              # no ε-explore labels here
+
+
+def test_gold_headline_is_explore_subset_only():
+    """accuracy_gold is measured ONLY on confirmed windows answered to a random
+    ε-explore ask — not pooled with uncertainty-sampled hard cases (audit F1)."""
+    from hearth.domain.training.evaluate import evaluate_model
+    idx = pd.date_range("2026-06-01", periods=80, freq="30min", tz="UTC")
+    X = pd.DataFrame({"signal": np.r_[np.zeros(40), np.ones(40)]}, index=idx)
+    y = pd.Series(["home"] * 40 + ["away"] * 40, index=idx)
+    est = RandomForestEstimator(n_estimators=30)
+    est.fit(X, y)
+    prov = pd.Series([Provenance.CONFIRMED.value] * len(y), index=idx)
+    gold = pd.Series([True] * 20 + [False] * 60, index=idx)  # first 20 are gold
+    metrics = evaluate_model(est, X, y, prov, gold)
+    assert metrics["n_gold"] == 20 and metrics["n_confirmed"] == 80
+    assert "accuracy_gold" in metrics and "accuracy_gold_ci" in metrics
+    # no gold series → no gold metric, confirmed still present
+    m2 = evaluate_model(est, X, y, prov)
+    assert m2["n_gold"] == 0 and "accuracy_gold" not in m2
 
 
 def test_smoothing_hysteresis():

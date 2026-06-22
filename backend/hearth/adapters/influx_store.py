@@ -347,6 +347,7 @@ from(bucket: "{FEAT_BUCKET}")
              .tag("provenance", label.provenance.value).tag("source", label.source)
              .time(datetime.now(timezone.utc))
              .field("label", label.label)
+             .field("gold", bool(label.gold))
              .field("window_ts", label.window_ts.timestamp()))
         if label.activity:
             p = p.field("activity", label.activity)
@@ -373,7 +374,8 @@ from(bucket: "{ML_BUCKET}")
                 label=str(r["label"]),
                 activity=str(r["activity"]) if "activity" in df.columns and pd.notna(r.get("activity")) else None,
                 provenance=Provenance(r["provenance"]),
-                source=str(r.get("source", "ui"))))
+                source=str(r.get("source", "ui")),
+                gold=bool(r["gold"]) if "gold" in df.columns and pd.notna(r.get("gold")) else False))
         return out
 
     def read_predictions(self, person: str, start: datetime, end: datetime) -> list[dict]:

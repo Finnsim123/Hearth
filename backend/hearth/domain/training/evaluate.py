@@ -44,8 +44,15 @@ def evaluate_model(
     X_val: pd.DataFrame,
     y_val: pd.Series,
     provenance: pd.Series,
+    gold: pd.Series | None = None,
 ) -> dict:
-    """Metrics dict for the registry (JSON-safe). Empty val -> {}."""
+    """Metrics dict for the registry (JSON-safe). Empty val -> {}.
+
+    `gold` (audit F1): confirmed windows that were asked at RANDOM (ε-explore),
+    so an unbiased sample of the home's life. `accuracy_confirmed` pools those
+    with uncertainty-sampled hard cases and so understates true performance;
+    `accuracy_gold` is the honest headline and what the promotion gate prefers.
+    """
     if X_val.empty:
         return {}
     probs = est.predict_proba(X_val)
@@ -63,6 +70,17 @@ def evaluate_model(
         lo, hi = wilson_interval(k, n_conf)
         out["accuracy_confirmed"] = round(k / n_conf, 4)
         out["accuracy_confirmed_ci"] = [round(lo, 4), round(hi, 4)]
+
+    # unbiased headline: confirmed AND gold (random ε-explore query)
+    gold_mask = (conf_mask & gold.reindex(y_val.index, fill_value=False)) \
+        if gold is not None else pd.Series(False, index=y_val.index)
+    n_gold = int(gold_mask.sum())
+    out["n_gold"] = n_gold
+    if n_gold:
+        kg = int(correct[gold_mask].sum())
+        glo, ghi = wilson_interval(kg, n_gold)
+        out["accuracy_gold"] = round(kg / n_gold, 4)
+        out["accuracy_gold_ci"] = [round(glo, 4), round(ghi, 4)]
     out["accuracy_bootstrap"] = round(float(correct[~conf_mask].mean()), 4) if (~conf_mask).any() else None
 
     prec, rec, f1, support = precision_recall_fscore_support(

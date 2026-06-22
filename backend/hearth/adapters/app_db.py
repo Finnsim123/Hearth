@@ -124,6 +124,7 @@ class QuestionRow(Base):
     asked_json: Mapped[str] = mapped_column(Text, default="[]")
     parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     probabilities_json: Mapped[str] = mapped_column(Text, default="{}")
+    ask_reason: Mapped[str] = mapped_column(String, default="uncertain")
     channel: Mapped[str] = mapped_column(String, default="inbox")
     status: Mapped[str] = mapped_column(String, default="open", index=True)
     answer: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -374,6 +375,7 @@ class AppDb:
                         alternatives=json.loads(r.alternatives_json),
                         asked=json.loads(r.asked_json or "[]"), parent_id=r.parent_id,
                         probabilities=json.loads(r.probabilities_json),
+                        ask_reason=getattr(r, "ask_reason", None) or "uncertain",
                         channel=r.channel, status=r.status, answer=r.answer,
                         created_at=r.created_at)
 
@@ -383,7 +385,8 @@ class AppDb:
                             confidence=q.confidence, channel=q.channel, status=q.status,
                             alternatives_json=json.dumps(q.alternatives),
                             asked_json=json.dumps(q.asked), parent_id=q.parent_id,
-                            probabilities_json=json.dumps(q.probabilities))
+                            probabilities_json=json.dumps(q.probabilities),
+                            ask_reason=q.ask_reason)
             s.add(r)
             s.commit()
             q.id = r.id

@@ -199,6 +199,10 @@ class LabelEvent(BaseModel):
     activity: str | None = None  # sub-activity slug
     provenance: Provenance
     source: str = "ui"  # ui | notification | bulk | rule:<id> | cluster:<id>
+    gold: bool = False  # answer to a RANDOM (ε-explore) ask → an unbiased sample
+                        # of the home's life, not an uncertainty-sampled hard case.
+                        # The honest headline metric is measured on gold only
+                        # (audit F1): uncertainty asks bias accuracy pessimistically.
 
 
 class Prediction(BaseModel):
@@ -230,6 +234,10 @@ class Question(BaseModel):
                                                     # follow-up chain — excluded from the next batch
     parent_id: int | None = None  # set on a follow-up; links back to the question it refines
     probabilities: dict[str, float] = Field(default_factory=dict)  # drives phrasing mode
+    ask_reason: Literal["uncertain", "explore"] = "uncertain"  # why this was asked.
+                       # "explore" = ε-greedy random query → its answer is a GOLD
+                       # (unbiased) eval label; "uncertain" = active-learning hard
+                       # case, great for training but biases the headline (audit F1).
     channel: Literal["notification", "inbox"] = "inbox"
     # superseded = the user tapped "No/Other", so a follow-up question replaced this one
     status: Literal["open", "answered", "expired", "superseded"] = "open"

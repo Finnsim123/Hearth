@@ -138,10 +138,14 @@ async def maybe_ask(pred: Prediction, person: Person, repo, notifier) -> Questio
     _msg, alternatives, _more = phrase_question_options(
         pred.probabilities or {pred.predicted: pred.confidence}, activities, pred.window_ts)
     alternatives = alternatives or [pred.predicted]
+    # gold (unbiased) eval labels come from PURE exploration only: a window we
+    # asked about *despite* being confident/decisive. An explore roll that
+    # coincides with an uncertain window is still a hard case, so it's not gold.
+    ask_reason = "explore" if (explore and not uncertain) else "uncertain"
     q = Question(person_id=person.id, window_ts=pred.window_ts,
                  predicted=pred.predicted, confidence=pred.confidence,
                  alternatives=alternatives, asked=list(alternatives),
-                 probabilities=pred.probabilities,
+                 probabilities=pred.probabilities, ask_reason=ask_reason,
                  channel="notification" if (person.has_device and not silent) else "inbox")
     q = repo.save_question(q)
     if silent:

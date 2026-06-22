@@ -17,10 +17,13 @@ _TRUST = {Provenance.BOOTSTRAP: 0, Provenance.LLM: 1,
 def merge_labels(
     bootstrap: pd.Series,
     events: list[LabelEvent],
-) -> tuple[pd.Series, pd.Series]:
-    """Returns (labels, provenance) aligned to bootstrap.index (UTC windows)."""
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Returns (labels, provenance, gold) aligned to bootstrap.index (UTC windows).
+    `gold` flags confirmed windows answered to a random ε-explore ask — the
+    unbiased subset the honest headline metric is measured on (audit F1)."""
     labels = bootstrap.copy()
     provenance = pd.Series(Provenance.BOOTSTRAP.value, index=bootstrap.index, dtype=object)
+    gold = pd.Series(False, index=bootstrap.index, dtype=bool)
     floored = bootstrap.index.floor("30min")
     by_window: dict[pd.Timestamp, LabelEvent] = {}
     for ev in events:
@@ -33,4 +36,5 @@ def merge_labels(
         if mask.any():
             labels[mask] = ev.activity or ev.label  # leaf slug wins when present
             provenance[mask] = ev.provenance.value
-    return labels, provenance
+            gold[mask] = bool(ev.gold)
+    return labels, provenance, gold
