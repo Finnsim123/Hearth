@@ -851,6 +851,10 @@ def build_api_router(deps: dict) -> APIRouter:
 
     @api.post("/persons")
     def save_person(p: Person) -> Person:
+        if getattr(p, "email", None):
+            from ..security import valid_email
+            if not valid_email(p.email):
+                raise HTTPException(400, "that doesn't look like a valid email address")
         return repo.save_person(p)
 
     @api.post("/persons/{person_id}/avatar")
@@ -1870,8 +1874,9 @@ def build_api_router(deps: dict) -> APIRouter:
         if sender is None or not sender.configured():
             raise HTTPException(409, "Configure SMTP first")
         to = (body.get("to") or "").strip()
-        if not to:
-            raise HTTPException(400, "a 'to' address is required")
+        from ..security import valid_email
+        if not to or not valid_email(to):
+            raise HTTPException(400, "a valid 'to' address is required")
         ok = sender.send(to, "Hearth test email",
                          "<p>Your Hearth email relay works. 🕯️</p>",
                          "Your Hearth email relay works.")

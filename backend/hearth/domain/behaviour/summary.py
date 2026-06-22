@@ -57,6 +57,8 @@ class Session(BaseModel):
     mean_min: float                # average episode length
     median_min: float
     longest_min: float
+    last_ts: str | None = None     # latest window of this activity (for drill-down)
+    last_basis: str | None = None  # fact | model | rule (so the "why" is honest)
 
 
 class Consistency(BaseModel):
@@ -131,6 +133,7 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
     trans: dict[tuple[str, str], int] = {}
     prev: tuple[datetime, str] | None = None
     seq_all: list[tuple[datetime, str]] = []
+    last_seen: dict[str, tuple[str, str]] = {}   # activity -> (latest iso, basis)
 
     parsed = sorted(((_parse(r["time"]), r) for r in rows if r.get("time")),
                     key=lambda t: t[0])
@@ -163,6 +166,7 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
                 day.fact_min += w; fact_min += w
             else:
                 day.inferred_min += w; inferred_min += w
+            last_seen[state] = (local.isoformat(), basis)
             if state == sleep_slug:
                 sleep_day[date] = sleep_day.get(date, 0.0) + w
             elif state == away_slug:
@@ -191,7 +195,7 @@ def summarize(person_id: str, rows: list[dict], *, tz: str = "UTC",
         key=lambda x: (-x.count, x.src, x.dst))[:24]
 
     episodes = _episodes(seq_all, window_min)
-    sessions = _sessions(episodes)
+    sessions = _sessions(episodes, last_seen)
     consistency = _consistency(episodes, sleep_slug)
 
     return BehaviourSummary(
@@ -220,15 +224,20 @@ def _episodes(seq: list[tuple[datetime, str]], window_min: int
     return [(s, a, b) for s, a, b in out]
 
 
-def _sessions(episodes: list[tuple[str, datetime, datetime]]) -> list[Session]:
+def _sessions(episodes: list[tuple[str, datetime, datetime]],
+              last_seen: dict[str, tuple[str, str]] | None = None) -> list[Session]:
+    last_seen = last_seen or {}
     by: dict[str, list[float]] = {}
     for state, start, end in episodes:
         if state == UNKNOWN:
             continue
         by.setdefault(state, []).append((end - start).total_seconds() / 60.0)
-    out = [Session(activity=a, count=len(ds), mean_min=round(mean(ds), 1),
-                   median_min=round(median(ds), 1), longest_min=round(max(ds), 1))
-           for a, ds in by.items()]
+    out = []
+    for a, ds in by.items():
+        ts, basis = last_seen.get(a, (None, None))
+        out.append(Session(activity=a, count=len(ds), mean_min=round(mean(ds), 1),
+                           median_min=round(median(ds), 1), longest_min=round(max(ds), 1),
+                           last_ts=ts, last_basis=basis))
     out.sort(key=lambda s: -s.count)
     return out
 

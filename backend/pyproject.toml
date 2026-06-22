@@ -22,6 +22,7 @@ dependencies = [
     "cryptography>=43.0",     # token encryption at rest (Fernet via security.py)
     "argon2-cffi>=23.1",      # password hashing (security.py only)
     "zeroconf>=0.132",        # mDNS announce for HA auto-discovery
+    "segno>=1.6",             # pure-python QR for 2FA enrollment (no Pillow)
 ]
 
 [build-system]
