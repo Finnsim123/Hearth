@@ -6,6 +6,7 @@
  * Save is per-card so a half-edited page never clobbers anything.
  */
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Avatar, { PRESET_HUES } from "../components/Avatar";
 import FoundationalFacts from "../components/FoundationalFacts";
 import { Icon, type IconName } from "../icons";
@@ -1249,6 +1250,12 @@ const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }
     desc: "The Hearth pipeline, end to end." },
 ];
 
+// Tiles that jump to a full page (not an in-Settings section).
+const LINK_TILES: { href: string; icon: IconName; title: string; desc: string }[] = [
+  { href: "/system", icon: "monitor", title: "System",
+    desc: "Live load — CPU, temperature, memory, power, and what Hearth pauses under pressure." },
+];
+
 const TLS_OPTS: [string, string][] = [
   ["starttls", "STARTTLS (587)"], ["ssl", "SSL/TLS (465)"], ["none", "None"],
 ];
@@ -1448,6 +1455,7 @@ export default function Settings() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+  const navigate = useNavigate();
   const open = (k: SectionKey) => { window.location.hash = k; setSection(k); };
   const back = () => { window.location.hash = ""; setSection(null); };
 
@@ -1491,6 +1499,21 @@ export default function Settings() {
             </span>
             <span style={{ fontSize: 15.5, fontWeight: 600 }}>{s.title}</span>
             <span style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.45 }}>{s.desc}</span>
+          </button>
+        ))}
+        {LINK_TILES.map((t) => (
+          <button key={t.href} className="card" onClick={() => navigate(t.href)}
+            style={{ textAlign: "left", cursor: "pointer", padding: 18, display: "flex",
+                     flexDirection: "column", gap: 8, border: "1px solid var(--border)",
+                     background: "var(--surface)", color: "var(--text)" }}>
+            <span style={{ width: 38, height: 38, borderRadius: 10, display: "flex",
+                           alignItems: "center", justifyContent: "center",
+                           background: "color-mix(in srgb, var(--accent) 14%, transparent)",
+                           color: "var(--accent)" }}>
+              <Icon name={t.icon} size={20} />
+            </span>
+            <span style={{ fontSize: 15.5, fontWeight: 600 }}>{t.title}</span>
+            <span style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.45 }}>{t.desc}</span>
           </button>
         ))}
       </div>
