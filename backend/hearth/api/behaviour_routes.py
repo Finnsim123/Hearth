@@ -6,6 +6,7 @@ activity palette (slug→name→color) so the UI can render with consistent colo
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
@@ -18,10 +19,34 @@ router = APIRouter(prefix="/api/behaviour", tags=["behaviour"])
 _repo = None
 _tsdb = None
 
+# Short-lived in-process cache for the heavy multi-day prediction reads this page
+# makes (the personal 14-day pull + one read per household member). New
+# predictions land every ~5 min, so a 60 s TTL is invisible to the user but turns
+# repeat visits / the household N+1 into near-instant reads.
+_PRED_TTL = 60.0
+_pred_cache: dict = {}
+
 
 def bind(repo, tsdb=None) -> None:
     global _repo, _tsdb
     _repo, _tsdb = repo, tsdb
+    _pred_cache.clear()
+
+
+def _read_predictions_cached(pid: str, start: datetime, end: datetime) -> list:
+    """read_predictions with a 60 s TTL cache keyed by (person, hour-bucketed
+    range). Bounded so it can't grow unbounded."""
+    key = (pid, int(start.timestamp() // 3600), int(end.timestamp() // 3600))
+    now = time.monotonic()
+    hit = _pred_cache.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    rows = _tsdb.read_predictions(pid, start, end)
+    _pred_cache[key] = (now + _PRED_TTL, rows)
+    if len(_pred_cache) > 64:                       # evict expired, keep it small
+        for k in [k for k, (exp, _) in _pred_cache.items() if exp <= now]:
+            _pred_cache.pop(k, None)
+    return rows
 
 
 @router.get("")
@@ -51,7 +76,7 @@ def behaviour(person: str | None = None, days: int = 7) -> dict:
     lookback = max(days, 14)
     start = end - timedelta(days=lookback)
     try:
-        rows = _tsdb.read_predictions(pid, start, end)
+        rows = _read_predictions_cached(pid, start, end)
     except Exception:
         rows = []
     disp_cut = (end - timedelta(days=days)).timestamp()
@@ -128,7 +153,7 @@ def household(person: str | None = None, days: int = 7) -> dict:
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
     try:
-        a_rows = _tsdb.read_predictions(pid, start, end)
+        a_rows = _read_predictions_cached(pid, start, end)
     except Exception:
         a_rows = []
     pairs = []
@@ -136,7 +161,7 @@ def household(person: str | None = None, days: int = 7) -> dict:
         if other == pid:
             continue
         try:
-            b_rows = _tsdb.read_predictions(other, start, end)
+            b_rows = _read_predictions_cached(other, start, end)
         except Exception:
             b_rows = []
         items = cooccurrence(a_rows, b_rows)

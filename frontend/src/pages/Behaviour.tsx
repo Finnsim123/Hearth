@@ -85,9 +85,13 @@ export default function Behaviour() {
   const load = useCallback(() => {
     const q = new URLSearchParams({ days: String(days) });
     if (person) q.set("person", person);
-    fetch(`/api/behaviour?${q}`).then(j).then(setData)
-      .catch(() => setData({ summary: null, trends: [], body: null, persons: [], activities: [] }));
-    fetch(`/api/behaviour/household?${q}`).then(j).then(setHousehold).catch(() => setHousehold(null));
+    // Personal summary is the critical path; the household co-occurrence view
+    // does one heavy prediction read PER member, so defer it until after the
+    // page has painted so it doesn't compete for InfluxDB connections.
+    fetch(`/api/behaviour?${q}`).then(j).then((d) => {
+      setData(d);
+      fetch(`/api/behaviour/household?${q}`).then(j).then(setHousehold).catch(() => setHousehold(null));
+    }).catch(() => setData({ summary: null, trends: [], body: null, persons: [], activities: [] }));
   }, [person, days]);
   useEffect(load, [load]);
 
