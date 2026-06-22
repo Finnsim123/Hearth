@@ -40,10 +40,11 @@ function Flame({ color }: { color: string }) {
 export default function Buddy() {
   const [s, setS] = useState<State | null>(null);
   const [cheer, setCheer] = useState<BuddyCheer | null>(null);
-  const [override, setOverride] = useState<boolean | null>(() => {
-    const v = localStorage.getItem("hearth.buddy.collapsed");
-    return v === null ? null : v === "1";
-  });
+  // self-tucking: expand on any NEW message, then collapse back to the orb after
+  // a short dwell. Manual toggle pauses the auto-tuck until the next new message.
+  const [expanded, setExpanded] = useState(false);
+  const lastSig = useRef("");
+  const autoTimer = useRef<number>();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const timer = useRef<number>();
@@ -78,6 +79,22 @@ export default function Buddy() {
     cheerTimer.current = window.setTimeout(() => setCheer(null), 4200);
   }), []);
 
+  // identity of the current message — a cheer, or the polled state's content/tone.
+  const sig = cheer ? `cheer|${cheer.title}|${cheer.detail ?? ""}`
+    : s ? `${s.phase}|${s.title}|${s.detail}|${s.tone}` : "";
+  const attentionTone = !cheer && !!s
+    && (s.tone === "ask" || s.tone === "alert" || s.tone === "error" || s.tone === "news");
+  // on a NEW message: pop open, then auto-collapse after a dwell (longer for the
+  // ones that want you). A repeat poll with identical content doesn't re-pop.
+  useEffect(() => {
+    if (!sig || sig === lastSig.current) return;
+    lastSig.current = sig;
+    setExpanded(true);
+    window.clearTimeout(autoTimer.current);
+    autoTimer.current = window.setTimeout(() => setExpanded(false), attentionTone ? 9000 : 5000);
+  }, [sig, attentionTone]);
+  useEffect(() => () => window.clearTimeout(autoTimer.current), []);
+
   if (!s && !cheer) return null;
   // a cheer takes over the bubble briefly, forcing it open
   const d: State = cheer
@@ -95,11 +112,10 @@ export default function Buddy() {
   };
   const color = TONE[d.tone] ?? "var(--accent)";
   const working = d.tone === "work" || d.tone === "ask";
-  const collapsed = cheer ? false : (override ?? (d.tone === "live"));   // rest = just the orb
+  const collapsed = !expanded && !cheer;   // tucked to just the orb, unless cheering
   const toggle = () => {
-    const next = !collapsed;
-    setOverride(next);
-    localStorage.setItem("hearth.buddy.collapsed", next ? "1" : "0");
+    window.clearTimeout(autoTimer.current);   // user takes over — stop the auto-tuck
+    setExpanded((e) => !e);
   };
   const attention = d.tone === "ask" || d.tone === "alert" || d.tone === "error"
     || d.tone === "news";
