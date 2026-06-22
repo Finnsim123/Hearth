@@ -1434,7 +1434,7 @@ function ConnectionsSection() {
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
     case "household": return (<><Household /><NewsletterDesign /><AdvancedAsking /></>);
-    case "model": return (<><FoundationalFacts /><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /><AdvancedTraining /></>);
+    case "model": return (<><FoundationalFacts /><TransitionMarkers /><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /><AdvancedTraining /></>);
     case "integrations": return <ConnectionsSection />;
     case "prompts": return <AiPrompts />;
     case "logs": return <Logs />;

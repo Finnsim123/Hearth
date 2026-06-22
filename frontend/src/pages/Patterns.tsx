@@ -130,6 +130,27 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
   const [ev, setEv] = useState<Evidence | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>(c.suggestions ?? []);
   const [suggesting, setSuggesting] = useState(false);
+  // a marker-like pattern is brief and time-concentrated (mirrors markers.looks_like_marker)
+  const total = c.hour_histogram.reduce((a, b) => a + b, 0);
+  const peak = Math.max(...c.hour_histogram, 0);
+  const top2 = [...c.hour_histogram].sort((a, b) => b - a).slice(0, 2).reduce((a, b) => a + b, 0);
+  const markerish = total >= 3 && (peak / total >= 0.4 || top2 / total >= 0.6) && c.n_windows <= 8;
+  const [mode, setMode] = useState<"activity" | "marker">(markerish ? "marker" : "activity");
+  const [mName, setMName] = useState("");
+  const [mFrom, setMFrom] = useState("");
+  const [mTo, setMTo] = useState("");
+  const createMarker = async () => {
+    if (!mTo) return;
+    setBusy(true); setMsg("");
+    try {
+      const r = await post(`/api/clusters/${c.id}/marker`, {
+        name: mName.trim() || "Transition", from_state: mFrom, to_state: mTo }).then(j);
+      cheerBuddy({ title: `Learned a transition: ${r.marker.name}`,
+                   detail: `marks ${r.marker.from_state || "any"} → ${r.marker.to_state}` });
+      setTimeout(onChange, 1600);
+    } catch { setMsg("Couldn't save the marker — check logs."); }
+    setBusy(false);
+  };
   useEffect(() => {
     fetch(`/api/clusters/${c.id}/evidence`).then(j).then(setEv).catch(() => {});
   }, [c.id]);
@@ -180,6 +201,39 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
       <SignatureLine plain={ev?.plain} raw={c.signature} />
       <HourHistogram hist={c.hour_histogram} />
 
+      {/* Is this an activity, or a moment that marks a change? */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="btn" onClick={() => setMode("activity")}
+          style={{ borderColor: mode === "activity" ? "var(--accent)" : undefined }}>Something I do</button>
+        <button className="btn" onClick={() => setMode("marker")}
+          style={{ borderColor: mode === "marker" ? "var(--accent)" : undefined }}>A moment of change</button>
+        {markerish && <span style={{ fontSize: 12, color: "var(--text-dim)" }}>brief &amp; time-locked — looks like a transition</span>}
+      </div>
+
+      {mode === "marker" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <input placeholder="Name (e.g. Wake up, Morning coffee)" value={mName}
+                 onChange={(e) => setMName(e.target.value)} />
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <select value={mFrom} onChange={(e) => setMFrom(e.target.value)}>
+              <option value="">from: any state</option>
+              {activities.map((a) => <option key={a.slug} value={a.slug}>{a.name}</option>)}
+            </select>
+            <span style={{ color: "var(--text-dim)" }}>→</span>
+            <select value={mTo} onChange={(e) => setMTo(e.target.value)}>
+              <option value="">to: pick a state…</option>
+              {activities.map((a) => <option key={a.slug} value={a.slug}>{a.name}</option>)}
+            </select>
+            <button className="btn btn-primary" disabled={!mTo || busy} onClick={createMarker}>
+              {busy ? "Saving…" : "Mark as transition"}
+            </button>
+          </div>
+          <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+            Bound to its main signal (<code>{c.signature?.[0]?.[0] ?? "—"}</code>). It won't be guessed as an activity — it nudges the switch into the new state.
+          </span>
+        </div>
+      ) : (
+      <>
       {/* Suggestions first — one tap to accept the AI's read of the moments above */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         {suggestions.length > 0 ? (
@@ -219,6 +273,8 @@ function PatternCard({ c, activities, personName, siblings, onChange }: {
           {busy ? "Labeling…" : "That's it — name it"}
         </button>
       </div>
+      </>
+      )}
 
       {/* Not-an-activity and merge are first-class outcomes, not afterthoughts:
           many clusters are everyday downtime, or a variant of something named. */}

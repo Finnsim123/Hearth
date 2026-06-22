@@ -66,7 +66,28 @@ def behaviour(person: str | None = None, days: int = 7) -> dict:
     return {"summary": s.model_dump(mode="json"),
             "trends": [c.model_dump(mode="json") for c in t],
             "body": body.model_dump(mode="json") if body else None,
+            "marker_flags": _marker_flags(pid, s.today),
             "persons": plist, "activities": acts}
+
+
+def _marker_flags(pid: str, today) -> list[dict]:
+    """Today's transition moments: where the published state crossed a marker's
+    from→to boundary. Rendered as flags on the Today ribbon."""
+    try:
+        from ..domain.markers import markers_for
+        mk = markers_for(_repo, pid) if _repo else []
+    except Exception:
+        mk = []
+    if not mk:
+        return []
+    out = []
+    for i in range(1, len(today)):
+        prev, cur = today[i - 1].activity, today[i].activity
+        for m in mk:
+            if m.to_state == cur and m.from_state in (None, prev):
+                out.append({"time": today[i].start, "name": m.name, "to": cur})
+                break
+    return out
 
 
 @router.get("/share")
