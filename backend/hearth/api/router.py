@@ -1627,14 +1627,24 @@ def build_api_router(deps: dict) -> APIRouter:
         if tsdb is None:
             raise HTTPException(409, "Connect InfluxDB first")
         slug = (body.get("activity_slug") or "").strip()
+        merged_into = None
         if not slug and body.get("name"):
             import re as _re
             name = str(body["name"]).strip()
-            slug = _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
-            if not slug:
-                raise HTTPException(400, "name needed")
-            if slug not in {a.slug for a in repo.activities()}:
-                repo.save_activity(Activity(slug=slug, name=name))
+            # Guard against duplicating an existing activity (esp. the reserved
+            # coarse states): "Alex out of the house" must fold into `away`, never
+            # mint a synonym. Deterministic, so it holds even when the AI slips.
+            from ..domain.labeling.dedupe import canonical_activity
+            existing = repo.activities()
+            dup = canonical_activity(name, existing, [p.name for p in repo.persons()])
+            if dup:
+                slug, merged_into = dup, dup
+            else:
+                slug = _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+                if not slug:
+                    raise HTTPException(400, "name needed")
+                if slug not in {a.slug for a in existing}:
+                    repo.save_activity(Activity(slug=slug, name=name))
         if not slug:
             raise HTTPException(400, "activity_slug or name required")
 
@@ -1651,7 +1661,7 @@ def build_api_router(deps: dict) -> APIRouter:
         rule = draft_rule_from_signature(card.signature, slug)
         rule.person_id = card.person_id or None
         rule = repo.save_rule(rule)
-        return {"ok": True, "activity": slug,
+        return {"ok": True, "activity": slug, "merged_into": merged_into,
                 "labeled_windows": len(card.example_windows),
                 "drafted_rule_id": rule.id}
 
