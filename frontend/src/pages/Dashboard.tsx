@@ -236,9 +236,25 @@ function WeekHeatmap({ preds, personId, ruleBased }:
   );
 }
 
+type CapReport = { has_model: boolean; reliable: string[];
+                   activities: { slug: string; tier: string }[] };
+
 function PersonCard({ person, preds, weekPreds }: { person: Person; preds: Pred[]; weekPreds: Pred[] }) {
   const latest = preds[0];
   const ruleBased = latest?.model_version?.startsWith("rules");
+  // honesty: don't present an activity the model can't actually do reliably as if
+  // it's certain. Facts (away/asleep) are always trustworthy regardless.
+  const cap = useQuery<CapReport>({
+    queryKey: ["capability", person.id],
+    queryFn: () => fetch(`/api/capability?person=${encodeURIComponent(person.id)}`).then((r) => r.json()),
+    staleTime: 300_000,
+  });
+  const tierOf = (slug?: string) => cap.data?.activities.find((a) => a.slug === slug)?.tier;
+  const isFact = !!latest?.model_version?.startsWith("fact");
+  const tier = latest ? (isFact ? "reliable" : tierOf(latest.smoothed)) : undefined;
+  const hedge = (!isFact && (tier === "unreliable" || tier === "blind")) ? "not reliable yet"
+              : (!isFact && tier === "learning") ? "still learning — not sure" : null;
+  const noReliable = !!cap.data?.has_model && (cap.data.reliable?.length ?? 0) === 0;
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14, flex: 1, minWidth: 280 }}>
       {latest ? (
@@ -246,11 +262,14 @@ function PersonCard({ person, preds, weekPreds }: { person: Person; preds: Pred[
           <Scene activity={latest.smoothed} person={person} />
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontWeight: 500 }}>{person.name}</span>
-            <span style={{ color: color(latest.smoothed), fontWeight: 500, textTransform: "capitalize" }}>
-              {latest.smoothed.replace("_", " ")}
+            <span style={{ color: color(latest.smoothed), fontWeight: 500, textTransform: "capitalize",
+                           opacity: hedge ? 0.6 : 1 }}>
+              {hedge ? "possibly " : ""}{latest.smoothed.replace("_", " ")}
             </span>
             <span style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "var(--text-dim)" }}>
-              <Conf v={latest.confidence} /> {Math.round(latest.confidence * 100)}% · since {t(latest.time)}
+              {hedge
+                ? <><Icon name="info" size={12} /> {hedge} · since {t(latest.time)}</>
+                : <><Conf v={latest.confidence} /> {Math.round(latest.confidence * 100)}% · since {t(latest.time)}</>}
             </span>
           </div>
         </div>
@@ -261,7 +280,18 @@ function PersonCard({ person, preds, weekPreds }: { person: Person; preds: Pred[
           <span style={{ fontSize: 13, color: "var(--text-dim)" }}>no predictions yet</span>
         </div>
       )}
-      <WeekHeatmap preds={weekPreds} personId={person.id} ruleBased={!!ruleBased} />
+      {noReliable && (
+        <div style={{ fontSize: 12.5, display: "flex", gap: 8, alignItems: "flex-start",
+                      padding: "8px 10px", borderRadius: 8,
+                      background: "color-mix(in srgb, var(--danger) 9%, transparent)",
+                      border: "1px solid color-mix(in srgb, var(--danger) 35%, var(--border))" }}>
+          <Icon name="info" size={14} />
+          <span>I can't reliably predict {person.name}'s activities yet with these sensors —
+            facts like home/away still hold. <a href="/models" style={{ color: "var(--accent)" }}>See what would help.</a></span>
+        </div>
+      )}
+      <WeekHeatmap preds={weekPreds} personId={person.id} ruleBased={!!ruleBased} unreliable={
+        new Set((cap.data?.activities ?? []).filter((a) => a.tier === "unreliable" || a.tier === "blind").map((a) => a.slug))} />
       {latest && <BasedOn latest={latest} />}
     </div>
   );

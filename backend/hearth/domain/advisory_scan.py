@@ -21,6 +21,42 @@ log = logging.getLogger(__name__)
 def refresh_system_advisories(repo) -> None:
     _coverage(repo)
     _model_health(repo)
+    _capability(repo)
+
+
+def _capability(repo) -> None:
+    """Honest 'I can't reliably do X' advisory with the concrete remedy."""
+    from .capability import assess_capability
+    from .coverage.advisor import gaps_from_home
+    try:
+        persons = list(repo.persons())
+        acts = repo.activities()
+    except Exception:
+        return
+    gaps = gaps_from_home(repo)
+    name_of = {a.slug: a.name for a in acts}
+    for p in persons:
+        kind = f"capability:{p.id}"
+        record = next((m for m in repo.models(p.id)
+                       if getattr(m, "promoted", False) and getattr(m, "node", "root") == "root"), None)
+        if record is None:
+            advisories.clear_advisory(repo, kind)
+            continue
+        rep = assess_capability(p.id, acts, record.metrics, gaps,
+                                name_of=lambda s: name_of.get(s, s))
+        broken = [a for a in rep.activities if a.tier in ("unreliable", "blind")]
+        if not broken:
+            advisories.clear_advisory(repo, kind)
+            continue
+        worst = broken[0]
+        names = ", ".join(name_of.get(a.slug, a.slug) for a in broken)
+        detail = f"I can't reliably tell {names} for {p.name}. {worst.remedy or ''}".strip()
+        fresh = kind not in (repo.get_setting(advisories.KEY) or {})
+        advisories.record_advisory(repo, kind,
+                                   f"Some activities aren't working for {p.name}", detail,
+                                   severity="info", cta={"label": "Models", "href": "/models"})
+        if fresh:
+            events.record_event(repo, "capability", "Honest check", detail)
 
 
 def _first_time(repo, kind: str) -> bool:

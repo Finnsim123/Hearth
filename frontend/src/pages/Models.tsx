@@ -892,6 +892,70 @@ function PersonPanel({ person, models, drift, auto, onToggleAuto, onRecompute, d
   );
 }
 
+type Cap = { slug: string; name: string; tier: string; reason: string;
+             remedy: string | null; f1: number | null; support: number; confused_with: string | null };
+type CapReport = { person_id: string | null; has_model: boolean; validation_status: string;
+                   overall: string; reliable: string[]; needs_help: string[]; activities: Cap[] };
+
+const TIER = {
+  reliable: { c: "var(--ok, #34D399)", label: "reliable" },
+  learning: { c: "var(--text-dim)", label: "learning" },
+  unreliable: { c: "#f59e0b", label: "not working" },
+  blind: { c: "var(--danger)", label: "blind" },
+} as const;
+
+/** Honest "what I can and can't do" — pairs every activity with its real quality
+ *  and, when it won't work, what would actually help. */
+function CapabilityPanel({ persons }: { persons: { id: string; name: string }[] }) {
+  const [pid, setPid] = useState("");
+  const [rep, setRep] = useState<CapReport | null>(null);
+  useEffect(() => {
+    const who = pid || persons[0]?.id || "";
+    const q = who ? `?person=${encodeURIComponent(who)}` : "";
+    fetch(`/api/capability${q}`).then(j).then(setRep).catch(() => setRep(null));
+  }, [pid, persons]);
+  if (!rep) return null;
+  const order = ["unreliable", "blind", "learning", "reliable"];
+  const acts = [...rep.activities].sort((a, b) => order.indexOf(a.tier) - order.indexOf(b.tier));
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16,
+                  display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <Icon name="check" size={16} />
+        <strong style={{ fontSize: 14.5 }}>What I can and can't do</strong>
+        {persons.length > 1 && (
+          <select value={pid || persons[0]?.id} onChange={(e) => setPid(e.target.value)}
+                  style={{ marginLeft: "auto", fontSize: 12.5 }}>
+            {persons.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
+      </div>
+      <p style={{ margin: 0, fontSize: 13.5 }}>{rep.overall}</p>
+      {acts.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {acts.map((a) => {
+            const t = TIER[a.tier as keyof typeof TIER] ?? TIER.learning;
+            return (
+              <div key={a.slug} style={{ display: "flex", gap: 9, alignItems: "baseline" }}>
+                <span style={{ width: 78, flex: "none", fontSize: 11, fontWeight: 500, color: t.c }}>{t.label}</span>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{a.name}</span>
+                  <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}> — {a.reason}</span>
+                  {a.remedy && (
+                    <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginTop: 1 }}>
+                      <Icon name="plus" size={12} /> {a.remedy}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Models() {
   const [models, setModels] = useState<Model[] | null>(null);
   const [persons, setPersons] = useState<{ id: string; name: string }[]>([]);
@@ -945,6 +1009,7 @@ export default function Models() {
         "tricky moments" is the harder windows Hearth asked about. New models go live only when the
         promotion gate says they're not credibly worse than the current one.
       </p>
+      {persons.length > 0 && <CapabilityPanel persons={persons} />}
       {trainMsg && <p style={{ margin: 0, fontSize: 13.5, color: "var(--accent)" }}>{trainMsg}</p>}
       {models === null && <p style={{ color: "var(--text-dim)" }}>Loading…</p>}
       {models !== null && Object.keys(byPerson).length === 0 && (
