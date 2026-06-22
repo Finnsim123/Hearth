@@ -1095,8 +1095,8 @@ function System() {
     restartAndReload(setRestarting);
   };
   return (
-    <Card title="System"
-          sub="Updates install from the top bar. Restart to apply new Home Assistant / InfluxDB connections.">
+    <Card title="Version & updates"
+          sub="Build, update status, and restart. Live load lives on the System page.">
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 14 }}>
         <span><span style={{ color: "var(--text-dim)" }}>Version&nbsp;</span><code>{info.build ?? "…"}</code></span>
         <span>
