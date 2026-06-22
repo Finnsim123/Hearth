@@ -129,8 +129,9 @@ def totp_uri(secret_b32: str, account: str, issuer: str = "Hearth") -> str:
 
 
 def new_recovery_codes(n: int = 8) -> list[str]:
-    """Human-typable one-time backup codes, e.g. 'a1b2-c3d4'."""
-    return [f"{_secrets.token_hex(2)}-{_secrets.token_hex(2)}" for _ in range(n)]
+    """Human-typable one-time backup codes, e.g. 'a1b2c3-d4e5f6' (48 bits each —
+    brute-force-resistant even before the login backoff applies)."""
+    return [f"{_secrets.token_hex(3)}-{_secrets.token_hex(3)}" for _ in range(n)]
 
 
 def recovery_sha(code: str) -> str:

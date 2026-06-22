@@ -846,6 +846,7 @@ class AppDb:
 
     def consume_recovery_code(self, user_id: int, code_plain: str) -> bool:
         """Mark a matching unused recovery code used. True if one matched."""
+        import hmac
         sha = security.recovery_sha(code_plain)
         with Session(self.engine) as s:
             r = s.get(UserRow, user_id)
@@ -853,7 +854,7 @@ class AppDb:
                 return False
             codes = json.loads(r.recovery_codes_json or "[]")
             for c in codes:
-                if c.get("sha") == sha and not c.get("used"):
+                if not c.get("used") and hmac.compare_digest(str(c.get("sha", "")), sha):
                     c["used"] = True
                     r.recovery_codes_json = json.dumps(codes)
                     s.commit()
