@@ -1027,6 +1027,83 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"entities": out, "total": len(inv), "disabled": n_disabled,
                 "bound": len(by_id), "available": sum(1 for e in out if not e["bound"])}
 
+    @api.get("/sensors/unassigned")
+    async def sensors_unassigned() -> dict:
+        """Entities Hearth left unbound but that look RELEVANT (diagnostics/noise
+        hidden), ranked so the easy wins — ones with a heuristic guess — come first.
+        The 'review the long tail' surface for sensor coverage."""
+        events = deps.get("events")
+        if events is None:
+            raise HTTPException(409, "Connect Home Assistant first")
+        from ..domain.onboarding.advisor import is_noise, suggest_role
+        inv = await events.discover_entities()
+        bound = {b.entity_id for b in repo.bindings()}
+        items, noise = [], 0
+        for e in inv:
+            if e.get("disabled") or e["entity_id"] in bound:
+                continue
+            if is_noise(e):
+                noise += 1
+                continue
+            role = suggest_role(e)
+            items.append({"entity_id": e["entity_id"], "domain": e.get("domain"),
+                          "friendly_name": e.get("friendly_name"), "area": e.get("area"),
+                          "device_class": e.get("device_class"), "state": e.get("state"),
+                          "suggested_role": role.value if role else None})
+        items.sort(key=lambda it: (it["suggested_role"] is not None,
+                                   bool(it["device_class"]), bool(it["area"])), reverse=True)
+        return {"unassigned": items, "count": len(items), "noise_hidden": noise,
+                "has_llm": repo.get_connection("llm") is not None}
+
+    @api.post("/sensors/assign")
+    def sensors_assign(body: dict) -> dict:
+        """Bind one entity to a role the user (or AI) chose — the manual/override
+        path, so it works even for entities the heuristic skipped."""
+        from ..domain.features.person_scope import binding_owner
+        from ..domain.onboarding.advisor import _slugify, is_bindable
+        from ..domain.schemas import Role
+        eid = (body.get("entity_id") or "").strip()
+        role_s = (body.get("role") or "").strip()
+        if not eid or not role_s:
+            raise HTTPException(400, "entity_id and role required")
+        try:
+            role = Role(role_s)
+        except Exception:
+            raise HTTPException(400, f"unknown role {role_s}")
+        if not is_bindable(eid, role, override=True):
+            raise HTTPException(400, "this entity can't back that role (stateless or blocked)")
+        name = _slugify(eid)
+        taken = {b.name for b in repo.bindings()}
+        while name in taken:
+            name += "_2"
+        b = Binding(entity_id=eid, role=role, name=name, room=body.get("area"), enabled=True)
+        b.person_id = binding_owner(b, repo.persons())
+        repo.save_binding(b)
+        return {"ok": True, "name": name, "role": role.value}
+
+    @api.post("/sensors/unassigned/suggest")
+    async def sensors_unassigned_suggest() -> dict:
+        """Ask the AI to propose roles for just the unassigned entities (scoped, so
+        it's cheap). Returns suggestions the user accepts one tap at a time."""
+        events = deps.get("events")
+        if events is None:
+            raise HTTPException(409, "Connect Home Assistant first")
+        if repo.get_connection("llm") is None:
+            raise HTTPException(409, "Add an AI key in Settings → Connections")
+        from ..adapters.openrouter_llm import OpenRouterAdvisor
+        from ..domain.onboarding.advisor import is_noise
+        inv = await events.discover_entities()
+        bound = {b.entity_id for b in repo.bindings()}
+        targets = [e for e in inv if not e.get("disabled")
+                   and e["entity_id"] not in bound and not is_noise(e)]
+        try:
+            props = await OpenRouterAdvisor(repo).propose_bindings(targets, repo.persons())
+        except Exception:
+            log.exception("scoped AI suggestion failed")
+            raise HTTPException(502, "AI suggestion failed — check the logs")
+        return {"suggestions": [{"entity_id": b.entity_id, "role": b.role.value}
+                                for b in props]}
+
     @api.post("/household/relink")
     async def relink_persons() -> dict:
         """Re-link every member to their home/away entity — LLM match (messy
