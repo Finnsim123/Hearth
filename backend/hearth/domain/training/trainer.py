@@ -164,7 +164,8 @@ def train_person(person_id: str, tsdb, repo, store,
     coarse_labels = labels.map(lambda lab: to_coarse(lab, pmap))
 
     record = _fit_node(person_id, "root", feats, coarse_labels, provenance, gold,
-                       repo, store, fset, end, excluded, force, cfg)
+                       repo, store, fset, end, excluded, force, cfg,
+                       baseline_labels=labels)
     if record is not None:
         from ..inference.smoothing import learn_transitions
         repo.set_setting(f"transitions.{person_id}", learn_transitions(coarse_labels))
@@ -183,10 +184,45 @@ def train_person(person_id: str, tsdb, repo, store,
     return record
 
 
+def _flat_baseline_metrics(feats, leaf_labels, provenance, gold, train_mask,
+                           end, cfg: TrainingConfig) -> dict:
+    """Flat multiclass leaf model on the SAME split as the hierarchy root — the
+    silent control that tells us whether LCPN's extra complexity is paying off
+    (audit F3). Returns a compact metrics subdict, or {} if not learnable."""
+    y_train = leaf_labels[train_mask]
+    if y_train.nunique() < 2:
+        return {}
+    X_train = feats[train_mask]
+    X_val = feats[~train_mask]
+    y_val, prov_val = leaf_labels[~train_mask], provenance[~train_mask]
+    gold_val = gold[~train_mask]
+    keep = y_val.isin(set(y_train.unique()))
+    X_val, y_val, prov_val, gold_val = X_val[keep], y_val[keep], prov_val[keep], gold_val[keep]
+    if len(X_val) < 5:
+        return {}
+    est = make_estimator(cfg.model_family)
+    if est.supports_sample_weight:
+        age_days = (end - X_train.index).total_seconds() / 86400
+        w = 0.5 ** (age_days / cfg.recency_half_life_days)
+        est.fit(X_train, y_train, sample_weight=w.to_numpy())
+    else:
+        est.fit(X_train, y_train)
+    m = evaluate_model(est, X_val, y_val, prov_val, gold_val)
+    # keep only the headline numbers — this is a comparison, not a shipped model
+    return {k: m[k] for k in ("accuracy_gold", "accuracy_confirmed",
+                              "accuracy_bootstrap", "n_gold", "n_confirmed")
+            if k in m}
+
+
 def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
               repo, store, fset: str, end, excluded, force: bool,
-              cfg: TrainingConfig) -> ModelRecord | None:
-    """Fit + evaluate + register + gate ONE hierarchy node's classifier."""
+              cfg: TrainingConfig, baseline_labels=None) -> ModelRecord | None:
+    """Fit + evaluate + register + gate ONE hierarchy node's classifier.
+
+    `baseline_labels` (root only): the FLAT leaf labels. A flat multiclass model
+    is trained on the same split and its accuracy stored under
+    metrics["flat_baseline"], so the hierarchy (LCPN) has to prove it beats the
+    simpler flat model — it doesn't always (audit F3)."""
     label_counts = {f"{prov}": int((provenance == prov).sum())
                     for prov in provenance.unique()}
     label_counts |= {f"class_{c}": int((labels == c).sum()) for c in labels.unique()}
@@ -245,6 +281,11 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
                     est.predict_proba(X_chk), y_chk)
             est.calibrate(X_val, y_val)        # refit on full val for deployment
             metrics["calibrated"] = True
+    if baseline_labels is not None:
+        bl = _flat_baseline_metrics(feats, baseline_labels, provenance, gold,
+                                    train_mask, end, cfg)
+        if bl:
+            metrics["flat_baseline"] = bl      # hierarchy must beat this (F3)
     if excluded:
         metrics["excluded_features"] = sorted(excluded)
     imp = est.importances()                # glass-box; {} for estimators without

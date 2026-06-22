@@ -197,6 +197,9 @@ def test_train_promote_and_beat_rules(world):
     # Estimator-port glass-box still flows through (importances + evidence profile)
     assert record.metrics["feature_importances"]               # non-empty
     assert "evidence_profile" in record.metrics
+    # flat multiclass baseline recorded so the hierarchy must earn its keep (F3)
+    assert "flat_baseline" in record.metrics
+    assert "accuracy_bootstrap" in record.metrics["flat_baseline"]
 
 
 def test_binary_auc_is_computed():
