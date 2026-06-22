@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import Avatar, { PRESET_HUES } from "../components/Avatar";
+import FoundationalFacts from "../components/FoundationalFacts";
 import { Icon, type IconName } from "../icons";
 import { applyTheme, getTheme, type ThemeMode } from "../theme";
 import Logs from "./Logs";
@@ -1104,7 +1105,7 @@ const SECTIONS: { key: SectionKey; icon: IconName; title: string; desc: string }
   { key: "household", icon: "household", title: "Household",
     desc: "People, avatars, notifications and daily question budgets." },
   { key: "model", icon: "models", title: "Model",
-    desc: "Data sharing, feature power, model family, clock trust, commit threshold and history retention." },
+    desc: "Ground-truth facts, data sharing, feature power, model family, clock trust, commit threshold and history retention." },
   { key: "integrations", icon: "flow", title: "Integrations",
     desc: "Home Assistant, InfluxDB, the AI assistant, and API tokens for the HA integration." },
   { key: "prompts", icon: "models", title: "AI prompts",
@@ -1150,7 +1151,7 @@ function ConnectionsSection() {
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
     case "household": return <Household />;
-    case "model": return (<><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /><AdvancedTraining /></>);
+    case "model": return (<><FoundationalFacts /><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /><AdvancedTraining /></>);
     case "integrations": return <ConnectionsSection />;
     case "prompts": return <AiPrompts />;
     case "logs": return <Logs />;

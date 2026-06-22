@@ -6,6 +6,7 @@
  */
 import { useEffect, useState } from "react";
 import { PRESET_HUES } from "../components/Avatar";
+import FoundationalFacts from "../components/FoundationalFacts";
 import Welcome from "./Welcome";
 import BubbleCloud, { type TriageCluster } from "../components/BubbleCloud";
 import { Icon } from "../icons";
@@ -13,7 +14,7 @@ import {
   Callout, ChoiceCard, Field, FooterNav, Progress, StepShell, TestRow, type TestState,
 } from "./ui";
 
-const TOTAL = 10;
+const TOTAL = 11;
 const STORE = "hearth.onboarding";
 
 type Member = { name: string; personEntity: string; hasDevice: boolean; notifyService: string; avatar: string; notifySystem: boolean; askBudget: number };
@@ -112,8 +113,9 @@ export default function Wizard() {
       {step === 6 && <StepAiAssist d={data} set={set} next={next} back={back} />}
       {step === 7 && <StepInventory d={data} set={set} next={next} back={back} />}
       {step === 8 && <StepActivities d={data} set={set} next={next} back={back} />}
-      {step === 9 && <StepOutput d={data} set={set} next={finishSetup} back={back} />}
-      {step === 10 && <StepDone d={data} />}
+      {step === 9 && <StepFoundational d={data} set={set} next={next} back={back} />}
+      {step === 10 && <StepOutput d={data} set={set} next={finishSetup} back={back} />}
+      {step === 11 && <StepDone d={data} />}
     </div>
   );
 }
@@ -346,7 +348,7 @@ function StepMqtt({ d, set, next, back }: StepProps) {
     <>
       <StepShell step={4} total={TOTAL} title="MQTT (optional)"
         explainer="Hearth's recommended way into HA is its own integration — no broker needed. MQTT is an alternative output channel; if you run HA's Mosquitto add-on you can hook it up now, or skip entirely.">
-        <ChoiceCard icon="check" title="Skip — use the Hearth integration" description="Recommended. You'll connect it in step 9 with one token." selected={m.use === "skip"} onSelect={() => set("mqtt", { ...m, use: "skip" })} />
+        <ChoiceCard icon="check" title="Skip — use the Hearth integration" description="Recommended. You'll connect it in step 10 with one token." selected={m.use === "skip"} onSelect={() => set("mqtt", { ...m, use: "skip" })} />
         <ChoiceCard icon="sensors" title="Use my HA broker" description="Hearth publishes MQTT-discovery entities through your existing Mosquitto." selected={m.use === "ha-broker"} onSelect={() => set("mqtt", { ...m, use: "ha-broker" })} />
         {m.use === "ha-broker" && (
           <Field label="Broker host" hint="Usually your HA host. Default port 1883; credentials can be added in Settings later.">
@@ -681,6 +683,18 @@ function StepActivities({ d, set, next, back }: StepProps) {
   );
 }
 
+function StepFoundational({ next, back }: StepProps) {
+  return (
+    <>
+      <StepShell step={9} total={TOTAL} title="What I can know for sure"
+        explainer="Some things Hearth never has to guess. When you're out, your presence already says so — Hearth marks you away and skips the model entirely (a fact beats a prediction, and saves compute). With a reliable sleep or bed sensor it can do the same for “asleep”. Bind those here or later in Settings — each one is checked for reliability before it's trusted as a fact.">
+        <FoundationalFacts wizard />
+      </StepShell>
+      <FooterNav onBack={back} onNext={next} skip={{ label: "Skip — set up later", onSkip: next }} />
+    </>
+  );
+}
+
 function StepOutput({ d, next, back }: StepProps) {
   const [token, setToken] = useState<string | null>(null);
   const [minting, setMinting] = useState(false);
@@ -704,7 +718,7 @@ function StepOutput({ d, next, back }: StepProps) {
   const flowLink = `${ha}/_my_redirect/config_flow_start?domain=hearth`;
   return (
     <>
-      <StepShell step={9} total={TOTAL} title="Send predictions back to Home Assistant"
+      <StepShell step={10} total={TOTAL} title="Send predictions back to Home Assistant"
         explainer="Install the Hearth integration in HA and it creates one device per person — sensors you can build automations on, like dimming the lights when a movie starts. The buttons below open the right screens directly in YOUR Home Assistant.">
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
@@ -776,7 +790,7 @@ function StepDone({ d }: { d: WizardData }) {
         ["Ongoing", "Hearth occasionally asks “was this right?” — every answer makes next week's model better."],
       ];
   return (
-    <StepShell step={10} total={TOTAL}
+    <StepShell step={11} total={TOTAL}
       title={fastTrack ? "You're all set — and you brought history" : "You're all set — come back in a few days"}
       explainer={fastTrack
         ? "Setup is done — and because you imported existing data, Hearth is skipping the waiting week and processing it right now:"
