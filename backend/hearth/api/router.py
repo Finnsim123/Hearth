@@ -373,6 +373,45 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"ok": True, "abstain_enabled": pol.abstain_enabled,
                 "abstain_threshold": pol.abstain_threshold}
 
+    # ── advanced training knobs (model_levers.md "advanced" tier) ─────────
+    _ADV_BOUNDS = {  # field: (min, max) — guards a bad value from breaking training
+        "promotion_margin": (0.0, 0.2),
+        "recency_half_life_days": (1.0, 365.0),
+        "val_days": (1.0, 60.0),
+        "tune_every_days": (1.0, 365.0),
+        "min_confirmed_for_validated": (1.0, 500.0),
+    }
+
+    @api.get("/settings/training-config")
+    def get_training_config() -> dict:
+        from dataclasses import asdict
+        from ..domain.training.trainer import load_training_config
+        cfg = asdict(load_training_config(repo))
+        return {"config": cfg, "editable": sorted(_ADV_BOUNDS),
+                "bounds": _ADV_BOUNDS}
+
+    @api.post("/settings/training-config")
+    def set_training_config(body: dict) -> dict:
+        cur = repo.get_setting("training.config") or {}
+        if not isinstance(cur, dict):
+            cur = {}
+        for k, v in body.items():
+            if k not in _ADV_BOUNDS:
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"{k} must be a number")
+            lo, hi = _ADV_BOUNDS[k]
+            if not lo <= fv <= hi:
+                raise HTTPException(400, f"{k} must be between {lo} and {hi}")
+            cur[k] = int(fv) if k in ("val_days", "tune_every_days",
+                                      "min_confirmed_for_validated") else fv
+        repo.set_setting("training.config", cur)
+        from dataclasses import asdict
+        from ..domain.training.trainer import load_training_config
+        return {"ok": True, "config": asdict(load_training_config(repo))}
+
     # ── aggregate-stats consent (privacy lever for the AI assistant) ───────
     @api.get("/stats-consent")
     def get_stats_consent() -> dict:

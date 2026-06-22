@@ -727,6 +727,55 @@ function TrainingWindow() {
   );
 }
 
+const ADV_FIELDS: { key: string; label: string; hint: string; step: number }[] = [
+  { key: "promotion_margin", label: "Promotion margin", step: 0.01,
+    hint: "How much worse a new model may be before it's rejected (CI slack). Lower = stricter." },
+  { key: "recency_half_life_days", label: "Recency half-life (days)", step: 1,
+    hint: "How fast old data fades in training. Lower = reacts faster to routine changes, remembers less." },
+  { key: "val_days", label: "Validation window (days)", step: 1,
+    hint: "Days held out to score each model. 7 = one full weekly cycle." },
+  { key: "tune_every_days", label: "Re-tune every (days)", step: 1,
+    hint: "How often hyper-parameters are re-tuned. Monthly avoids chasing weekly noise." },
+  { key: "min_confirmed_for_validated", label: "Labels to validate", step: 1,
+    hint: "Confirmed labels needed before a model is called “validated” instead of “provisional”." },
+];
+
+function AdvancedTraining() {
+  const [open, setOpen] = useState(false);
+  const [cfg, setCfg] = useState<Record<string, number> | null>(null);
+  const [state, setState] = useState<SaveState>("idle");
+  useEffect(() => {
+    fetch("/api/settings/training-config").then(j).then((r) => setCfg(r.config)).catch(() => {});
+  }, []);
+  const saveField = async (key: string, value: number) => {
+    setState("saving");
+    try {
+      const r = await post("/api/settings/training-config", { [key]: value }).then(j);
+      setCfg(r.config); setState("ok");
+    } catch { setState("fail"); }
+  };
+  return (
+    <Card title="Advanced model tuning"
+          sub="Sensible defaults — most homes never touch these. Each takes effect on the next training run.">
+      <button className="btn btn-ghost" style={{ alignSelf: "flex-start" }}
+              onClick={() => setOpen(!open)}>{open ? "Hide advanced" : "Show advanced"}</button>
+      {open && cfg && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {ADV_FIELDS.map((f) => (
+            <Row key={f.key} label={f.label} hint={f.hint}>
+              <input type="number" step={f.step} defaultValue={cfg[f.key]}
+                     style={{ width: 120 }}
+                     onBlur={(e) => { const v = Number(e.target.value);
+                       if (!Number.isNaN(v) && v !== cfg[f.key]) saveField(f.key, v); }} />
+            </Row>
+          ))}
+          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>{savedNote(state, true)}</p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 type CoveragePoint = { t: number; coverage: number; precision: number | null };
 
 function OutputPolicy() {
@@ -1101,7 +1150,7 @@ function ConnectionsSection() {
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
     case "household": return <Household />;
-    case "model": return (<><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /></>);
+    case "model": return (<><StatsConsent /><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><DataRetention /><TrainingWindow /><AdvancedTraining /></>);
     case "integrations": return <ConnectionsSection />;
     case "prompts": return <AiPrompts />;
     case "logs": return <Logs />;
