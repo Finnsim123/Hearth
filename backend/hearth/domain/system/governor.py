@@ -94,7 +94,13 @@ def decide_state(prev: GovernorState | None, v: Vitals,
     h = heaviness_index(v, cfg)
 
     # ── hard triggers: thermal ceiling or disk floor → CRITICAL immediately ──
-    if (v.temp_c is not None and v.temp_c >= cfg.temp_max) or v.disk_free_gb < cfg.min_disk_gb:
+    # Disk must be UNKNOWN-safe: a monitor that can't read the volume (psutil
+    # missing, bad data_path) returns the 0.0 default, and "unknown" must never
+    # be read as "0 GB free = full". A real near-full disk reports free < floor
+    # AND non-zero usage; an unread one is free==0 AND used==0 — skip that.
+    disk_known = v.disk_free_gb > 0.0 or v.disk_used_pct > 0.0
+    disk_floor = disk_known and v.disk_free_gb < cfg.min_disk_gb
+    if (v.temp_c is not None and v.temp_c >= cfg.temp_max) or disk_floor:
         return GovernorState.CRITICAL, h
     # thermal cooldown: once CRITICAL on heat, hold until back below temp_warn
     if prev == GovernorState.CRITICAL and v.temp_c is not None and v.temp_c > cfg.temp_warn:
