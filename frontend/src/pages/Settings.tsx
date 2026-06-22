@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Avatar, { PRESET_HUES } from "../components/Avatar";
 import FoundationalFacts from "../components/FoundationalFacts";
+import TransitionMarkers from "../components/TransitionMarkers";
 import { Icon, type IconName } from "../icons";
 import { applyTheme, getTheme, type ThemeMode } from "../theme";
 import Logs from "./Logs";

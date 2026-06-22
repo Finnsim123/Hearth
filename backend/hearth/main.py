@@ -149,6 +149,11 @@ def create_app() -> FastAPI:
     behaviour_routes.bind(deps["repo"], deps.get("tsdb"))
     app.include_router(behaviour_routes.router)
 
+    # transition markers: events (alarm/coffee) that mark a state change
+    from .api import markers_routes
+    markers_routes.bind(deps["repo"])
+    app.include_router(markers_routes.router)
+
     # ── auth middleware (docs/SECURITY.md) ──────────────────────────────────
     # /api/* requires a session, except: health, login, the integration
     # webhook (TODO: bearer scope check), and — ONLY while no users exist —

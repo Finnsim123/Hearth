@@ -1544,6 +1544,39 @@ def build_api_router(deps: dict) -> APIRouter:
                 "labeled_windows": len(card.example_windows),
                 "drafted_rule_id": rule.id}
 
+    @api.post("/clusters/{cluster_id}/marker")
+    def cluster_marker(cluster_id: int, body: dict) -> dict:
+        """Classify a discovered pattern as a TRANSITION MARKER, not an activity:
+        it marks moving from one state to another (asleep → home). No discovered
+        labels are emitted — the marker is bound to the cluster's dominant signal
+        and feeds the predictor's transition prior instead of the softmax."""
+        card = repo.get_cluster(cluster_id)
+        if card is None:
+            raise HTTPException(404, "no such pattern")
+        to_state = (body.get("to_state") or "").strip()
+        if not to_state:
+            raise HTTPException(400, "to_state required")
+        if not card.signature:
+            raise HTTPException(400, "this pattern has no signal to bind a marker to")
+        import re as _re
+
+        from ..domain.markers import (Marker, binding_from_feature, load_markers,
+                                      save_markers)
+        name = (body.get("name") or "transition").strip()
+        slug = _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or f"marker_{cluster_id}"
+        binding = binding_from_feature(card.signature[0][0])
+        m = Marker(slug=slug, name=name, to_state=to_state,
+                   from_state=(body.get("from_state") or None), binding_name=binding,
+                   person_id=card.person_id or None, source="discovery", cluster_id=card.id)
+        save_markers(repo, [x for x in load_markers(repo) if x.slug != slug] + [m])
+        card.status, card.named_activity_slug = "named", None
+        repo.save_cluster(card)
+        from ..domain.events import record_event
+        record_event(repo, "marker_created",
+                     f"Learned a transition: {name}",
+                     f"marks {m.from_state or 'any'} → {to_state} (from {binding})")
+        return {"ok": True, "marker": m.model_dump(mode="json"), "binding": binding}
+
     @api.post("/clusters/{cluster_id}/merge")
     def merge_cluster(cluster_id: int, body: dict) -> dict:
         """This pattern is the same as that one — fold it in."""

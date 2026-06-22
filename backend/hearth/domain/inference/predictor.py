@@ -108,6 +108,8 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         version = RULES_VERSION
 
     trans = repo.get_setting(f"transitions.{person_id}") or None
+    from ..markers import apply_marker_prior, marker_fired, markers_for
+    markers = markers_for(repo, person_id)
     tz_name = repo.get_setting("timezone", "UTC") or "UTC"
     out: list[Prediction] = []
     for ts in todo.index:
@@ -138,22 +140,29 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         # STATES, so it must run on the root row before the hierarchy picks a
         # fine label; applying it to the rules row could flip the argmax away
         # from the rule we then cite as the reason.
-        if trans and history and version != RULES_VERSION:
+        if (trans or markers) and history and version != RULES_VERSION:
             prev = history[0]
             prev_ts = prev.window_ts if prev.window_ts.tzinfo else \
                 prev.window_ts.replace(tzinfo=timezone.utc)
             if abs((ts.to_pydatetime() - prev_ts).total_seconds() - 1800) < 1:
-                from ..features.pipeline import _bucket
-                from .smoothing import transition_filter
                 prev_state = prev.parent or prev.predicted
-                # daypart of THIS window (local) selects the time-conditioned
-                # matrix; transition_filter falls back to "all" / flat (F6)
-                try:
-                    local_hour = ts.tz_convert(ZoneInfo(tz_name)).hour
-                except Exception:
-                    local_hour = ts.hour
-                row = transition_filter(row, prev_state, trans,
-                                        daypart=int(_bucket(int(local_hour))))
+                # learned transition prior (stationary, daypart-keyed)
+                if trans:
+                    from ..features.pipeline import _bucket
+                    from .smoothing import transition_filter
+                    try:
+                        local_hour = ts.tz_convert(ZoneInfo(tz_name)).hour
+                    except Exception:
+                        local_hour = ts.hour
+                    row = transition_filter(row, prev_state, trans,
+                                            daypart=int(_bucket(int(local_hour))))
+                # transition markers: an OBSERVED, time-localised trigger (alarm,
+                # coffee) sharply boosts P(from→to) so the published state switches
+                # cleanly at the right window. Markers are never classifier labels.
+                if markers:
+                    fired = [m for m in markers if marker_fired(todo.loc[ts], m)]
+                    if fired:
+                        row = apply_marker_prior(row, prev_state, fired)
         predicted = str(row.idxmax())
         confidence = float(row.max())
         parent = None
