@@ -387,111 +387,72 @@ function ModelCardSheet({ m, personName }: { m: Model; personName: string }) {
   );
 }
 
-function ModelCard({ m, onAction, personName }: { m: Model; onAction: () => void; personName: string }) {
-  const [open, setOpen] = useState(false);
-  const [card, setCard] = useState(false);
-  const [busy, setBusy] = useState("");
+/** Collapsible section. Children are mounted only while open, so any data fetch
+ *  inside runs lazily on first open (used for What-if / Drift / History). */
+function Fold({ title, hint, badge, defaultOpen = false, children }: {
+  title: string; hint?: string; badge?: ReactNode; defaultOpen?: boolean; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+      <button onClick={() => setOpen(!open)}
+        style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", border: "none",
+                 background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
+                 color: "var(--text)", padding: "9px 13px", textAlign: "left" }}>
+        <span style={{ color: "var(--text-dim)", display: "inline-flex", transition: "transform .15s",
+                       transform: open ? "rotate(90deg)" : "none", fontSize: 11 }}>▶</span>
+        <strong style={{ fontSize: 13 }}>{title}</strong>
+        {hint && <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{hint}</span>}
+        {badge && <span style={{ marginLeft: "auto" }}>{badge}</span>}
+      </button>
+      {open && <div style={{ padding: 13, borderTop: "1px solid var(--border)" }}>{children}</div>}
+    </div>
+  );
+}
+
+/** The live model's headline chip row. */
+function LiveChips({ m }: { m: Model }) {
   const mt = m.metrics ?? {};
-  const act = async (label: string, fn: () => Promise<Response>) => {
-    setBusy(label);
-    try { await fn().then(j); onAction(); } catch { /* refresh shows reality */ }
-    setBusy("");
-  };
   const confirmedLabels = m.label_counts?.confirmed ?? 0;
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16,
-                  display: "flex", flexDirection: "column", gap: 12,
-                  ...(m.promoted ? { borderColor: "var(--accent)" } : {}) }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <Icon name="models" size={16} />
-        <strong>{m.version}</strong>
-        {m.promoted && (
-          <span style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 99,
-                         background: "color-mix(in srgb, var(--accent) 18%, transparent)",
-                         color: "var(--accent)", fontWeight: 600 }}>LIVE</span>
-        )}
-        <StatusBadge status={mt.validation_status} nConfirmed={mt.n_confirmed ?? 0} />
-        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-          {m.trained_at ? new Date(m.trained_at).toLocaleString() : ""} · {m.algo}
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {!m.promoted && (
-            <button className="btn btn-secondary" disabled={!!busy}
-                    onClick={() => act("promote", () => fetch(`/api/models/${m.id}/promote`, { method: "POST" }))}>
-              {busy === "promote" ? "…" : "Promote"}
-            </button>
-          )}
-          <button className="btn btn-ghost" onClick={() => setCard(!card)}>
-            {card ? "Hide card" : "Model card"}
-          </button>
-          <button className="btn btn-ghost" onClick={() => setOpen(!open)}>
-            {open ? "Hide details" : "Details"}
-          </button>
-        </div>
-      </div>
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch" }}>
+      <HeroAccuracy mt={mt} />
+      <MetricChip label="on tricky moments" value={pct(mt.accuracy_confirmed)}
+        hint={mt.accuracy_confirmed_ci ? `95% CI: ${pct(mt.accuracy_confirmed_ci[0])}–${pct(mt.accuracy_confirmed_ci[1])}. Accuracy on the uncertain windows Hearth deliberately asked about — the HARD cases, so it reads lower than real-world accuracy.` : "no confirmed labels in validation yet"} />
+      <MetricChip label="bootstrap agr" value={pct(mt.accuracy_bootstrap)}
+        hint="Agreement with rule-generated labels — NOT real accuracy, the rules can be wrong" />
+      <MetricChip label="AUC (macro)" value={mt.auc_macro ? mt.auc_macro.toFixed(3) : "—"}
+        hint="Ranking quality across all classes; 1.0 = perfect, 0.5 = coin flip" />
+      <MetricChip label="train windows" value={String(mt.n_train ?? "—")} />
+      <MetricChip label="features" value={String(mt.feature_count ?? "—")} />
+      <MetricChip label="human labels" value={String(confirmedLabels)}
+        hint="Confirmed answers from notifications, the Inbox and ribbon corrections" />
+    </div>
+  );
+}
 
-      {card && <ModelCardSheet m={m} personName={personName} />}
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch" }}>
-        <HeroAccuracy mt={mt} />
-        <MetricChip label="on tricky moments" value={pct(mt.accuracy_confirmed)}
-          hint={mt.accuracy_confirmed_ci ? `95% CI: ${pct(mt.accuracy_confirmed_ci[0])}–${pct(mt.accuracy_confirmed_ci[1])}. Accuracy on the uncertain windows Hearth deliberately asked about — these are the HARD cases, so this reads lower than real-world accuracy. Great for training, not the fair headline.` : "no confirmed labels in validation yet"} />
-        <MetricChip label="bootstrap agr" value={pct(mt.accuracy_bootstrap)}
-          hint="Agreement with rule-generated labels — NOT real accuracy, the rules can be wrong" />
-        <MetricChip label="AUC (macro)" value={mt.auc_macro ? mt.auc_macro.toFixed(3) : "—"}
-          hint="Ranking quality across all classes; 1.0 = perfect, 0.5 = coin flip" />
-        <MetricChip label="train windows" value={String(mt.n_train ?? "—")} />
-        <MetricChip label="features" value={String(mt.feature_count ?? "—")} />
-        <MetricChip label="human labels" value={String(confirmedLabels)}
-          hint="Confirmed answers from notifications, the Inbox and ribbon corrections" />
-      </div>
-
-      {open && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {mt.per_class && (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ borderCollapse: "collapse", fontSize: 12.5, minWidth: 380 }}>
-                <thead><tr>
-                  {["activity", "precision", "recall", "F1", "support"].map((h) => (
-                    <th key={h} style={{ padding: 6, textAlign: h === "activity" ? "left" : "right",
-                                         color: "var(--text-dim)", fontWeight: 500 }}>{h}</th>))}
-                </tr></thead>
-                <tbody>
-                  {Object.entries(mt.per_class).map(([cls, v]) => (
-                    <tr key={cls} style={{ borderTop: "1px solid var(--border)" }}>
-                      <td style={{ padding: 6, fontWeight: 500 }}>{cls}</td>
-                      <td style={{ padding: 6, textAlign: "right" }}>{pct(v.precision)}</td>
-                      <td style={{ padding: 6, textAlign: "right" }}>{pct(v.recall)}</td>
-                      <td style={{ padding: 6, textAlign: "right" }}>{pct(v.f1)}</td>
-                      <td style={{ padding: 6, textAlign: "right", color: "var(--text-dim)" }}>{v.support}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {mt.confusion && <Confusion c={mt.confusion} />}
-          {mt.evidence_profile && Object.keys(mt.evidence_profile).length > 0 && (
-            <EvidenceBar profile={mt.evidence_profile} />
-          )}
-          {mt.calibration && (mt.calibration.reliability?.length ?? 0) > 0 && (
-            <Calibration cal={mt.calibration} />
-          )}
-          {mt.slices && mt.slices.by_activity_daypart.length > 0 && (
-            <SliceHeatmap slices={mt.slices} />
-          )}
-          {mt.feature_importances ? (
-            <div>
-              <h4 style={{ margin: "0 0 8px", fontSize: 13.5 }}>What the model looks at</h4>
-              <Importances imp={mt.feature_importances} />
-            </div>
-          ) : (
-            <p style={{ fontSize: 12.5, color: "var(--text-dim)", margin: 0 }}>
-              Feature importances appear for models trained from now on.
-            </p>
-          )}
-        </div>
-      )}
+/** Per-class precision/recall/F1 table for the live model. */
+function PerClassTable({ per }: { per: NonNullable<Metrics["per_class"]> }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ borderCollapse: "collapse", fontSize: 12.5, minWidth: 380 }}>
+        <thead><tr>
+          {["activity", "precision", "recall", "F1", "support"].map((h) => (
+            <th key={h} style={{ padding: 6, textAlign: h === "activity" ? "left" : "right",
+                                 color: "var(--text-dim)", fontWeight: 500 }}>{h}</th>))}
+        </tr></thead>
+        <tbody>
+          {Object.entries(per).map(([cls, v]) => (
+            <tr key={cls} style={{ borderTop: "1px solid var(--border)" }}>
+              <td style={{ padding: 6, fontWeight: 500 }}>{cls}</td>
+              <td style={{ padding: 6, textAlign: "right" }}>{pct(v.precision)}</td>
+              <td style={{ padding: 6, textAlign: "right" }}>{pct(v.recall)}</td>
+              <td style={{ padding: 6, textAlign: "right" }}>{pct(v.f1)}</td>
+              <td style={{ padding: 6, textAlign: "right", color: "var(--text-dim)" }}>{v.support}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

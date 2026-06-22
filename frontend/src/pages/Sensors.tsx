@@ -734,6 +734,107 @@ function FeatureSpecPanel({ nonce }: { nonce: number }) {
   );
 }
 
+type Unassigned = { entity_id: string; domain: string | null; friendly_name: string | null;
+                    area: string | null; device_class: string | null; suggested_role: string | null };
+
+/** Review the long tail: entities Hearth left unbound but that look relevant
+ *  (diagnostics hidden). One-click assign the heuristic guesses, set a role by
+ *  hand, or ask the AI to propose roles for just these. */
+function UnassignedSensors({ onAssigned }: { onAssigned: () => void }) {
+  const [data, setData] = useState<{ unassigned: Unassigned[]; count: number;
+                                     noise_hidden: number; has_llm: boolean } | null>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [aiRoles, setAiRoles] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState("");
+
+  const load = () => fetch("/api/sensors/unassigned").then(j).then(setData).catch(() => setData(null));
+  useEffect(() => { if (open && !data) load(); }, [open]);   // lazy: only scan when opened
+
+  const assign = async (eid: string, role: string, area: string | null) => {
+    if (!role) return;
+    setBusy(eid);
+    try {
+      await postJSON("/api/sensors/assign", { entity_id: eid, role, area });
+      setData((d) => d && { ...d, unassigned: d.unassigned.filter((u) => u.entity_id !== eid),
+                            count: d.count - 1 });
+      cheerBuddy({ title: "Sensor added", detail: `${eid} → ${role}` });
+      onAssigned();
+    } catch { setMsg(`Couldn't assign ${eid}.`); }
+    setBusy("");
+  };
+  const askAi = async () => {
+    setBusy("ai"); setMsg("");
+    try {
+      const r = await fetch("/api/sensors/unassigned/suggest", { method: "POST" }).then(j);
+      const m: Record<string, string> = {};
+      for (const s of r.suggestions ?? []) m[s.entity_id] = s.role;
+      setAiRoles(m);
+      setMsg(`AI proposed roles for ${Object.keys(m).length} sensor${Object.keys(m).length === 1 ? "" : "s"}.`);
+    } catch { setMsg("AI suggestion needs an AI key (Settings → Connections) and a working connection."); }
+    setBusy("");
+  };
+
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+      <button onClick={() => setOpen((o) => !o)}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
+                 background: "none", border: "none", cursor: "pointer", color: "var(--text)", fontSize: 14 }}>
+        <Icon name="search" size={16} />
+        <strong>Review unassigned sensors</strong>
+        {data && <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+          {data.count} worth a look · {data.noise_hidden} diagnostics hidden</span>}
+        <span style={{ marginLeft: "auto", color: "var(--text-dim)" }}>{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open && (
+        <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)", flex: 1 }}>
+              Real sensors Hearth didn't recognise. Assign the ones that matter; the rest are fine to leave.
+            </span>
+            <button className="btn btn-secondary" disabled={busy === "ai"} onClick={askAi}>
+              {busy === "ai" ? "Thinking…" : "Suggest roles with AI"}
+            </button>
+          </div>
+          {msg && <p style={{ margin: 0, fontSize: 12.5, color: "var(--accent)" }}>{msg}</p>}
+          {!data ? <p style={{ color: "var(--text-dim)" }}>Scanning…</p>
+            : data.unassigned.length === 0 ? <p style={{ color: "var(--text-dim)" }}>Nothing relevant unassigned — nice.</p>
+            : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 360, overflow: "auto" }}>
+                {data.unassigned.map((u) => {
+                  const guess = aiRoles[u.entity_id] || u.suggested_role || "";
+                  return (
+                    <div key={u.entity_id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ flex: 1, minWidth: 200, fontSize: 13 }}>
+                        {u.friendly_name || u.entity_id}
+                        <span style={{ color: "var(--text-dim)", fontSize: 12 }}>
+                          {" "}· {u.entity_id}{u.area ? ` · ${u.area}` : ""}{u.device_class ? ` · ${u.device_class}` : ""}
+                        </span>
+                      </span>
+                      {aiRoles[u.entity_id] && <RoleBadge role={aiRoles[u.entity_id]} />}
+                      <select defaultValue={guess} id={`role-${u.entity_id}`}
+                              style={{ fontSize: 12.5 }}>
+                        <option value="">role…</option>
+                        {ALL_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                      <button className="btn" disabled={busy === u.entity_id}
+                        onClick={() => assign(u.entity_id,
+                          (document.getElementById(`role-${u.entity_id}`) as HTMLSelectElement)?.value || guess,
+                          u.area)}>
+                        {busy === u.entity_id ? "…" : "Assign"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Sensors() {
   const [bindings, setBindings] = useState<Binding[] | null>(null);
   const [health, setHealth] = useState<Record<string, Health>>({});
@@ -856,6 +957,8 @@ export default function Sensors() {
           <button className="btn btn-secondary" onClick={cleanup}>Clean up junk</button>
         </div>
       </div>
+
+      <UnassignedSensors onAssigned={reload} />
 
       {members.some((m) => !m.person_alive) && (() => {
         const unlinked = members.filter((m) => !m.has_person);
