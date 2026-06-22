@@ -69,6 +69,9 @@ def test_sessions_count_and_length():
     assert cook.count == 2
     assert cook.longest_min == 60
     assert cook.mean_min == 45            # (60 + 30) / 2
+    # drill-down anchor: latest cooking window + its basis (model here)
+    assert cook.last_basis == "model"
+    assert cook.last_ts == (BASE + timedelta(minutes=120)).isoformat()
 
 
 def test_consistency_bands_from_sleep():
