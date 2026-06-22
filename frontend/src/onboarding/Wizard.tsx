@@ -17,7 +17,7 @@ import {
 const TOTAL = 11;
 const STORE = "hearth.onboarding";
 
-type Member = { name: string; personEntity: string; hasDevice: boolean; notifyService: string; avatar: string; notifySystem: boolean; askBudget: number };
+type Member = { name: string; personEntity: string; hasDevice: boolean; notifyService: string; avatar: string; notifySystem: boolean; askBudget: number; email: string; newsletter: boolean };
 
 type WizardData = {
   account: { name: string; email: string; password: string; confirm: string };
@@ -41,7 +41,7 @@ const empty: WizardData = {
   ha: { url: "http://homeassistant.local:8123", token: "" },
   influx: { mode: null, url: "", org: "", token: "", sourceBucket: "", importHistory: true },
   mqtt: { use: "ha-broker", host: "" },
-  members: [{ name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:ember", notifySystem: true, askBudget: 8 }],
+  members: [{ name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:ember", notifySystem: true, askBudget: 8, email: "", newsletter: false }],
   llmKey: "",
   llmModel: "openai/gpt-4o-mini",
   shareStats: false,
@@ -377,6 +377,17 @@ function StepHousehold({ d, set, next, back }: StepProps) {
                 <input placeholder="person.alex" value={m.personEntity} onChange={(e) => upd(idx, { personEntity: e.target.value })} />
               </Field>
             </div>
+            <Field label="Email (optional)" hint="For password recovery and, if enabled, the weekly habits newsletter.">
+              <input type="email" placeholder="alex@example.com" value={m.email}
+                     onChange={(e) => upd(idx, { email: e.target.value })} />
+            </Field>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14,
+                            opacity: m.email.trim() ? 1 : 0.5 }}>
+              <input type="checkbox" checked={m.newsletter} disabled={!m.email.trim()}
+                     onChange={(e) => upd(idx, { newsletter: e.target.checked })}
+                     style={{ width: 16, height: 16 }} />
+              Send a weekly habits email (detailed — leaves your local box; off by default)
+            </label>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <span style={{ fontSize: 14, fontWeight: 500 }}>Avatar</span>
               {Object.entries(PRESET_HUES).map(([key, hue]) => (
@@ -421,7 +432,7 @@ function StepHousehold({ d, set, next, back }: StepProps) {
           </div>
         ))}
         <button className="btn btn-secondary" style={{ alignSelf: "flex-start" }}
-          onClick={() => set("members", [...ms, { name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:indigo", notifySystem: false, askBudget: 5 }])}>
+          onClick={() => set("members", [...ms, { name: "", personEntity: "", hasDevice: true, notifyService: "", avatar: "preset:indigo", notifySystem: false, askBudget: 5, email: "", newsletter: false }])}>
           + Add another person
         </button>
         <Callout icon="household">

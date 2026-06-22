@@ -68,6 +68,8 @@ class PersonRow(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)  # slug
     name: Mapped[str] = mapped_column(String)
     avatar: Mapped[str | None] = mapped_column(String, nullable=True)
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    newsletter: Mapped[bool] = mapped_column(Boolean, default=False)
     ha_person_entity: Mapped[str | None] = mapped_column(String, nullable=True)
     notify_service: Mapped[str | None] = mapped_column(String, nullable=True)
     has_device: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -263,6 +265,7 @@ class AppDb:
             for r in s.scalars(select(PersonRow)).all():
                 qh = tuple(int(x) for x in r.quiet_hours.split(","))
                 out.append(Person(id=r.id, name=r.name, avatar=r.avatar,
+                                  email=r.email, newsletter=r.newsletter,
                                   ha_person_entity=r.ha_person_entity,
                                   notify_service=r.notify_service, has_device=r.has_device,
                                   notify_system=r.notify_system,
@@ -276,6 +279,7 @@ class AppDb:
             s.add(r)
             r.name, r.ha_person_entity, r.notify_service = p.name, p.ha_person_entity, p.notify_service
             r.avatar = p.avatar
+            r.email, r.newsletter = p.email, p.newsletter
             r.has_device, r.ask_budget_per_day, r.enabled = p.has_device, p.ask_budget_per_day, p.enabled
             r.notify_system = p.notify_system
             r.quiet_hours = f"{p.quiet_hours[0]},{p.quiet_hours[1]}"

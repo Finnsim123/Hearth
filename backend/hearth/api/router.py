@@ -651,6 +651,8 @@ def build_api_router(deps: dict) -> APIRouter:
         for m in body.get("members", []):
             repo.save_person(Person(id=_slug(m["name"]), name=m["name"],
                                     avatar=m.get("avatar"),
+                                    email=(m.get("email") or "").strip() or None,
+                                    newsletter=bool(m.get("newsletter", False)),
                                     ha_person_entity=m.get("personEntity") or None,
                                     notify_service=m.get("notifyService") or None,
                                     has_device=bool(m.get("hasDevice", True)),

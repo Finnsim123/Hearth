@@ -69,6 +69,8 @@ class Person(BaseModel):
     id: str  # slug, e.g. "alice"
     name: str
     avatar: str | None = None  # "preset:<hue>" or "upload:<path>" — UI renders both
+    email: str | None = None   # newsletter recipient (NOT a login; see User for auth)
+    newsletter: bool = False   # opt-in: weekly habits email. Off by default (privacy)
     ha_person_entity: str | None = None
     notify_service: str | None = None  # e.g. "mobile_app_alice_phone"
     has_device: bool = True
