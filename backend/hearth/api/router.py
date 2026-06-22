@@ -1426,6 +1426,21 @@ def build_api_router(deps: dict) -> APIRouter:
         from ..domain.training.drift import run_drift_check
         return {"reports": run_drift_check(tsdb, repo, deps.get("models"))}
 
+    @api.post("/predict/probe")
+    def predict_probe(body: dict) -> dict:
+        """What-If probe (UX8): score an (optionally edited) feature row through
+        the live model. body: {person_id, window_ts?, overrides?:{feat:value}}."""
+        tsdb = deps.get("tsdb")
+        store = deps.get("models")
+        if tsdb is None or store is None:
+            raise HTTPException(503, "model store unavailable")
+        pid = body.get("person_id")
+        if not pid:
+            raise HTTPException(400, "missing 'person_id'")
+        from ..domain.inference.whatif import probe_window
+        return probe_window(pid, tsdb, repo, store,
+                            body.get("window_ts"), body.get("overrides") or {})
+
     @api.get("/drift/auto-retrain")
     def drift_auto_retrain_get() -> dict:
         return {"enabled": bool(repo.get_setting("drift.auto_retrain", False))}

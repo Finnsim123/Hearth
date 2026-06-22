@@ -112,6 +112,8 @@ def plausibility(fact: pd.Series, profile: RoleProfile) -> dict:
         comps.append(min(1.0, median_block_min / profile.min_block_min) if profile.min_block_min else 1.0)
         comps.append(min(1.0, night_frac / profile.min_night_frac) if profile.min_night_frac else 1.0)
     score = float(np.mean(comps)) if comps else 0.0
+    if stuck:
+        score = 0.0          # a sensor that never changes carries no information
     return {"score": round(score, 3), "missing_frac": round(missing_frac, 3),
             "stuck": stuck, "flips_per_day": round(flips_per_day, 1),
             "median_block_min": round(median_block_min, 1),

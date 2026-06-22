@@ -719,6 +719,117 @@ function DriftHealth({ personName }: { personName: (id: string) => string }) {
   );
 }
 
+type Probe = {
+  error?: string;
+  window_ts?: string; predicted?: string; confidence?: number;
+  probabilities?: Record<string, number>; features?: Record<string, number>;
+  explanation?: [string, number][]; edited?: string[];
+};
+
+/** What-If probe (UX8): perturb a feature, watch the live model's prediction
+ *  move. The Google What-If Tool / LIT idiom — the standout trust-builder. */
+function WhatIfProbe({ personId }: { personId: string }) {
+  const [open, setOpen] = useState(false);
+  const [p, setP] = useState<Probe | null>(null);
+  const [ov, setOv] = useState<Record<string, number>>({});
+  const [busy, setBusy] = useState(false);
+  const probe = async (overrides: Record<string, number>) => {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/predict/probe", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_id: personId, overrides }) }).then(j);
+      setP(r);
+    } catch { setP({ error: "probe_failed" }); }
+    setBusy(false);
+  };
+  const toggle = () => { const n = !open; setOpen(n); if (n && !p) probe({}); };
+  const reset = () => { setOv({}); probe({}); };
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+      <button onClick={toggle}
+              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none",
+                       background: open ? "var(--surface-2)" : "transparent", cursor: "pointer",
+                       color: "var(--text)", padding: "10px 14px", textAlign: "left" }}>
+        <Icon name="models" size={15} />
+        <strong style={{ fontSize: 13.5 }}>What-if</strong>
+        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+          change a signal, watch the guess move
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--text-dim)" }}>
+          {open ? "Hide" : "Try it"}
+        </span>
+      </button>
+      {open && (
+        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14,
+                      borderTop: "1px solid var(--border)" }}>
+          {p?.error && <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+            {p.error === "no_model" ? "No live model yet." : p.error === "no_features"
+              ? "No recent feature windows to probe." : "Probe failed."}</p>}
+          {p && !p.error && (
+            <>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>predicts</span>
+                <strong style={{ fontSize: 18 }}>{p.predicted}</strong>
+                <span style={{ fontSize: 13, color: "var(--accent)", fontVariantNumeric: "tabular-nums" }}>
+                  {pct(p.confidence)}</span>
+                {(p.edited?.length ?? 0) > 0 && (
+                  <button className="btn btn-ghost" style={{ marginLeft: "auto" }} onClick={reset}>
+                    Reset</button>
+                )}
+              </div>
+              {p.probabilities && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  {Object.entries(p.probabilities).map(([cls, v]) => (
+                    <div key={cls} style={{ display: "grid", gridTemplateColumns: "minmax(80px,140px) 1fr 44px",
+                                            gap: 10, alignItems: "center", fontSize: 12.5 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cls}</span>
+                      <div style={{ height: 7, background: "var(--surface-2)", borderRadius: 4 }}>
+                        <div style={{ height: "100%", width: `${v * 100}%`,
+                                      background: cls === p.predicted ? "var(--accent)" : "var(--text-dim)",
+                                      borderRadius: 4 }} />
+                      </div>
+                      <span style={{ color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{pct(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {p.features && Object.keys(p.features).length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <h4 style={{ margin: 0, fontSize: 13 }}>Nudge a signal{busy ? " …" : ""}</h4>
+                  {Object.entries(p.features).map(([f, cur]) => {
+                    const val = ov[f] ?? cur;
+                    const max = Math.max(1, Math.abs(cur) * 2);
+                    return (
+                      <div key={f} style={{ display: "grid", gridTemplateColumns: "minmax(96px,200px) 1fr 56px",
+                                            gap: 10, alignItems: "center", fontSize: 12.5 }}>
+                        <code style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</code>
+                        <input type="range" min={0} max={max} step={max / 100} value={val}
+                               onChange={(e) => setOv({ ...ov, [f]: Number(e.target.value) })}
+                               onMouseUp={() => probe({ ...ov, [f]: val })}
+                               onTouchEnd={() => probe({ ...ov, [f]: val })} />
+                        <span style={{ color: ov[f] != null ? "var(--accent)" : "var(--text-dim)",
+                                       fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
+                          {val.toFixed(2)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {p.window_ts && (
+                <p style={{ margin: 0, fontSize: 11.5, color: "var(--text-dim)" }}>
+                  Based on the window at {new Date(p.window_ts).toLocaleString()}. Changes here are
+                  hypothetical — they don't alter stored data.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Models() {
   const [models, setModels] = useState<Model[] | null>(null);
   const [persons, setPersons] = useState<{ id: string; name: string }[]>([]);
@@ -776,6 +887,7 @@ export default function Models() {
               </button>
             </div>
             <PersonHistory models={sorted} />
+            {sorted.some((m) => m.promoted) && <WhatIfProbe personId={pid} />}
             {sorted.slice(0, 6).map((m) => <ModelCard key={m.id} m={m} onAction={load} personName={name} />)}
             {sorted.length > 6 && (
               <p style={{ fontSize: 12.5, color: "var(--text-dim)", margin: 0 }}>
