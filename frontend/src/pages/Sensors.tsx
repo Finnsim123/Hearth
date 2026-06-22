@@ -481,14 +481,15 @@ function TriagePanel({ nonce, onChange }: { nonce: number; onChange: () => void 
         <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12,
                       borderTop: "1px solid var(--border)" }}>
           <p style={{ margin: 0, fontSize: 13, color: "var(--text-dim)" }}>
-            Hearth clustered your entities and kept the activity-relevant ones. Tap a group to
-            keep or skip it, then re-analyse to remap with AI.
+            Hearth kept the groups most useful for learning routines — these are tuned for accuracy,
+            so you don't need to change anything. Switch a group off only to exclude something private;
+            edits may affect results. Re-analyse to remap with AI.
           </p>
           <BubbleCloud clusters={clusters} max={24}
             kept={kept}
             onToggle={tr!.has_llm ? (id) => setKept((k) => ({ ...k, [id]: !k[id] })) : undefined}
-            onSetAll={tr!.has_llm ? (keep) => setKept(Object.fromEntries(
-              clusters.map((c) => [triageId(c), keep]))) : undefined} />
+            onReset={tr!.has_llm ? () => setKept(Object.fromEntries(
+              clusters.map((c) => [triageId(c), c.relevant]))) : undefined} />
           {tr!.has_llm ? (
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <button className="btn btn-primary" disabled={busy || keptEstimate === 0 || (!dirty && !tr!.awaiting)}

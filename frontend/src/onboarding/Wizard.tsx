@@ -534,13 +534,14 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
               ))}
             </div>
             <p style={{ margin: 0, fontSize: 13.5, color: "var(--text-dim)" }}>
-              {triage.by === "llm" ? "AI grouped your entities" : "Grouped by type"} — tap a group to
-              keep or skip it. Only kept groups go into your model.
+              {triage.by === "llm" ? "Hearth's AI picked" : "Hearth picked"} the groups most useful for
+              learning your routines — these defaults are tuned for accuracy, so you don't need to change
+              anything. Switch a group off only to exclude something private; edits may affect results.
             </p>
             <BubbleCloud clusters={triage.clusters} kept={kept}
               onToggle={(l) => persist({ ...kept, [l]: !kept[l] })}
-              onSetAll={(keep) => persist(Object.fromEntries(
-                triage.clusters.map((c) => [c.category ?? c.label, keep])))} />
+              onReset={() => persist(Object.fromEntries(
+                triage.clusters.map((c) => [c.category ?? c.label, c.relevant])))} />
           </>
         )}
       </StepShell>

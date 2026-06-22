@@ -4,10 +4,16 @@
  * with a switch to keep or skip the whole group. Cards beat the old bubble
  * cloud here: the job is a keep/skip decision, so state must be legible at a
  * glance (switch + fill, not size + opacity) and the "why" has to be visible on
- * touch, not buried in a tooltip. Read-only by default; pass `kept` + `onToggle`
- * to make cards interactive, and `onSetAll` to enable the keep-all/skip-all bar.
- * Toggle state is keyed by the stable `category` (falling back to `label`), so it
- * survives re-scans and translation.
+ * touch, not buried in a tooltip.
+ *
+ * The DEFAULTS (each cluster's `relevant`) are Hearth's recommendation — tuned
+ * for accuracy at a point where there's no data yet to judge predictiveness, so
+ * they're the safe pick. This UI is opt-OUT: the user only needs to switch a
+ * group off to exclude something private; any deviation from the recommendation
+ * is flagged (it may affect results) with a one-click reset. Read-only by
+ * default; pass `kept` + `onToggle` to make cards interactive, and `onReset` to
+ * enable the "reset to recommended" action. Toggle state is keyed by the stable
+ * `category` (falling back to `label`), so it survives re-scans and translation.
  * Used by the wizard "Scanning your home" step, the Welcome hand-off, and the
  * Sensors "Entity groups" panel.
  */
@@ -37,34 +43,43 @@ function Switch({ on }: { on: boolean }) {
   );
 }
 
-export default function BubbleCloud({ clusters, total, keptCount, by, kept, onToggle, onSetAll, max = 18 }: {
+export default function BubbleCloud({ clusters, total, keptCount, by, kept, onToggle, onReset, max = 18 }: {
   clusters: TriageCluster[];
   total?: number;
   keptCount?: number;
   by?: string | null;
   kept?: Record<string, boolean>;
   onToggle?: (id: string) => void;
-  onSetAll?: (keep: boolean) => void;
+  onReset?: () => void;
   max?: number;
 }) {
   const shown = clusters.slice(0, max);
   if (!shown.length) return null;
   const interactive = !!onToggle;
   const on = (c: TriageCluster) => (kept ? !!kept[cid(c)] : c.relevant);
+  const off = (c: TriageCluster) => on(c) !== c.relevant;   // deviates from recommended
   const keptN = shown.filter(on).length;
+  const changedN = shown.filter(off).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {interactive && onSetAll && (
-        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12.5,
-                      color: "var(--text-dim)" }}>
+      {interactive && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5,
+                      color: "var(--text-dim)", flexWrap: "wrap" }}>
           <span><strong style={{ color: "var(--text)" }}>{keptN}</strong> of {shown.length} kept</span>
-          <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8 }}>
-            <button type="button" onClick={() => onSetAll(true)} className="btn btn-ghost"
-              style={{ fontSize: 12, minHeight: 0, padding: "4px 10px" }}>Keep all</button>
-            <button type="button" onClick={() => onSetAll(false)} className="btn btn-ghost"
-              style={{ fontSize: 12, minHeight: 0, padding: "4px 10px" }}>Skip all</button>
-          </span>
+          {changedN > 0 ? (
+            <span style={{ color: "var(--warn)" }}>
+              · {changedN} changed from recommended — may affect accuracy
+            </span>
+          ) : (
+            <span>· using Hearth's recommended picks</span>
+          )}
+          {onReset && changedN > 0 && (
+            <button type="button" onClick={onReset} className="btn btn-ghost"
+              style={{ marginLeft: "auto", fontSize: 12, minHeight: 0, padding: "4px 10px" }}>
+              Reset to recommended
+            </button>
+          )}
         </div>
       )}
       <div style={{ display: "grid", gap: 10,
@@ -99,6 +114,11 @@ export default function BubbleCloud({ clusters, total, keptCount, by, kept, onTo
                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.label}</span>
                   <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 600,
                            fontVariantNumeric: "tabular-nums", color: "var(--text-dim)" }}>{c.count}</span>
+                  {interactive && off(c) && (
+                    <span title={`Changed from Hearth's recommendation (${c.relevant ? "keep" : "skip"})`}
+                      style={{ flexShrink: 0, width: 6, height: 6, borderRadius: "50%",
+                               background: "var(--warn)" }} />
+                  )}
                 </span>
                 {c.why && (
                   <span style={{ fontSize: 11.5, lineHeight: 1.3, color: "var(--text-dim)",
