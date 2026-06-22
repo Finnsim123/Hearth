@@ -27,6 +27,27 @@ def wilson_interval(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
     return (max(0.0, center - half), min(1.0, center + half))
 
 
+def reliability_metrics(probs: pd.DataFrame, y_true: pd.Series, bins: int = 10) -> dict:
+    """Whether calibrated confidence is honest (audit F4): multiclass Brier score
+    and Expected Calibration Error on a HELD-OUT slice. Brier ↓ = sharper+truer;
+    ECE = mean |confidence − accuracy| across confidence bins (0 = '0.75 really
+    means 75%'). Computed on a slice NOT used to fit the calibrators."""
+    classes = list(probs.columns)
+    p = probs[classes].to_numpy()
+    onehot = pd.get_dummies(y_true).reindex(columns=classes, fill_value=0).to_numpy()
+    brier = float(((p - onehot) ** 2).sum(axis=1).mean())
+    conf = probs.max(axis=1).to_numpy()
+    acc = (probs.idxmax(axis=1).to_numpy() == y_true.to_numpy()).astype(float)
+    edges = np.linspace(0.0, 1.0, bins + 1)
+    n = len(conf)
+    ece = 0.0
+    for i in range(bins):
+        m = (conf > edges[i]) & (conf <= edges[i + 1])
+        if m.sum():
+            ece += (m.sum() / n) * abs(acc[m].mean() - conf[m].mean())
+    return {"brier": round(brier, 4), "ece": round(float(ece), 4), "n_check": int(n)}
+
+
 def population_stability_index(expected: pd.Series, actual: pd.Series, bins: int = 10) -> float:
     """Feature drift score (>0.2 = investigate). Quantile bins on `expected`."""
     if expected.empty or actual.empty:

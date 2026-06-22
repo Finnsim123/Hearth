@@ -229,10 +229,22 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
     train_acc = float((est.predict_proba(X_train).idxmax(axis=1) == y_train).mean())
     metrics["accuracy_train"] = round(train_acc, 4)
     metrics["hyperparams"] = params
-    if len(X_val) >= 100 and est.calibrate(X_val, y_val):
-        # AFTER evaluation (metrics stay honest): so 0.75 confidence actually
-        # means ~75% downstream. calibrate() returns False if unsupported.
-        metrics["calibrated"] = True
+    if len(X_val) >= 100:
+        # AFTER evaluation (metrics stay honest). Fit isotonic on an EARLIER
+        # calib slice and measure reliability out-of-sample on the later check
+        # slice (audit F4 — don't fit and trust on the same points), then refit
+        # on all of val for deployment: the reported Brier/ECE reflects
+        # generalization while the shipped calibrator uses every label.
+        cut = int(len(X_val) * 0.6)
+        X_cal, y_cal = X_val.iloc[:cut], y_val.iloc[:cut]
+        X_chk, y_chk = X_val.iloc[cut:], y_val.iloc[cut:]
+        if est.calibrate(X_cal, y_cal):
+            if len(X_chk) >= 20:
+                from .evaluate import reliability_metrics
+                metrics["calibration"] = reliability_metrics(
+                    est.predict_proba(X_chk), y_chk)
+            est.calibrate(X_val, y_val)        # refit on full val for deployment
+            metrics["calibrated"] = True
     if excluded:
         metrics["excluded_features"] = sorted(excluded)
     imp = est.importances()                # glass-box; {} for estimators without

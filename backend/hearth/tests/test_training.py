@@ -160,6 +160,22 @@ def test_gold_headline_is_explore_subset_only():
     assert m2["n_gold"] == 0 and "accuracy_gold" not in m2
 
 
+def test_reliability_metrics_brier_ece():
+    """Perfectly-calibrated, perfectly-confident probs → Brier 0, ECE 0 (F4)."""
+    from hearth.domain.training.evaluate import reliability_metrics
+    idx = pd.date_range("2026-06-01", periods=20, freq="30min", tz="UTC")
+    y = pd.Series(["home"] * 10 + ["away"] * 10, index=idx)
+    probs = pd.DataFrame({"home": [1.0] * 10 + [0.0] * 10,
+                          "away": [0.0] * 10 + [1.0] * 10}, index=idx)
+    m = reliability_metrics(probs, y)
+    assert m["brier"] == 0.0 and m["ece"] == 0.0 and m["n_check"] == 20
+    # always-confident "away": right on away rows, wrong on home rows →
+    # Brier 2.0 on the wrong half, 0 on the right half = 1.0; conf 1.0 vs acc 0.5
+    bad = pd.DataFrame({"home": [0.0] * 20, "away": [1.0] * 20}, index=idx)
+    mb = reliability_metrics(bad, y)
+    assert mb["brier"] == 1.0 and abs(mb["ece"] - 0.5) < 1e-9
+
+
 def test_smoothing_hysteresis():
     base = Prediction(person_id="a", window_ts=datetime.now(timezone.utc),
                       model_version="v", predicted="sleeping", smoothed="sleeping",
