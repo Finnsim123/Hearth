@@ -1,6 +1,7 @@
 /** Sign-in screen — shown whenever /api/auth/me returns 401 after setup.
- *  Also hosts the password-recovery form (no mail server: the operator mints a
- *  token from a shell, then redeems it here). Reachable at /reset too. */
+ *  Also hosts password recovery: request an emailed reset link (when SMTP is
+ *  configured), or redeem a token (from the email, the /reset?token= link, or the
+ *  `hearth.recover` CLI fallback). Reachable at /reset too. */
 import { useState } from "react";
 
 const Logo = () => (
@@ -24,7 +25,9 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
     () => (typeof window !== "undefined" && window.location.pathname === "/reset") ? "reset" : "login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(
+    () => (typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("token") ?? "" : ""));
   const [newPw, setNewPw] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -66,10 +69,31 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
     }
   };
 
+  const forgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(null); setOk(null);
+    await fetch("/api/auth/forgot", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim() }) });
+    setBusy(false);
+    setOk("If that address has an account, a reset link is on its way. Check your inbox, then paste the token below.");
+  };
+
   if (mode === "reset") {
     return wrap(<>
       <p style={{ margin: 0, fontSize: 13.5, color: "var(--text-dim)" }}>
-        Locked out? On the machine running Hearth, get a one-time token:
+        Enter your email and we'll send a one-time reset link (if email is set up).
+      </p>
+      <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 500 }}>
+        Email
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+      </label>
+      {ok && <span style={{ color: "var(--ok, #34D399)", fontSize: 13 }}>{ok}</span>}
+      <button className="btn btn-ghost" disabled={busy || !email} onClick={forgot}>
+        {busy ? "Sending…" : "Email me a reset link"}
+      </button>
+      <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "var(--text-dim)" }}>
+        No email set up? On the machine running Hearth, mint a token:
       </p>
       <code style={{ fontSize: 12, background: "var(--surface-2)", border: "1px solid var(--border)",
                      borderRadius: 8, padding: "8px 10px", overflowWrap: "anywhere" }}>

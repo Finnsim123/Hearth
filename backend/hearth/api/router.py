@@ -93,6 +93,35 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(400, "Invalid or expired recovery token")
         return {"ok": True}
 
+    @api.post("/auth/forgot")
+    def forgot_password(body: dict) -> dict:
+        """Email a one-time recovery link to a known account. Always returns ok —
+        never reveal whether an address has an account (enumeration guard). Needs
+        SMTP configured; the CLI (`python -m hearth.recover`) remains the fallback
+        when email isn't set up."""
+        from ..security import mint_reset_token
+        email = (body.get("email") or "").strip().lower()
+        sender = deps.get("email")
+        user = repo.user_by_email(email) if email else None
+        if user and sender is not None and sender.configured():
+            token, sha = mint_reset_token()
+            repo.create_reset_token(user.id, sha, hours=1)
+            base = (repo.get_setting("hearth_base_url") or "").rstrip("/")
+            link = f"{base}/reset?token={token}" if base else None
+            html = (f"<p>Hi {user.display_name or 'there'},</p>"
+                    "<p>Someone asked to reset your Hearth password. This link is valid "
+                    "for one hour and can be used once:</p>"
+                    + (f'<p><a href="{link}">{link}</a></p>' if link else "")
+                    + f"<p>Or open <b>/reset</b> in Hearth and paste this token:</p>"
+                      f"<p><code>{token}</code></p>"
+                    "<p>If you didn't request this, ignore this email — your password "
+                    "stays unchanged.</p>")
+            text = (f"Reset your Hearth password (valid 1 hour, single use).\n"
+                    + (f"{link}\n\n" if link else "")
+                    + f"Or open /reset and paste this token:\n{token}\n")
+            sender.send(user.email, "Reset your Hearth password", html, text)
+        return {"ok": True}
+
     @api.get("/health")
     def health() -> dict:
         import os
