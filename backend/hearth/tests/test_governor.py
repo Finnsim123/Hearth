@@ -91,3 +91,16 @@ def test_plan_and_yield():
     assert plan_for(GovernorState.CRITICAL).admitted == {INFERENCE}
     assert should_yield(GovernorState.HIGH) is True
     assert should_yield(GovernorState.ELEVATED) is False
+
+
+def test_unknown_disk_is_not_critical():
+    """A monitor that can't read the volume returns disk_free_gb=0.0; that
+    "unknown" must NOT be read as a full disk (the false-CRITICAL / stuck-heavy
+    bug). Only a real reading (non-zero usage) trips the floor."""
+    from hearth.domain.system.governor import GovernorState, decide_state
+    from hearth.domain.system.vitals import Vitals
+    # empty snapshot (psutil missing / bad path) → NORMAL, not CRITICAL
+    assert decide_state(GovernorState.NORMAL, Vitals())[0] == GovernorState.NORMAL
+    # a genuinely near-full disk (free<1GB AND used reported) → CRITICAL
+    full = Vitals(disk_free_gb=0.3, disk_used_pct=99.0)
+    assert decide_state(GovernorState.NORMAL, full)[0] == GovernorState.CRITICAL
