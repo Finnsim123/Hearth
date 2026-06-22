@@ -486,7 +486,9 @@ function TriagePanel({ nonce, onChange }: { nonce: number; onChange: () => void 
           </p>
           <BubbleCloud clusters={clusters} max={24}
             kept={kept}
-            onToggle={tr!.has_llm ? (id) => setKept((k) => ({ ...k, [id]: !k[id] })) : undefined} />
+            onToggle={tr!.has_llm ? (id) => setKept((k) => ({ ...k, [id]: !k[id] })) : undefined}
+            onSetAll={tr!.has_llm ? (keep) => setKept(Object.fromEntries(
+              clusters.map((c) => [triageId(c), keep]))) : undefined} />
           {tr!.has_llm ? (
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <button className="btn btn-primary" disabled={busy || keptEstimate === 0 || (!dirty && !tr!.awaiting)}

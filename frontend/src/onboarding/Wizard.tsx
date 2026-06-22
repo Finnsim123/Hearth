@@ -536,7 +536,9 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
               keep or skip it. Only kept groups go into your model.
             </p>
             <BubbleCloud clusters={triage.clusters} kept={kept}
-              onToggle={(l) => persist({ ...kept, [l]: !kept[l] })} />
+              onToggle={(l) => persist({ ...kept, [l]: !kept[l] })}
+              onSetAll={(keep) => persist(Object.fromEntries(
+                triage.clusters.map((c) => [c.category ?? c.label, keep])))} />
           </>
         )}
       </StepShell>
