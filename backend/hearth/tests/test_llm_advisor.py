@@ -16,6 +16,12 @@ BINDINGS = [Binding(entity_id="sensor.matras_links", role=Role.BED, name="bed_li
 ACTS = [Activity(slug="sleeping", name="Sleeping"), Activity(slug="home", name="Home")]
 
 
+class _Stream:
+    """Mimics aiohttp resp.content for the capped reader (read_*_capped)."""
+    def __init__(self, body: bytes): self._body = body
+    async def iter_chunked(self, _n): yield self._body
+
+
 class FakeRepo:
     def get_connection(self, kind):
         return {"url": "http://x", "token": "t", "options": {}}
@@ -101,12 +107,14 @@ async def test_chat_emits_sending_then_received_activity(monkeypatch):
 
     adv = OpenRouterAdvisor(RecRepo())
 
+    _BODY1 = json.dumps({"choices": [{"message": {"content": "[1, 2, 3]"},
+                                      "finish_reason": "stop"}],
+                         "usage": {"completion_tokens": 7}}).encode()
+
     class FakeResp:
         status = 200
-        async def text(self):
-            return json.dumps({"choices": [{"message": {"content": "[1, 2, 3]"},
-                                            "finish_reason": "stop"}],
-                               "usage": {"completion_tokens": 7}})
+        content = _Stream(_BODY1)
+        async def text(self): return _BODY1.decode()
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
 
@@ -140,12 +148,14 @@ async def test_chat_accumulates_usage(monkeypatch):
 
     adv = OpenRouterAdvisor(UsageRepo())
 
+    _BODY2 = json.dumps({"choices": [{"message": {"content": "[1]"},
+                                      "finish_reason": "stop"}],
+                         "usage": {"prompt_tokens": 100, "completion_tokens": 50}}).encode()
+
     class FakeResp:
         status = 200
-        async def text(self):
-            return json.dumps({"choices": [{"message": {"content": "[1]"},
-                                            "finish_reason": "stop"}],
-                               "usage": {"prompt_tokens": 100, "completion_tokens": 50}})
+        content = _Stream(_BODY2)
+        async def text(self): return _BODY2.decode()
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
 

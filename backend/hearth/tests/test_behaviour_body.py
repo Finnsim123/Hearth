@@ -66,7 +66,22 @@ def test_cross_tab_attributes_steps_to_the_activity():
     assert s.by_activity["cleaning"] == 600  # delta in the 01:00 window
 
 
+def test_charging_windows_split_coverage_and_drop_from_activity():
+    # steps in 4 diff windows; charging during the last two → those are "docked",
+    # excluded from totals/worn, counted as charging.
+    counters = {"steps": _samples([(0, 0), (30, 100), (60, 200), (90, 1000), (120, 1100)])}
+    charging = [(BASE + timedelta(minutes=90), "on"), (BASE + timedelta(minutes=120), "charging")]
+    s = summarize_body("alice", counters, [], tz="UTC",
+                       now=BASE + timedelta(minutes=150), range_start=BASE, charging=charging)
+    assert s.total["steps"] == 200          # only the two non-charging windows
+    assert s.worn_min == 60                  # 2 worn windows
+    assert s.charging_min == 60              # 2 docked windows
+    assert s.absent_min == 30                # 1 window with no data
+    assert s.coverage == round(2 / 5, 4)
+
+
 def test_empty_is_safe():
     s = summarize_body("alice", {}, [], tz="UTC", now=BASE, range_start=BASE)
     assert s.signals == [] and s.primary is None and s.per_day == []
     assert s.coverage == 0.0 and s.by_activity == {}
+    assert s.worn_min == 0 and s.charging_min == 0 and s.absent_min == 0

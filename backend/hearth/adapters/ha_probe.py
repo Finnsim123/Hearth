@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import aiohttp
 
+from ._httpcap import read_json_capped
+
 
 async def probe(url: str, token: str) -> dict:
     """-> {reachable, authed, entities, version, error} — staged truth."""
@@ -26,13 +28,13 @@ async def probe(url: str, token: str) -> dict:
                     return out
                 r.raise_for_status()
                 out["authed"] = True
-                cfg = await r.json()
+                cfg = await read_json_capped(r, 4 * 1024 * 1024)
                 out["version"] = cfg.get("version")
                 out["timezone"] = cfg.get("time_zone")
             async with session.get(f"{base}/api/states",
                                    headers={"Authorization": f"Bearer {token}"}) as r:
                 r.raise_for_status()
-                out["entities"] = len(await r.json())
+                out["entities"] = len(await read_json_capped(r))
     except aiohttp.ClientConnectorError as exc:
         out["error"] = f"Can't reach HA at this URL ({exc.__class__.__name__})"
     except Exception as exc:
@@ -48,7 +50,7 @@ async def rest_inventory(url: str, token: str) -> list[dict]:
         async with session.get(f"{base}/api/states",
                                headers={"Authorization": f"Bearer {token}"}) as r:
             r.raise_for_status()
-            states = await r.json()
+            states = await read_json_capped(r)
     out = []
     for st in states:
         eid = st["entity_id"]

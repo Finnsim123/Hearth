@@ -1717,6 +1717,58 @@ def build_api_router(deps: dict) -> APIRouter:
                 "note": None if applied else
                         "saved — applies when InfluxDB is connected (restart to apply now)"}
 
+    # ── outbound email (SMTP relay — newsletter + auth recovery) ──────────
+    @api.get("/settings/email")
+    def get_email() -> dict:
+        """Current SMTP config, password masked. Never returns the secret."""
+        from ..security import mask
+        conn = repo.get_connection("smtp")
+        if not conn:
+            return {"configured": False, "host": "", "port": 587, "username": "",
+                    "from": "", "from_name": "Hearth", "tls": "starttls"}
+        o = conn.get("options") or {}
+        return {"configured": True, "host": conn["url"], "port": int(o.get("port", 587)),
+                "username": o.get("username", ""), "from": o.get("from", ""),
+                "from_name": o.get("from_name", "Hearth"), "tls": o.get("tls", "starttls"),
+                "password": mask(conn.get("token", ""))}
+
+    @api.post("/settings/email")
+    def set_email(body: dict) -> dict:
+        """Save SMTP relay creds (password encrypted at rest). Leave password
+        blank to keep the existing one. host/username/from required when setting up."""
+        host = (body.get("host") or "").strip()
+        if not host:
+            raise HTTPException(400, "host is required (e.g. smtp.gmail.com)")
+        existing = repo.get_connection("smtp")
+        password = body.get("password") or (existing.get("token") if existing else "")
+        if not password:
+            raise HTTPException(400, "password (app-password) is required")
+        tls = body.get("tls", "starttls")
+        if tls not in ("starttls", "ssl", "none"):
+            raise HTTPException(400, "tls must be starttls, ssl or none")
+        username = (body.get("username") or "").strip()
+        options = {"port": int(body.get("port", 587)), "username": username,
+                   "from": (body.get("from") or username).strip(),
+                   "from_name": (body.get("from_name") or "Hearth").strip(), "tls": tls}
+        repo.set_connection("smtp", host, password, options)
+        return {"ok": True}
+
+    @api.post("/settings/email/test")
+    def test_email(body: dict) -> dict:
+        """Send a test message to prove the relay works before relying on it."""
+        sender = deps.get("email")
+        if sender is None or not sender.configured():
+            raise HTTPException(409, "Configure SMTP first")
+        to = (body.get("to") or "").strip()
+        if not to:
+            raise HTTPException(400, "a 'to' address is required")
+        ok = sender.send(to, "Hearth test email",
+                         "<p>Your Hearth email relay works. 🕯️</p>",
+                         "Your Hearth email relay works.")
+        if not ok:
+            raise HTTPException(502, "Send failed — check host/port/credentials and logs")
+        return {"ok": True}
+
     @api.get("/system/status")
     def status() -> dict:
         return {"bindings": len(repo.bindings()),

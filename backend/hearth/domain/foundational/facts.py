@@ -72,20 +72,59 @@ def fact_series(feats: pd.DataFrame, fact: FoundationalFact) -> pd.Series:
     return pd.Series(False, index=feats.index)
 
 
+# steps accrued within a window that clearly mean "up and moving about" (a couple
+# of bathroom steps shouldn't flag the whole window as awake).
+STEP_AWAKE_STEPS = 60.0
+
+
 def _awake_evidence(feats: pd.DataFrame) -> pd.Series:
-    """True where signals imply someone is AWAKE/active — contradicts 'asleep'."""
+    """True where signals imply someone is AWAKE/active — contradicts 'asleep'.
+
+    Two tiers: HARD evidence (lights on, media playing, real step movement) is
+    unambiguous; the SOFT time-of-day prior (it's daytime) is weak and can be
+    cancelled when the phone says you're resting (on the charger and not moving),
+    so a daytime nap with a parked phone isn't wrongly counted against the sleep
+    sensor. Fully backward-compatible: with no steps/charging columns this reduces
+    to the previous time-of-day-OR-lights-OR-media behaviour."""
     idx = feats.index
-    awake = pd.Series(False, index=idx)
     if "time_bucket" in feats.columns:              # 0 = night (pipeline _bucket)
-        awake = awake | (feats["time_bucket"] != 0)
+        soft = (feats["time_bucket"] != 0)
     else:
-        awake = awake | ((idx.hour >= 8) & (idx.hour < 22))
+        soft = pd.Series((idx.hour >= 8) & (idx.hour < 22), index=idx)
+    hard = pd.Series(False, index=idx)
     for c in feats.columns:
+        cl = c.lower()
         if c.endswith("_on_frac") or c.endswith("_on_last"):       # lights on
-            awake = awake | (feats[c] > 0.3)
+            hard = hard | (feats[c] > 0.3)
         elif c.endswith("_active") or c.endswith("_playing"):       # media playing
-            awake = awake | (feats[c] > 0.5)
-    return awake
+            hard = hard | (feats[c] > 0.5)
+        elif "step" in cl and c.endswith("_delta"):                 # real movement
+            hard = hard | (feats[c].fillna(0.0) > STEP_AWAKE_STEPS)
+    rest = _charging_rest(feats)
+    return hard | (soft & ~rest)
+
+
+def _charging_rest(feats: pd.DataFrame) -> pd.Series:
+    """True where the phone is on the charger AND there's no step movement — a
+    'resting' signal that suppresses the weak daytime-awake prior. Detects a
+    binary charging sensor (any column with 'charg') or a battery level that is
+    RISING ({batt}_delta > 0). Returns all-False when no such sensor is bound."""
+    idx = feats.index
+    charging = pd.Series(False, index=idx)
+    found = False
+    for c in feats.columns:
+        cl = c.lower()
+        if "charg" in cl:
+            charging = charging | (feats[c].fillna(0.0) > 0.5); found = True
+        elif "batt" in cl and c.endswith("_delta"):
+            charging = charging | (feats[c].fillna(0.0) > 0.0); found = True
+    if not found:
+        return pd.Series(False, index=idx)
+    still = pd.Series(True, index=idx)
+    for c in feats.columns:
+        if "step" in c.lower() and c.endswith("_delta"):
+            still = still & (feats[c].fillna(0.0) <= STEP_AWAKE_STEPS)
+    return charging & still
 
 
 def contradiction_series(feats: pd.DataFrame, fact: FoundationalFact) -> pd.Series | None:

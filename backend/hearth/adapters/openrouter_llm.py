@@ -194,7 +194,8 @@ class OpenRouterAdvisor:
                 async with session.post(url, json=payload,
                                         headers={"Authorization": f"Bearer {conn['token']}"},
                                         timeout=aiohttp.ClientTimeout(total=120)) as r:
-                    text = await r.text()
+                    from ._httpcap import read_text_capped
+                    text = await read_text_capped(r, 8 * 1024 * 1024)
                     if r.status >= 400:
                         self._set_status(False, r.status, text[:200])
                         self._set_activity("error", task, model=model)

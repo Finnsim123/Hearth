@@ -21,8 +21,10 @@ def build_deps() -> dict:
     repo = AppDb(settings.db_path)
     repo.migrate()
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+    from .adapters.email_sender import EmailSender
     deps: dict = {"repo": repo, "models": FileModelStore(settings.models_dir),
-                  "uploads_dir": settings.uploads_dir, "tsdb": None, "events": None}
+                  "uploads_dir": settings.uploads_dir, "tsdb": None, "events": None,
+                  "email": EmailSender(repo)}
 
     influx = repo.get_connection("influx") or (
         {"url": settings.influx_url, "token": settings.influx_token,

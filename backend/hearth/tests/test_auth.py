@@ -42,7 +42,8 @@ def test_lockdown_and_sessions(client):
     # pre-setup: wizard endpoints open, everything else closed
     assert c.get("/api/health").status_code == 200
     assert c.get("/api/persons").status_code == 401
-    assert c.post("/api/ha/test", json={"url": "x", "token": "y"}).status_code == 200
+    # private URL passes the SSRF guard; the probe just can't connect → 200 + error
+    assert c.post("/api/ha/test", json={"url": "http://10.255.255.1:8123", "token": "y"}).status_code == 200
 
     # setup signs you in (cookie set on the response)
     r = c.post("/api/setup/complete", json=PAYLOAD)

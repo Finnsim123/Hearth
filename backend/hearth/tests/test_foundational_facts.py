@@ -4,6 +4,7 @@ import pandas as pd
 
 from hearth.domain.foundational.facts import (
     FoundationalFact,
+    _awake_evidence,
     candidate_bindings,
     compute_verdict,
     contradiction_series,
@@ -86,6 +87,35 @@ def test_save_load_roundtrip_and_run_verdicts():
     # earned → it becomes an extra gate in the predictor
     extras = extra_gate_slugs(repo, "alice")
     assert [f.gate for f in extras] == ["asleep"]
+
+
+def test_step_movement_contradicts_sleep():
+    # all night-bucket windows; a burst of steps in one window = clearly awake
+    idx = pd.date_range("2026-06-01 00:00", periods=6, freq="30min", tz="UTC")
+    feats = pd.DataFrame({"time_bucket": [0.0] * 6,
+                          "watch_steps_delta": [0, 0, 400, 0, 0, 0]}, index=idx)
+    assert list(_awake_evidence(feats)) == [False, False, True, False, False, False]
+
+
+def test_charging_and_still_cancels_daytime_awake():
+    idx = pd.date_range("2026-06-01 13:00", periods=3, freq="30min", tz="UTC")  # daytime
+    base = pd.DataFrame({"time_bucket": [2.0, 2.0, 2.0]}, index=idx)
+    assert list(_awake_evidence(base)) == [True, True, True]      # daytime ⇒ awake
+    charged = base.copy()
+    charged["phone_charging_max"] = [1.0, 1.0, 0.0]               # docked, then unplugged
+    charged["watch_steps_delta"] = [0.0, 0.0, 0.0]               # not moving
+    # charging+still suppresses the soft daytime prior; last window is unplugged
+    assert list(_awake_evidence(charged)) == [False, False, True]
+
+
+def test_charging_does_not_excuse_real_activity():
+    # phone charging but lights on + walking → still awake (hard evidence wins)
+    idx = pd.date_range("2026-06-01 14:00", periods=2, freq="30min", tz="UTC")
+    feats = pd.DataFrame({"time_bucket": [2.0, 2.0],
+                          "phone_charging_max": [1.0, 1.0],
+                          "lamp_on_frac": [0.9, 0.0],
+                          "watch_steps_delta": [0.0, 300.0]}, index=idx)
+    assert list(_awake_evidence(feats)) == [True, True]
 
 
 def test_candidate_bindings_by_role():

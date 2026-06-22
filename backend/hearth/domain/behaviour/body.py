@@ -42,6 +42,9 @@ class BodySummary(BaseModel):
     units: dict[str, str]          # label -> unit ("steps", "km", "floors", "")
     total: dict[str, float]        # signal -> total over the range
     coverage: float                # worn windows / total windows in range (0..1)
+    worn_min: float                # device worn & reporting movement
+    charging_min: float            # on the charger / docked (steps≈0 is EXPECTED)
+    absent_min: float              # no data and not charging — genuinely unknown
     per_day: list[BodyDay]
     rhythm: list[RhythmCell]       # 24h x dow grid of the PRIMARY signal
     by_activity: dict[str, float]  # activity slug -> primary-signal amount during it
@@ -77,6 +80,29 @@ def _deltas(samples: list[tuple[datetime, float]], window_min: int
     return out
 
 
+def _truthy(v) -> bool:
+    """Is a raw charging-sensor sample 'on'? Handles numeric (0/1) and HA string
+    states ('on', 'charging', 'full')."""
+    if isinstance(v, (int, float)):
+        return float(v) > 0.5
+    s = str(v).strip().lower()
+    return s in {"on", "charging", "true", "1", "yes", "full"}
+
+
+def _charge_buckets(samples, window_min: int) -> set[datetime]:
+    """Window starts (UTC) during which the device was charging/docked."""
+    if not samples:
+        return set()
+    secs = window_min * 60
+    out: set[datetime] = set()
+    for ts, val in samples:
+        if not _truthy(val):
+            continue
+        ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+        out.add(datetime.fromtimestamp((int(ts.timestamp()) // secs) * secs, timezone.utc))
+    return out
+
+
 def _unit_for(label: str) -> str:
     l = label.lower()
     if "step" in l:
@@ -98,12 +124,22 @@ def _pick_primary(signals: list[str]) -> str | None:
 def summarize_body(person_id: str, counters: dict[str, list[tuple[datetime, float]]],
                    activity_rows: list[dict], *, tz: str = "UTC",
                    now: datetime | None = None, window_min: int = 30,
-                   range_start: datetime | None = None) -> BodySummary:
+                   range_start: datetime | None = None,
+                   charging: list[tuple[datetime, object]] | None = None) -> BodySummary:
     zone = ZoneInfo(tz) if tz else timezone.utc
     now = (now or datetime.now(timezone.utc)).astimezone(zone)
 
-    deltas = {label: _deltas(s, window_min) for label, s in counters.items() if s}
-    deltas = {k: v for k, v in deltas.items() if v}
+    charge_set = _charge_buckets(charging or [], window_min)
+    # a charging/docked window is NOT activity data — steps≈0 there is expected, so
+    # drop those windows from the rate deltas entirely (they'd otherwise read as
+    # "worn but still" and understate how active the worn time was).
+    deltas = {}
+    for label, s in counters.items():
+        if not s:
+            continue
+        d = {b: v for b, v in _deltas(s, window_min).items() if b not in charge_set}
+        if d:
+            deltas[label] = d
     signals = sorted(deltas)
     primary = _pick_primary(signals)
 
@@ -131,12 +167,22 @@ def summarize_body(person_id: str, counters: dict[str, list[tuple[datetime, floa
     for date, day in per_day.items():
         day.covered_min = len(cov_by_day.get(date, set())) * window_min
 
-    # coverage over the whole range: worn windows / total windows
+    # coverage over the whole range, split three ways: worn (data, not charging) /
+    # charging (docked) / absent (no data, not charging). absent != still.
     secs = window_min * 60
-    start = (range_start or (min(covered_buckets) if covered_buckets else now))
+    anchor = covered_buckets | charge_set
+    start = (range_start or (min(anchor) if anchor else now))
     start = start.astimezone(timezone.utc) if start.tzinfo else start.replace(tzinfo=timezone.utc)
-    span_windows = max(1, int((now.astimezone(timezone.utc) - start).total_seconds() // secs))
-    coverage = min(1.0, len(covered_buckets) / span_windows)
+    end_utc = now.astimezone(timezone.utc)
+    span_windows = max(0, int((end_utc - start).total_seconds() // secs))
+    charge_in_range = {b for b in charge_set if start <= b < end_utc}
+    worn_n = len(covered_buckets)                       # already excludes charging
+    charge_n = len(charge_in_range)
+    absent_n = max(0, span_windows - worn_n - charge_n)
+    worn_min = worn_n * window_min
+    charging_min = charge_n * window_min
+    absent_min = absent_n * window_min
+    coverage = min(1.0, worn_n / span_windows) if span_windows else 0.0
 
     # cross-tab: primary signal amount per activity (aligns by window start)
     by_activity: dict[str, float] = {}
@@ -160,7 +206,8 @@ def summarize_body(person_id: str, counters: dict[str, list[tuple[datetime, floa
         person_id=person_id, signals=signals, primary=primary,
         units={s: _unit_for(s) for s in signals},
         total={k: round(v, 2) for k, v in total.items()},
-        coverage=round(coverage, 4),
+        coverage=round(coverage, 4), worn_min=worn_min,
+        charging_min=charging_min, absent_min=absent_min,
         per_day=[per_day[k] for k in sorted(per_day)],
         rhythm=[RhythmCell(dow=d, hour=h, totals=t) for (d, h), t in sorted(rhythm.items())],
         by_activity={k: round(v, 2) for k, v in by_activity.items()})
