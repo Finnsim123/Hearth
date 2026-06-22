@@ -136,6 +136,11 @@ def create_app() -> FastAPI:
         deps["repo"])
     app.include_router(system_routes.router)
 
+    # foundational facts: bind a sensor to a gate (away/asleep), reliability-gated
+    from .api import foundational_routes
+    foundational_routes.bind(deps["repo"], deps.get("tsdb"))
+    app.include_router(foundational_routes.router)
+
     # ── auth middleware (docs/SECURITY.md) ──────────────────────────────────
     # /api/* requires a session, except: health, login, the integration
     # webhook (TODO: bearer scope check), and — ONLY while no users exist —

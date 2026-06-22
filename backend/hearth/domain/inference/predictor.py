@@ -57,36 +57,81 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
     if todo.empty:
         return []
 
+    bindings = repo.bindings()
+    # ── foundational gating fact: AWAY (ground truth from the person tracker) ──
+    # The cascade (foundational_facts_design §5): a gating fact settles the window
+    # and BYPASSES the model — correct (a fact beats a prediction) and cheap (no
+    # inference on those windows). Presence is fact-eligible by default (§7a);
+    # sleep/other gates extend this once their reliability verdict == 'fact'.
+    from ..features.presence import AWAY, gate_row, presence_state
+    from ..foundational.facts import extra_gate_slugs, fact_series
+    presence_by_ts = {ts: presence_state(todo.loc[ts], bindings, person_id)
+                      for ts in todo.index}
+    gate_by_ts: dict = {ts: (AWAY, "you're out (tracker)")
+                        for ts, p in presence_by_ts.items() if p == AWAY}
+    # earned non-away facts (e.g. asleep from a reliable sleep sensor) gate the
+    # remaining windows — only facts whose reliability verdict == 'fact' (§7a)
+    for f in extra_gate_slugs(repo, person_id):
+        s = fact_series(todo, f)
+        for ts in todo.index:
+            if ts not in gate_by_ts and bool(s.get(ts, False)):
+                gate_by_ts[ts] = (f.gate, "known from a reliable sensor")
+    gate_ts = set(gate_by_ts)
+    model_todo = todo.loc[[ts for ts in todo.index if ts not in gate_ts]]
+
     promoted = [m for m in repo.models(person_id) if m.promoted]
     record = next((m for m in promoted if m.node == "root"), None)
-    bindings = repo.bindings()
     # hierarchy (LCPN): one fine classifier per coarse state that has one
     child_probs: dict[str, pd.DataFrame] = {}
     child_explains: dict[str, pd.DataFrame] = {}
-    if record is not None:
+    probs = pd.DataFrame()
+    explains = pd.DataFrame()
+    rule_basis: dict = {}
+    version = RULES_VERSION
+    if not model_todo.empty and record is not None:
         est = store.load(record)
-        probs = est.predict_proba(todo)
-        explains = est.explain(todo)        # all windows: explanation + evidence
+        probs = est.predict_proba(model_todo)
+        explains = est.explain(model_todo)  # all windows: explanation + evidence
         version = record.version
         for child in (m for m in promoted if m.node != "root"):
             try:
                 child_est = store.load(child)
-                child_probs[child.node] = child_est.predict_proba(todo)
+                child_probs[child.node] = child_est.predict_proba(model_todo)
                 # explain from the CHILD too: a fine prediction's "based on"
                 # and evidence must describe the child model, not the root
-                child_explains[child.node] = child_est.explain(todo)
+                child_explains[child.node] = child_est.explain(model_todo)
             except Exception:
                 log.exception("child model %s failed to load", child.version)
-    else:
-        probs, rule_basis = _rules_predict(repo, todo, person_id)
-        explains = pd.DataFrame(index=todo.index)
+    elif not model_todo.empty:
+        probs, rule_basis = _rules_predict(repo, model_todo, person_id)
+        explains = pd.DataFrame(index=model_todo.index)
         version = RULES_VERSION
 
     trans = repo.get_setting(f"transitions.{person_id}") or None
     tz_name = repo.get_setting("timezone", "UTC") or "UTC"
     out: list[Prediction] = []
     for ts in todo.index:
+        if ts in gate_ts:                       # foundational fact → bypass model
+            slug, detail = gate_by_ts[ts]
+            pred = Prediction(person_id=person_id, window_ts=ts.to_pydatetime(),
+                              model_version=FACT_VERSION, predicted=slug, smoothed=slug,
+                              confidence=1.0, probabilities={slug: 1.0},
+                              explanation=[(f"known: {detail}", 1.0)],
+                              evidence=None, parent=None, coarse_confidence=None)
+            if override:                        # override still wins over a fact
+                pred = override_prediction(pred, override)
+                if label_override:
+                    from ..schemas import LabelEvent, Provenance
+                    tsdb.write_label(LabelEvent(
+                        person_id=person_id, window_ts=ts.to_pydatetime(), label=override,
+                        provenance=Provenance.CONFIRMED, source="override"))
+            tsdb.write_prediction(pred)
+            history.insert(0, pred)
+            out.append(pred)
+            continue
         row = probs.loc[ts]
+        if presence_by_ts.get(ts) == "home" and AWAY in row.index:
+            row = gate_row(row, "home")         # a present person can't be 'away'
         # learned-transition forward filter: the previous window's state sets
         # a prior (sleeping is sticky; sleeping→cooking at 3am is rare).
         # ONLY for model predictions — the transition matrix is keyed on coarse

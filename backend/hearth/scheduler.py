@@ -190,6 +190,18 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
         scheduler.add_job(_drift_check, "interval", hours=24,
                           id="drift_check", max_instances=1, coalesce=True)
 
+        def _foundational_verdicts() -> None:
+            # score each bound foundational sensor (away/asleep) so only ones that
+            # EARN it bypass the model; degraded ones auto-demote to a hint (§7a)
+            from .domain.foundational.facts import run_verdicts
+            try:
+                run_verdicts(tsdb, repo)
+            except Exception:
+                log.exception("foundational verdict scoring failed")
+
+        scheduler.add_job(_foundational_verdicts, "interval", hours=24,
+                          id="foundational_verdicts", max_instances=1, coalesce=True)
+
         def _discover_all() -> None:
             if not _admit(DISCOVERY):
                 log.info("discovery deferred — system %s", gov_runtime.state().name.lower())
