@@ -18,7 +18,7 @@ import { onBuddyCheer, type BuddyCheer } from "./buddyBus";
 type State = {
   phase: string; tone: string; title: string; detail: string;
   progress: number | null; cta: { label: string; href: string } | null;
-  ack?: string | null;
+  ack?: string | null; ack_label?: string | null;
 };
 
 const TONE: Record<string, string> = {
@@ -170,7 +170,7 @@ export default function Buddy() {
             <button className="btn btn-secondary"
                     style={{ marginTop: 9, fontSize: 12.5, minHeight: 30, padding: "4px 10px" }}
                     onClick={ackNews}>
-              Got it
+              {d.ack_label || "Got it"}
             </button>
           )}
         </div>

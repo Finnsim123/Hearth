@@ -115,6 +115,28 @@ than creepy.
    low effort polish.
 7. **Per-sensor silence** (3e) — medium effort, needs a per-binding last-seen check.
 
+## 5b. Roadmap status — IMPLEMENTED (June 2026)
+Built as one coherent slice rather than ad-hoc nudges:
+- **Shared primitives.** `domain/advisories.py` (standing, dismissible, severity-ranked,
+  snooze with cooldown), `domain/events.py` (append-only timeline ring buffer), and
+  `domain/health.py` upgraded to **keyed multi-issue + severity** (concurrent incidents
+  no longer mask each other; back-compatible, migrates the old single slot).
+- **Producers.** Foundational demotions/promotions are detected inline in
+  `foundational.facts.run_verdicts` (advisory + timeline event on a role_decision
+  change). A daily `advisory_scan.refresh_system_advisories` turns coverage blind-spots
+  (`gaps_from_home`) and poor model health (`model_insight`: low accuracy / drift /
+  miscalibration / flat-baseline) into advisories. Wired in the scheduler.
+- **Buddy.** Folds the worst warn/critical advisory in above routine nudges, with a
+  CTA + a **Dismiss** action (`ack_label`); info-level advisories stay passive. The
+  live line now shows basis — "Alice: asleep (known)" vs "Bob: cooking (78%)".
+- **Surface.** `GET /api/advisories` (+ events), `POST /api/advisories/dismiss`,
+  `GET /api/events`; a new **Activity** page (nav) lists active advisories (dismiss)
+  and the timeline.
+- **Tests.** advisories/events/health, producers (demotion, coverage, model health),
+  buddy advisory surfacing + dismissal — all green.
+- **Deferred:** per-sensor silence (3e) — needs a per-binding last-seen query I didn't
+  want to guess at; noted for a follow-up.
+
 ## 6. Note on consistency
 Several of these (1, 2, 5) want a shared notion of an "advisory": a typed,
 dismissible, optionally-actionable message with a severity and a cooldown. Worth
