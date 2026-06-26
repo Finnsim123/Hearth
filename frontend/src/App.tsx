@@ -24,6 +24,7 @@ import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import Welcome from "./onboarding/Welcome";
 import Login from "./components/Login";
+import Landing from "./components/Landing";
 import ProgressWait from "./components/ProgressWait";
 import Buddy from "./components/Buddy";
 
@@ -114,15 +115,16 @@ function InfluxLogo() {   // InfluxDB — rising data line on a rounded tile
 /** Official logo if present in /public/logos (see logos/README.md), otherwise
  *  the built-in mark — so it works out of the box and upgrades to the real
  *  brand asset once you drop the file in. */
-function LogoImg({ src, alt, fallback }: {
-  src: string; alt: string; fallback: React.ReactNode;
+function LogoImg({ base, alt, fallback }: {
+  base: string; alt: string; fallback: React.ReactNode;
 }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return <>{fallback}</>;
+  const exts = ["svg", "png"];   // official SVG preferred, PNG accepted, then mark
+  const [i, setI] = useState(0);
+  if (i >= exts.length) return <>{fallback}</>;
   return (
-    <img src={src} alt={alt} width={20} height={20}
+    <img src={`/logos/${base}.${exts[i]}`} alt={alt} width={20} height={20}
          style={{ display: "block", objectFit: "contain" }}
-         onError={() => setFailed(true)} />
+         onError={() => setI((n) => n + 1)} />
   );
 }
 
@@ -154,13 +156,13 @@ function ConnectionLinks({ onClick }: { onClick: () => void }) {
       {ha && (
         <a href={ha} target="_blank" rel="noreferrer" style={tile} onClick={onClick}
            title={`Open Home Assistant — ${ha}`} aria-label="Open Home Assistant">
-          <LogoImg src="/logos/home-assistant.svg" alt="Home Assistant" fallback={<HaLogo />} />
+          <LogoImg base="home-assistant" alt="Home Assistant" fallback={<HaLogo />} />
         </a>
       )}
       {influx && (
         <a href={influx} target="_blank" rel="noreferrer" style={tile} onClick={onClick}
            title={`Open InfluxDB — ${influx}`} aria-label="Open InfluxDB">
-          <LogoImg src="/logos/influxdb.svg" alt="InfluxDB" fallback={<InfluxLogo />} />
+          <LogoImg base="influxdb" alt="InfluxDB" fallback={<InfluxLogo />} />
         </a>
       )}
     </div>
@@ -189,6 +191,7 @@ type UpdateInfo = { build: string; behind: number; latest_subject?: string; pend
 export default function App() {
   const [mode, setMode] = useState<ThemeMode>(getTheme());
   const [auth, setAuth] = useState<AuthState>("loading");
+  const [entered, setEntered] = useState(false);   // dismissed the landing this visit
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [updating, setUpdating] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState<Set<string>>(
@@ -254,6 +257,11 @@ export default function App() {
   if (updating) return <UpdatingScreen />;
 
   if (auth === "loading") return null;
+  // Landing first — sells the product before either the wizard or the login screen.
+  // The CTA adapts: "Let's get started" pre-setup, "Log in" once it's set up.
+  if ((auth === "setup" || auth === "login") && !entered) {
+    return <Landing setup={auth === "setup"} onEnter={() => setEntered(true)} />;
+  }
   if (auth === "setup") {
     // setup mode: wizard only — no nav, no other routes
     return (

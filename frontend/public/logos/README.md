@@ -8,9 +8,11 @@ the **official** brand logos, drop their SVG files here with these exact names:
 | `home-assistant.svg` | Home Assistant brand assets — https://www.home-assistant.io/ (press/brand) or the `home-assistant/assets` repository |
 | `influxdb.svg` | InfluxData brand assets — https://www.influxdata.com/ (brand/press kit) |
 
-Served locally at `/logos/home-assistant.svg` and `/logos/influxdb.svg` (no CDN,
-in keeping with Hearth's local-first rule). If a file is missing, the nav falls
-back to a built-in placeholder mark, so the links always work.
+**Either `.svg` or `.png` works** — the loader tries `home-assistant.svg`, then
+`home-assistant.png`, then a built-in mark (same for `influxdb`). SVG is preferred
+(crisp at any size); PNG is fine if that's what you have. Served locally (no CDN,
+in keeping with Hearth's local-first rule), so the links always work even with no
+file present.
 
 These are third-party trademarks, included only to link to your own instances of
 those tools; follow each project's brand-usage guidelines. They are intentionally
