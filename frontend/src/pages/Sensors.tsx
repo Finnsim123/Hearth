@@ -9,6 +9,7 @@ import { Icon } from "../icons";
 import { useIsMobile } from "../useMedia";
 import { cheerBuddy } from "../components/buddyBus";
 import BubbleCloud from "../components/BubbleCloud";
+import DeviceHierarchy from "../components/DeviceHierarchy";
 
 type Binding = {
   id: number; entity_id: string; role: string; name: string;
@@ -958,6 +959,7 @@ export default function Sensors() {
         </div>
       </div>
 
+      <DeviceHierarchy />
       <UnassignedSensors onAssigned={reload} />
 
       {members.some((m) => !m.person_alive) && (() => {

@@ -101,6 +101,40 @@ key recovers. Independent of the hierarchy work; ships on its own.
 6. **LLM tail** for `unsure` nodes (with a key).
 7. **AI-key-exhausted HA push** (§7) — standalone.
 
+## 8b. The hierarchy as a CORE SPINE — penetration map (not a bolt-on)
+The integration→device→entity model must show up everywhere the system talks about
+signals, or it feels like an afterthought. One shared primitive (`relevance_of` +
+`ha.relevance` decisions + the live tree) feeds all of these:
+
+- **Sensors page (flagship):** stop being a flat entity list. Primary view is the tree
+  — integration → device → entities — with a relevance chip at each level, inline
+  keep/skip that writes an override, and the "new devices" offer inline. The flat
+  list + "review unassigned" become filtered views of the same tree, and every
+  unassigned reason now cites its level ("skipped — its integration Met.no isn't about
+  your home").
+- **Onboarding triage (bubble cloud):** cluster/keep at **device & integration**
+  granularity — ~80 friendly nodes instead of 1700 cryptic entities. Cheaper LLM
+  shortlist, and the user reasons about "keep my Zigbee stuff, skip weather," not entity
+  ids. The scan step reports "N integrations · M devices · K sensors".
+- **Coverage / blind-spot advisor:** a device carries an `area`, so "rooms that have
+  devices but no *useful* sensor" is far crisper than inferring rooms from entity names.
+  Remedies name the device ("your kitchen has an Oral-B and a plug, but nothing that
+  sees cooking").
+- **Foundational facts & markers:** candidate pickers show the **device** ("Bed — Withings
+  Sleep") not a raw entity; a whole device (Oral-B) is the natural unit for a marker.
+- **Reliability gate:** device battery / last-seen feed the fact/hint verdict.
+- **The "why" drill-down & evidence:** group the signals behind a prediction by device
+  ("your kitchen plug, your motion sensor") — far more legible than entity slugs.
+- **Behaviour / body:** step/charge signals are attributed to their **device** (phone,
+  watch), making per-person attribution explicit.
+- **Capability verdicts:** "can't tell cooking from eating" pairs with the device-level
+  coverage gap for the concrete fix.
+- **Buddy / Activity timeline:** new-device and integrate/skip events already flow here;
+  the buddy can say "added your Oral-B".
+
+Rule of thumb going forward: **anywhere we list or judge a signal, we do it through the
+hierarchy** — the entity is the leaf, but the device and integration are always in view.
+
 ## 9. Decisions (settled with you)
 1. **Blend, not either/or:** entities remain the feature unit; integration+device drive
    relevance/role/grouping, with per-entity override. ✔

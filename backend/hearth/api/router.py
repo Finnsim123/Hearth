@@ -1192,6 +1192,80 @@ def build_api_router(deps: dict) -> APIRouter:
                      f"{bound} sensor(s) added." if bound else "")
         return {"ok": True, "decision": decision, "bound": bound}
 
+    @api.get("/hierarchy")
+    async def hierarchy_tree() -> dict:
+        """The live integration → device → entity tree with a relevance verdict at
+        every level — the spine the Sensors page renders. Entities with no device are
+        returned under `orphans`."""
+        events = deps.get("events")
+        if events is None:
+            raise HTTPException(409, "Connect Home Assistant first")
+        from ..domain.hierarchy import (device_relevance, integration_relevance,
+                                        load_decisions, relevance_of)
+        integrations = await events.discover_integrations()
+        devices = await events.discover_devices()
+        entities = await events.discover_entities()
+        integ_by = {i["entry_id"]: i for i in integrations if i.get("entry_id")}
+        dev_by = {d["id"]: d for d in devices if d.get("id")}
+        dec = load_decisions(repo)
+        bound = {b.entity_id for b in repo.bindings()}
+
+        dev_ents: dict = {}
+        orphans = []
+        for e in entities:
+            if e.get("disabled"):
+                continue
+            rel, level, reason = relevance_of(e, dev_by, integ_by, dec)
+            item = {"entity_id": e["entity_id"], "name": e.get("friendly_name") or e["entity_id"],
+                    "relevance": rel, "level": level, "reason": reason,
+                    "bound": e["entity_id"] in bound, "area": e.get("area")}
+            did = e.get("device_id")
+            if did in dev_by:
+                dev_ents.setdefault(did, []).append(item)
+            else:
+                orphans.append(item)
+
+        integ_devs: dict = {}
+        for did, d in dev_by.items():
+            ents = dev_ents.get(did)
+            if not ents:
+                continue
+            drel = dec["device"].get(did) or device_relevance(d)
+            ce = (d.get("config_entries") or [None])[0]
+            integ_devs.setdefault(ce, []).append({
+                "id": did, "name": d.get("name") or d.get("model") or did,
+                "manufacturer": d.get("manufacturer"), "model": d.get("model"),
+                "area": d.get("area"), "relevance": drel,
+                "keep_n": sum(1 for x in ents if x["relevance"] == "keep"), "entities": ents})
+
+        out = []
+        for eid, i in integ_by.items():
+            devs = integ_devs.get(eid)
+            if not devs:
+                continue
+            irel = dec["integration"].get(eid) or integration_relevance(i.get("domain"))
+            out.append({"entry_id": eid, "domain": i.get("domain"),
+                        "title": i.get("title") or i.get("domain"), "relevance": irel,
+                        "keep_n": sum(d["keep_n"] for d in devs),
+                        "devices": sorted(devs, key=lambda d: -d["keep_n"])})
+        out.sort(key=lambda x: -x["keep_n"])
+        return {"integrations": out, "orphans": orphans,
+                "pending": repo.get_setting("ha.pending_nodes") or []}
+
+    @api.post("/hierarchy/relevance")
+    def hierarchy_relevance(body: dict) -> dict:
+        """Override relevance at any level (integration|device|entity) — the inline
+        keep/skip on the Sensors tree."""
+        from ..domain.hierarchy import set_decision
+        level = (body.get("level") or "").strip()
+        node_id = (body.get("id") or "").strip()
+        rel = (body.get("relevance") or "").strip()
+        if level not in ("integration", "device", "entity") or not node_id \
+                or rel not in ("keep", "skip", "unsure"):
+            raise HTTPException(400, "level, id, relevance required")
+        set_decision(repo, level, node_id, rel)
+        return {"ok": True}
+
     @api.post("/household/relink")
     async def relink_persons() -> dict:
         """Re-link every member to their home/away entity — LLM match (messy
