@@ -461,55 +461,114 @@ type TriageResp = { by: string | null; total: number; kept_count: number;
 // A taste of what Hearth unlocks in Home Assistant — looped while the scan runs,
 // then on the result screen the ones your sensors actually support are surfaced
 // (`needs` = triage category keys the idea relies on).
-type Idea = { icon: IconName; title: string; text: string; needs?: string[]; bespoke?: boolean };
+//
+// The POINT of each card is the contrast: HA can already flip these switches, but
+// only if you hand-wire the trigger from motion + time + device state (`manual`).
+// Hearth collapses all of that into ONE smart trigger — the activity itself
+// (`trigger`) — which is the actual product. Keep that front and centre.
+type Idea = { icon: IconName; title: string; text: string; needs?: string[];
+              trigger?: string; manual?: string; bespoke?: boolean };
 const AUTOMATION_IDEAS: Idea[] = [
   { icon: "play", title: "Movie mode, instantly", needs: ["media", "lights"],
+    trigger: "you're watching a movie", manual: "TV state + room + time-of-day + sofa motion",
     text: "Lights dim and the blinds drop the moment a movie starts — no remote, no scene button." },
   { icon: "presence", title: "Wake up gently", needs: ["presence", "lights"],
+    trigger: "you're waking up", manual: "bed sensor + alarm time + light level + first motion",
     text: "As you stir awake, the lights fade up and the kettle clicks on." },
   { icon: "power", title: "Away = armed and saving", needs: ["presence", "power"],
+    trigger: "everyone's out", manual: "all phones away + no motion for N min + doors shut",
     text: "Everyone out? Arm the alarm, drop the heating, cut standby power — automatically." },
   { icon: "focus", title: "Deep-work mode", needs: ["lights"],
+    trigger: "you sit down to work", manual: "desk motion + calendar + laptop power + time",
     text: "Sit down to work and phones go do-not-disturb while the desk light turns cool and bright." },
   { icon: "env", title: "Cooking light", needs: ["lights"],
+    trigger: "you're cooking", manual: "kitchen motion + stove/oven power + time window",
     text: "The kitchen jumps to full brightness while you cook, then eases back when you're done." },
   { icon: "household", title: "Welcome home", needs: ["presence", "lights"],
+    trigger: "you get home", manual: "phone arrives + door opens + which person + time",
     text: "First one through the door gets the hallway lit and their playlist going." },
   { icon: "lock", title: "Goodnight, handled", needs: ["lights", "doors"],
+    trigger: "you fall asleep", manual: "bed sensor + lights off + no motion + late hour",
     text: "Drift off and Hearth locks the doors, kills the lights, and sets the night temperature." },
   { icon: "play", title: "Dinner together", needs: ["media", "lights"],
+    trigger: "you sit down to eat", manual: "table motion + TV paused + kitchen quiet + time",
     text: "Sitting down to eat pauses the TV and warms the lights." },
   { icon: "alarm", title: "A heads-up on the unusual", needs: ["presence"],
+    trigger: "you're out at an odd time", manual: "presence + day-of-week + your usual pattern",
     text: "Away at 3pm on a workday? A quiet nudge — only if you ask for one." },
   { icon: "sensors", title: "Heat the room you're in", needs: ["climate", "presence"],
+    trigger: "you're active in a room", manual: "per-room motion + presence + heating schedules",
     text: "Warmth follows people and activity, not a dumb schedule." },
   { icon: "info", title: "Reading nook", needs: ["lights"],
+    trigger: "you settle in to read", manual: "chair motion + low TV + one lamp + evening",
     text: "Pick up a book and one warm lamp glows while the rest of the room dims." },
   { icon: "light", title: "Wind-down", needs: ["lights"],
+    trigger: "you're winding down", manual: "time-before-bed + light level + activity slowing",
     text: "Half an hour before your usual bedtime, the house softens and quietens on its own." },
 ];
 
+// The single-trigger token — the actual differentiator, styled like a HA entity.
+function TriggerPill({ trigger, size = "md" }: { trigger: string; size?: "sm" | "md" }) {
+  return (
+    <code style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600,
+                   fontSize: size === "sm" ? 11.5 : 12.5, color: "var(--accent)",
+                   background: "color-mix(in srgb, var(--accent) 12%, transparent)",
+                   border: "1px solid var(--accent)", borderRadius: 6,
+                   padding: size === "sm" ? "1px 7px" : "2px 9px", whiteSpace: "nowrap" }}>
+      when {trigger}
+    </code>
+  );
+}
+
 function AutomationIdeas() {
   const [i, setI] = useState(0);
+  const [paused, setPaused] = useState(false);
   useEffect(() => {
-    const id = setInterval(() => setI((n) => (n + 1) % AUTOMATION_IDEAS.length), 4500);
+    if (paused) return;
+    // slow enough to actually read the card + take in the contrast (was 4.5s).
+    const id = setInterval(() => setI((n) => (n + 1) % AUTOMATION_IDEAS.length), 9000);
     return () => clearInterval(id);
-  }, []);
+  }, [paused]);
   const idea = AUTOMATION_IDEAS[i];
   return (
     <div style={{ marginTop: 14 }}>
-      <p className="label" style={{ margin: "0 0 8px" }}>While you wait — what you'll be able to do</p>
+      <p className="label" style={{ margin: "0 0 6px" }}>While you wait — what Hearth unlocks</p>
+      <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5 }}>
+        Home Assistant can already flip any switch — the hard part is knowing <em>when</em>. Today that
+        means hand-wiring motion, time and device rules for every scenario. Hearth gives you{" "}
+        <strong style={{ color: "var(--text)" }}>one smart trigger — what you're actually doing</strong>{" "}
+        — and everything below hangs off that single entity.
+      </p>
       <div className="card" style={{ display: "flex", gap: 12, alignItems: "flex-start",
-                                     padding: 16, minHeight: 84 }}>
+                                     padding: 16, minHeight: 150 }}
+           onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
         <span style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 10, display: "flex",
                        alignItems: "center", justifyContent: "center", color: "var(--accent)",
                        background: "color-mix(in srgb, var(--accent) 14%, transparent)",
                        border: "1px solid var(--accent)" }}>
           <Icon name={idea.icon} size={20} />
         </span>
-        <div key={i} style={{ animation: "hearth-idea-in .5s ease" }}>
+        <div key={i} style={{ animation: "hearth-idea-in .55s ease", minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 14.5, fontWeight: 600 }}>{idea.title}</div>
           <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 2, lineHeight: 1.4 }}>{idea.text}</div>
+          {idea.trigger && (
+            <div style={{ marginTop: 12, paddingTop: 11, borderTop: "1px solid var(--border)",
+                          display: "flex", flexDirection: "column", gap: 7 }}>
+              {idea.manual && (
+                <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                  <span style={{ opacity: 0.7 }}>In HA today: </span>
+                  <span style={{ textDecoration: "line-through", textDecorationColor: "var(--border)" }}>
+                    {idea.manual}
+                  </span>
+                </div>
+              )}
+              <div style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ color: "var(--text-dim)" }}>With Hearth:</span>
+                <TriggerPill trigger={idea.trigger} />
+                <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>— one entity, no rulebook</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       <div style={{ display: "flex", gap: 5, justifyContent: "center", marginTop: 10 }}>
@@ -566,12 +625,16 @@ function IdeasForYourHome({ triage, llmKey, llmModel }:
                 )}
               </div>
               <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginTop: 2, lineHeight: 1.4 }}>{i.text}</div>
+              {i.trigger && (
+                <div style={{ marginTop: 8 }}><TriggerPill trigger={i.trigger} size="sm" /></div>
+              )}
             </div>
           </div>
         ))}
       </div>
       <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--text-dim)" }}>
-        You've got the sensors for these — build them in Home Assistant once Hearth is live.
+        Each one is a <strong style={{ color: "var(--text)" }}>single trigger</strong> in Home Assistant —
+        <em> when you're …</em> — instead of a rulebook you build and maintain. Wire them up once Hearth is live.
       </p>
     </div>
   );
