@@ -317,6 +317,18 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
             scheduler.add_job(_scan, "interval", hours=24,
                               id="device_watch", max_instances=1, coalesce=True)
 
+    if deps.get("notifier") is not None:
+        async def _llm_credit_watch() -> None:
+            # push through HA once when the AI key runs dry / gets rate-limited
+            from .domain.llm_notify import check_llm_credits
+            try:
+                await check_llm_credits(repo, deps["notifier"])
+            except Exception:
+                log.exception("llm credit watch failed")
+
+        scheduler.add_job(_llm_credit_watch, "interval", minutes=15,
+                          id="llm_credit_watch", max_instances=1, coalesce=True)
+
     if tsdb is not None and deps.get("notifier") is not None:
         scheduler.add_job(check_milestones, "interval", minutes=30,
                           args=[repo, tsdb, deps["notifier"]], id="milestones",
