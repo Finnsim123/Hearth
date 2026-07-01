@@ -1477,6 +1477,30 @@ def build_api_router(deps: dict) -> APIRouter:
                 imp_by_col[col] = max(imp_by_col.get(col, 0.0), float(v))
 
         from ..domain.onboarding.inventory import heuristic_reliability
+        # device context (cached from onboarding / the hierarchy scan) so the
+        # coverage map can group a multi-sensor device's dots and drop pure
+        # diagnostics — loaded once, not per binding.
+        from ..domain.hierarchy import load_device_catalog
+        _dev_cat = load_device_catalog(repo)
+        _ent_dev = repo.get_setting("ha.entity_device") or {}
+
+        def _device_of(entity_id: str):
+            d = _dev_cat.get(_ent_dev.get(entity_id))
+            if not d:
+                return None, None
+            name, model = d.get("name"), d.get("model")
+            label = (f"{name} — {model}" if name and model
+                     and model.lower() not in name.lower() else name or model)
+            return _ent_dev.get(entity_id), label
+
+        import re as _re
+        _DIAG = _re.compile(r"battery|rssi|link.?quality|signal|firmware|_update\b|"
+                            r"last_seen|uptime|restart")
+
+        def _is_diagnostic(b) -> bool:
+            return b.role.value == "battery" or bool(
+                _DIAG.search(f"{b.entity_id} {b.name}".lower()))
+
         out = []
         for b in bindings:
             trace = traces.get(b.name, [])
@@ -1518,7 +1542,10 @@ def build_api_router(deps: dict) -> APIRouter:
                         "per_day": round(counts.get(b.name, 0) / 7, 1),
                         "feature": feature, "model_use": model_use,
                         "room": b.room, "tier": tiers.get(b.name, 2),
-                        "recent": b.name in recent})
+                        "recent": b.name in recent,
+                        "device_id": _device_of(b.entity_id)[0],
+                        "device": _device_of(b.entity_id)[1],
+                        "diagnostic": _is_diagnostic(b)})
         # class balance from confirmed + bootstrap labels (stable 7-day window)
         classes: dict[str, int] = {}
         label_start = end - timedelta(days=7)

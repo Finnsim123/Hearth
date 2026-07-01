@@ -432,7 +432,8 @@ function Pulse({ j, hasTsdb }: { j?: Journey; hasTsdb: boolean }) {
 }
 
 type Health = { name: string; status: string; role: string; room: string | null;
-                tier: number; per_day?: number; recent?: boolean };
+                tier: number; per_day?: number; recent?: boolean;
+                device_id?: string | null; device?: string | null; diagnostic?: boolean };
 
 const TIER_META: Record<number, [string, string]> = {
   1: ["Senses people", "#34D399"],   // bed, presence, person, media, door
@@ -450,10 +451,13 @@ const ROLE_COLORS: Record<string, string> = {
 };
 const roleColor = (r: string) => ROLE_COLORS[r] ?? ROLE_COLORS.custom;
 
-type Leaf = C & { tier: number; name: string; role: string; per_day: number; recent: boolean };
+type Leaf = C & { tier: number; name: string; role: string; per_day: number; recent: boolean;
+                  device_id?: string | null; device?: string | null };
+type DeviceHull = { x: number; y: number; r: number; id: string; label: string; n: number };
 type Room = { x: number; y: number; r: number; key: string; label: string;
               leaves: Leaf[]; total: number; sparse: boolean; tiers: Record<number, number>;
-              live: number; blind?: boolean; seed?: { x: number; y: number } };
+              live: number; blind?: boolean; seed?: { x: number; y: number };
+              devices?: DeviceHull[] };
 
 // Co-activation grouping from /api/bindings/coactivation — sensors that fire
 // together, with an MDS layout seed (0..1) per cluster so the map's position
@@ -479,20 +483,44 @@ const LABEL_H = 24;
 const leafOf = (b: Health, maxPD: number): Leaf => ({
   x: 0, y: 0, r: 5 + Math.sqrt((b.per_day ?? 0) / maxPD) * 9,   // 5–14px
   tier: b.tier || 2, name: b.name, role: b.role, per_day: b.per_day ?? 0,
-  recent: !!b.recent });
+  recent: !!b.recent, device_id: b.device_id ?? null, device: b.device ?? null });
 
-/** Pack one group of sensors into a disc (leaves centred on the disc origin).
- *  `seed` (0..1) optionally fixes where the disc starts in the cloud. */
+/** Pack one group of sensors into a disc, sub-clustered by PHYSICAL DEVICE:
+ *  a multi-sensor device's dots pack together and get a faint hull, so one piece
+ *  of hardware reads as one thing rather than inflating apparent coverage. Leaves
+ *  are centred on the disc origin. `seed` (0..1) optionally fixes the disc start. */
 function packRoom(key: string, label: string, list: Health[], maxPD: number,
                   seed?: { x: number; y: number }): Room {
-  const leaves = list.map((b) => leafOf(b, maxPD));
-  packSiblings(leaves);
-  const e = enclose(leaves);
-  for (const l of leaves) { l.x -= e.x; l.y -= e.y; }
+  // group by device (an entity with no known device is its own singleton)
+  const byDev = new Map<string, Health[]>();
+  for (const b of list) {
+    const k = b.device_id || `solo:${b.name}`;
+    (byDev.get(k) ?? (byDev.set(k, []), byDev.get(k)!)).push(b);
+  }
+  // pack each device's leaves into a sub-disc
+  const packs = [...byDev.entries()].map(([id, members]) => {
+    const leaves = members.map((b) => leafOf(b, maxPD));
+    packSiblings(leaves);
+    const e = enclose(leaves);
+    for (const l of leaves) { l.x -= e.x; l.y -= e.y; }
+    return { x: 0, y: 0, r: e.r + (members.length > 1 ? 3.5 : 0),
+             leaves, id, label: members[0].device || "", multi: members.length > 1 };
+  });
+  // pack the device-discs within the room, then flatten to room-relative coords
+  packSiblings(packs);
+  const e2 = enclose(packs);
+  for (const p of packs) { p.x -= e2.x; p.y -= e2.y; }
+  const leaves: Leaf[] = [];
+  const devices: DeviceHull[] = [];
+  for (const p of packs) {
+    for (const l of p.leaves) leaves.push({ ...l, x: l.x + p.x, y: l.y + p.y });
+    if (p.multi) devices.push({ x: p.x, y: p.y, r: p.r, id: p.id, label: p.label,
+                                n: p.leaves.length });
+  }
   const tiers: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
   for (const l of leaves) tiers[l.tier] = (tiers[l.tier] || 0) + 1;
-  return { x: 0, y: 0, r: e.r + 7, key, label, leaves, total: leaves.length,
-           sparse: leaves.length <= 1, tiers,
+  return { x: 0, y: 0, r: e2.r + 7, key, label, leaves, total: leaves.length,
+           sparse: leaves.length <= 1, tiers, devices,
            live: leaves.filter((l) => l.recent).length, seed };
 }
 
@@ -614,7 +642,9 @@ function SensorCoverage() {
   useEffect(() => {
     const load = () => fetch("/api/bindings/health").then((r) => r.json())
       .then((h) => {
-        setRows((h.bindings ?? []).filter((b: Health) => b.status === "alive"));
+        // live sensors only; drop pure diagnostics (battery/signal/firmware) so a
+        // multi-sensor device doesn't inflate a room's apparent coverage.
+        setRows((h.bindings ?? []).filter((b: Health) => b.status === "alive" && !b.diagnostic));
         setKnown(h.rooms_known ?? []);
       })
       .catch(() => setRows([]));
@@ -654,7 +684,7 @@ function SensorCoverage() {
     <Card icon="sensors" title="Sensor coverage"
           sub={byBehavior
             ? "Each bubble is a group of sensors that FIRE TOGETHER — a behavioural zone learned from the data, not the room labels. Nearby bubbles behave alike. Each dot is a sensor; bigger fires more often, colour is how directly it senses people. Click a bubble to see its sensors."
-            : "Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Dots pulsing green fired in the last few minutes; dashed rooms have no sensor Hearth can use. Click a room to see its sensors."}>
+            : "Each cluster is a room; each dot is a live sensor — bigger dots fire more often, colour is how directly it senses people. Sensors from one device are ringed together, so a multi-sensor gadget reads as one thing. Dots pulsing green fired in the last few minutes; dashed rooms have no sensor Hearth can use. Click a room to see its sensors."}>
       <svg viewBox={`${minX} ${minY} ${vbW} ${vbH}`} role="img"
            style={{ width: "100%", display: "block" }}>
         <style>{`
@@ -702,6 +732,14 @@ function SensorCoverage() {
                       stroke={rm.sparse ? "var(--danger)" : active ? "var(--accent)"
                               : rm.live > 0 ? "var(--ok, #34D399)" : "var(--border)"}
                       strokeWidth={active ? 2 : rm.sparse ? 1.8 : 1} />
+              {/* faint hull behind the dots of one physical device (2+ sensors) */}
+              {rm.devices?.map((d) => (
+                <circle key={d.id} cx={rm.x + d.x} cy={rm.y + d.y} r={d.r + 2}
+                        fill="var(--text-dim)" fillOpacity={0.07}
+                        stroke="var(--text-dim)" strokeOpacity={0.35} strokeWidth={0.8}>
+                  <title>{d.label || "device"} · {d.n} sensors</title>
+                </circle>
+              ))}
               {rm.leaves.map((l, i) => (
                 <circle key={i} cx={rm.x + l.x} cy={rm.y + l.y} r={l.r}
                         className={l.recent ? "hearth-live" : undefined}
@@ -732,15 +770,18 @@ function SensorCoverage() {
                     style={{ marginLeft: "auto", fontSize: 12 }}>Close</button>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {[...selected.leaves].sort((a, b) => b.per_day - a.per_day).map((l) => (
-              <span key={l.name} title={`${l.role} · ~${l.per_day.toLocaleString()}/day`}
+            {[...selected.leaves]
+              .sort((a, b) => (a.device || "~").localeCompare(b.device || "~")
+                              || b.per_day - a.per_day)
+              .map((l) => (
+              <span key={l.name} title={`${l.role} · ~${l.per_day.toLocaleString()}/day${l.device ? ` · ${l.device}` : ""}`}
                     style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
                              padding: "3px 9px", borderRadius: 99, background: "var(--surface)",
                              border: "1px solid var(--border)" }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%",
                       background: colorBy === "role" ? roleColor(l.role) : tierColor(l.tier) }} />
                 {l.name}
-                <span style={{ color: "var(--text-dim)" }}>{l.role}</span>
+                <span style={{ color: "var(--text-dim)" }}>{l.device || l.role}</span>
               </span>
             ))}
           </div>
