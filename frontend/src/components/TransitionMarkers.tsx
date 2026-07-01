@@ -21,7 +21,7 @@ type Timing = { lead_min: number; spread_min: number; precision: number; recall:
 type Marker = { slug: string; name: string; to_state: string; from_state: string | null;
                 binding_name: string; source: string; enabled: boolean;
                 lead_min: number; strength: number; timing: Timing };
-type Bind = { name: string; entity_id: string; room?: string | null };
+type Bind = { name: string; entity_id: string; room?: string | null; device?: string | null };
 type Act = { slug: string; name: string };
 type Data = { markers: Marker[]; bindings: Bind[]; activities: Act[] };
 
@@ -84,7 +84,7 @@ export default function TransitionMarkers() {
           <label style={{ fontSize: 12.5, color: "var(--text-dim)" }}>Sensor that fires</label>
           <select value={draft.binding_name} onChange={(e) => setDraft({ ...draft, binding_name: e.target.value })}>
             <option value="">Pick a sensor…</option>
-            {data.bindings.map((b) => <option key={b.name} value={b.name}>{b.entity_id}{b.room ? ` · ${b.room}` : ""}</option>)}
+            {data.bindings.map((b) => <option key={b.name} value={b.name}>{b.device ? `${b.device} · ` : ""}{b.entity_id}{b.room ? ` · ${b.room}` : ""}</option>)}
           </select>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <select value={draft.from_state} onChange={(e) => setDraft({ ...draft, from_state: e.target.value })} style={{ flex: 1 }}>

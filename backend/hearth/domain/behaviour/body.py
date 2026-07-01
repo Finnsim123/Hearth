@@ -16,6 +16,8 @@ activity timeline via read_predictions(), then hands both here.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -293,11 +295,27 @@ def _charging_samples(repo, tsdb, pid: str, start: datetime, end: datetime) -> l
     return []
 
 
-def read_body(repo, tsdb, pid: str, start: datetime, end: datetime, *,
-              tz: str = "UTC", activity_rows: list[dict] | None = None) -> BodySummary | None:
-    """Read the person's cumulative counters (Role.STEPS) + charging sensor and
-    aggregate. The display summary covers [start, end]; the active/sedentary TREND
-    always uses ≥14d so it's independent of the view range. None when nothing bound."""
+@dataclass
+class BodyIO:
+    """The raw wearable series read from Influx, split display-vs-full so the
+    pure aggregation (assemble_body) needs no further I/O. Lets the route fetch
+    this concurrently with the prediction read."""
+    counters_full: dict[str, list]
+    counters_disp: dict[str, list]
+    charging_full: list
+    charging_disp: list
+
+
+def _after_samples(samples: list, cut: datetime) -> list:
+    return [(ts, v) for ts, v in samples
+            if (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)) >= cut]
+
+
+def read_body_io(repo, tsdb, pid: str, start: datetime, end: datetime) -> BodyIO | None:
+    """I/O half of the body summary: read the cumulative counters (Role.STEPS)
+    and the charging sensor from Influx. The two reads are independent, so they
+    run concurrently. None when nothing is bound / no data. No CPU aggregation
+    here — assemble_body does that, and needs no I/O."""
     from ..schemas import Role
     try:
         binds = [b for b in repo.bindings()
@@ -307,10 +325,19 @@ def read_body(repo, tsdb, pid: str, start: datetime, end: datetime, *,
     if not binds or tsdb is None:
         return None
     lookback_start = min(start, end - timedelta(days=14))
-    try:
-        wide = tsdb.read_raw(binds, lookback_start, end, freq="30m")
-    except Exception:
-        return None
+
+    def _read_counters():
+        try:
+            return tsdb.read_raw(binds, lookback_start, end, freq="30m")
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_wide = ex.submit(_read_counters)
+        f_charge = ex.submit(_charging_samples, repo, tsdb, pid, lookback_start, end)
+        wide = f_wide.result()
+        charging_full = f_charge.result()
+
     if wide is None or getattr(wide, "empty", True):
         return None
     counters_full = {b.name: _samples_from_col(wide, b.name)
@@ -318,18 +345,28 @@ def read_body(repo, tsdb, pid: str, start: datetime, end: datetime, *,
     counters_full = {k: v for k, v in counters_full.items() if v}
     if not counters_full:
         return None
-    charging_full = _charging_samples(repo, tsdb, pid, lookback_start, end)
-
-    def _after(samples, cut):
-        return [(ts, v) for ts, v in samples
-                if (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)) >= cut]
-
     cstart = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
-    counters_disp = {k: _after(v, cstart) for k, v in counters_full.items()}
-    counters_disp = {k: v for k, v in counters_disp.items() if v}
-    charging_disp = _after(charging_full, cstart)
+    counters_disp = {k: s for k, s in ((k, _after_samples(v, cstart))
+                                       for k, v in counters_full.items()) if s}
+    charging_disp = _after_samples(charging_full, cstart)
+    return BodyIO(counters_full, counters_disp, charging_full, charging_disp)
 
-    summary = summarize_body(pid, counters_disp, activity_rows or [], tz=tz,
-                             now=end, range_start=start, charging=charging_disp)
-    summary.trends = active_sedentary_trends(counters_full, charging_full, tz=tz, now=end)
+
+def assemble_body(pid: str, io: BodyIO | None, activity_rows: list[dict] | None, *,
+                  tz: str = "UTC", now: datetime, range_start: datetime) -> BodySummary | None:
+    """CPU half: aggregate pre-read BodyIO into a BodySummary. Pure, no I/O."""
+    if io is None:
+        return None
+    summary = summarize_body(pid, io.counters_disp, activity_rows or [], tz=tz,
+                             now=now, range_start=range_start, charging=io.charging_disp)
+    summary.trends = active_sedentary_trends(io.counters_full, io.charging_full, tz=tz, now=now)
     return summary
+
+
+def read_body(repo, tsdb, pid: str, start: datetime, end: datetime, *,
+              tz: str = "UTC", activity_rows: list[dict] | None = None) -> BodySummary | None:
+    """Read + aggregate the person's cumulative counters (Role.STEPS) + charging
+    sensor. The display summary covers [start, end]; the active/sedentary TREND
+    always uses ≥14d so it's independent of the view range. None when nothing bound."""
+    io = read_body_io(repo, tsdb, pid, start, end)
+    return assemble_body(pid, io, activity_rows, tz=tz, now=end, range_start=start)

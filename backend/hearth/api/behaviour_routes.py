@@ -7,11 +7,12 @@ activity palette (slug→name→color) so the UI can render with consistent colo
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
 
-from ..domain.behaviour.body import read_body
+from ..domain.behaviour.body import assemble_body, read_body_io
 from ..domain.behaviour.summary import summarize, trends
 
 router = APIRouter(prefix="/api/behaviour", tags=["behaviour"])
@@ -26,11 +27,44 @@ _tsdb = None
 _PRED_TTL = 60.0
 _pred_cache: dict = {}
 
+# Same idea for the raw wearable reads read_body makes (steps + charging over
+# ≥14d) — these are the page's other heavy Influx queries and weren't cached
+# before, so they hit Influx on every visit / every 7d⇄30d / person toggle.
+_RAW_TTL = 60.0
+_raw_cache: dict = {}
+
 
 def bind(repo, tsdb=None) -> None:
     global _repo, _tsdb
     _repo, _tsdb = repo, tsdb
     _pred_cache.clear()
+    _raw_cache.clear()
+
+
+class _CachingTsdb:
+    """Thin proxy that memoizes read_raw with a short TTL; everything else falls
+    through to the real tsdb. Handed to read_body_io so its steps+charging reads
+    are cached like predictions are."""
+
+    def __init__(self, tsdb):
+        self._t = tsdb
+
+    def read_raw(self, bindings, start, end, freq: str = "1m"):
+        key = (tuple(sorted(b.name for b in bindings)),
+               int(start.timestamp() // 3600), int(end.timestamp() // 3600), freq)
+        now = time.monotonic()
+        hit = _raw_cache.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+        df = self._t.read_raw(bindings, start, end, freq=freq)
+        _raw_cache[key] = (now + _RAW_TTL, df)
+        if len(_raw_cache) > 32:                     # evict expired, keep it small
+            for k in [k for k, (exp, _) in _raw_cache.items() if exp <= now]:
+                _raw_cache.pop(k, None)
+        return df
+
+    def __getattr__(self, name):
+        return getattr(self._t, name)
 
 
 def _read_predictions_cached(pid: str, start: datetime, end: datetime) -> list:
@@ -47,6 +81,15 @@ def _read_predictions_cached(pid: str, start: datetime, end: datetime) -> list:
         for k in [k for k, (exp, _) in _pred_cache.items() if exp <= now]:
             _pred_cache.pop(k, None)
     return rows
+
+
+def _safe_body_io(tsdb, pid: str, start: datetime, end: datetime):
+    """read_body_io wrapper that never raises — run in the worker pool so a body
+    read failure can't sink the whole page."""
+    try:
+        return read_body_io(_repo, tsdb, pid, start, end)
+    except Exception:
+        return None
 
 
 @router.get("")
@@ -75,17 +118,27 @@ def behaviour(person: str | None = None, days: int = 7) -> dict:
     # toggle, so fetch at least 14d and scope the display aggregation to `days`.
     lookback = max(days, 14)
     start = end - timedelta(days=lookback)
-    try:
-        rows = _read_predictions_cached(pid, start, end)
-    except Exception:
-        rows = []
-    disp_cut = (end - timedelta(days=days)).timestamp()
+    disp_start = end - timedelta(days=days)
+    # The prediction read and the wearable (body) reads are independent Influx
+    # queries — run them concurrently instead of back-to-back so the page's
+    # wall-clock is max(pred, body), not their sum. body_io does no CPU work and
+    # needs no predictions, so it parallelizes cleanly; the aggregation that DOES
+    # need the rows (assemble_body) happens after, on cheap in-memory data.
+    ctsdb = _CachingTsdb(_tsdb)
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_rows = ex.submit(_read_predictions_cached, pid, start, end)
+        f_io = ex.submit(_safe_body_io, ctsdb, pid, disp_start, end)
+        try:
+            rows = f_rows.result()
+        except Exception:
+            rows = []
+        io = f_io.result()
+    disp_cut = disp_start.timestamp()
     disp_rows = [r for r in rows if _after(r, disp_cut)]
     s = summarize(pid, disp_rows, tz=tz)
     t = trends(pid, rows, tz=tz)
     try:
-        body = read_body(_repo, _tsdb, pid, end - timedelta(days=days), end,
-                         tz=tz, activity_rows=disp_rows)
+        body = assemble_body(pid, io, disp_rows, tz=tz, now=end, range_start=disp_start)
     except Exception:
         body = None
     return {"summary": s.model_dump(mode="json"),

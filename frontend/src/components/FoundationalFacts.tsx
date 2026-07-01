@@ -24,7 +24,7 @@ type Verdict = { role_decision: "fact" | "feature" | "suspect"; score: number;
 type Fact = { id: string; gate: string; binding_name: string; person_id?: string | null;
               enabled: boolean; verdict: Verdict };
 type Candidate = { binding_name: string; entity_id: string; room?: string | null;
-                   person_id?: string | null };
+                   person_id?: string | null; device?: string | null };
 type Data = { facts: Fact[]; candidates: Record<string, Candidate[]> };
 
 const PILL: Record<string, { bg: string; fg: string; label: string }> = {
@@ -116,7 +116,11 @@ export default function FoundationalFacts({ wizard = false }: { wizard?: boolean
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {sleepCands.map((c) => (
               <div key={c.binding_name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 13, flex: 1 }}>{c.entity_id}
+                <span style={{ fontSize: 13, flex: 1 }}>
+                  {c.device
+                    ? <><b style={{ fontWeight: 500 }}>{c.device}</b>
+                        <span style={{ color: "var(--text-dim)" }}> · {c.entity_id}</span></>
+                    : c.entity_id}
                   {c.room ? <span style={{ color: "var(--text-dim)" }}> · {c.room}</span> : null}</span>
                 <button className="btn" onClick={() => bind("asleep", c)}>Use this</button>
               </div>
