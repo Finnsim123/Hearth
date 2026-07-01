@@ -101,6 +101,8 @@ def create_app() -> FastAPI:
             app.state.ingest_task = asyncio.create_task(deps["ingest_coro"]())
         if deps.get("realtime_coro"):
             app.state.realtime_task = asyncio.create_task(deps["realtime_coro"]())
+        if deps.get("registry_coro"):        # event-driven new-device detection
+            app.state.registry_task = asyncio.create_task(deps["registry_coro"]())
         repo = deps["repo"]
         if repo.get_setting("seed.pending") or repo.get_setting("fasttrack.pending"):
             async def _seed_then_fasttrack() -> None:

@@ -143,6 +143,44 @@ class HaWebSocketSource:
                         out.append(_to_state(item.get("entity_id", eid), item))
         return out
 
+    async def watch_registry(self) -> AsyncIterator[str]:
+        """Yield on every `device_registry_updated` event (reconnecting). Near-zero
+        cost — fires ONLY when HA's device registry actually changes, so a new device
+        is noticed within seconds without polling the full entity list."""
+        backoff = 1.0
+        while True:
+            try:
+                conn = self._conn()
+                async with aiohttp.ClientSession() as session:
+                    ws = await self._authed_ws(session, conn)
+                    await ws.send_json({"id": self._next_id(), "type": "subscribe_events",
+                                        "event_type": "device_registry_updated"})
+                    backoff = 1.0
+                    log.info("HA device-registry watch connected")
+                    async for msg in ws:
+                        if msg.type != aiohttp.WSMsgType.TEXT:
+                            break
+                        data = msg.json()
+                        if data.get("type") == "event":
+                            yield (data.get("event") or {}).get("event_type", "device_registry_updated")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("registry watch disconnected (%s) — retry in %.0fs", exc, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
+
+    async def list_device_ids(self) -> set[str]:
+        """Just the device-id set — a cheap poll (no get_states) for the fallback."""
+        conn = self._conn()
+        async with aiohttp.ClientSession() as session:
+            ws = await self._authed_ws(session, conn)
+            try:
+                devices = await self._command(ws, {"type": "config/device_registry/list"})
+            finally:
+                await ws.close()
+        return {d.get("id") for d in devices if d.get("id")}
+
     async def discover_entities(self) -> list[dict]:
         """Inventory metadata: states + entity registry + area names."""
         conn = self._conn()

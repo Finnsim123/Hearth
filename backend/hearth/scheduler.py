@@ -262,16 +262,59 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
             scheduler.add_job(_sync_inventory, "interval", hours=24,
                               id="inventory_sync", max_instances=1, coalesce=True)
 
-            async def _device_watch() -> None:
-                # notice newly-added HA devices and offer to integrate them (push +
-                # advisory). First scan just seeds the snapshot; later ones detect new.
+            # New-device detection, three tiers so it feels instant without polling
+            # the heavy entity list: (1) event-driven — react to HA's
+            # device_registry_updated within seconds; (2) a cheap 10-min poll of just
+            # the device-id set as a safety net if the subscription drops; (3) a daily
+            # full scan as a backstop. The full scan itself runs only on a real change.
+            async def _scan() -> None:
                 from .domain.onboarding.device_watch import scan_new_nodes
                 try:
                     await scan_new_nodes(repo, events, deps.get("notifier"))
                 except Exception:
-                    log.exception("device watch failed")
+                    log.exception("device scan failed")
 
-            scheduler.add_job(_device_watch, "interval", hours=24,
+            async def _registry_watch_forever() -> None:
+                # debounce HA's burst of registry events (a new device also registers
+                # its entities) into a single scan ~45 s after things settle.
+                dirty = asyncio.Event()
+
+                async def _watch() -> None:
+                    async for _ in events.watch_registry():
+                        dirty.set()
+
+                async def _consume() -> None:
+                    while True:
+                        await dirty.wait()
+                        await asyncio.sleep(45)
+                        dirty.clear()
+                        await _scan()
+
+                while True:
+                    try:
+                        await asyncio.gather(_watch(), _consume())
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        log.exception("registry watch crashed — restarting in 10 s")
+                        await asyncio.sleep(10)
+
+            deps["registry_coro"] = _registry_watch_forever   # started from main.py
+
+            _dev_ids: dict = {"seen": None}
+
+            async def _registry_poll() -> None:
+                try:
+                    ids = await events.list_device_ids()
+                except Exception:
+                    return
+                prev, _dev_ids["seen"] = _dev_ids["seen"], ids
+                if prev is not None and (ids - prev):          # a new device id appeared
+                    await _scan()
+
+            scheduler.add_job(_registry_poll, "interval", minutes=10,
+                              id="registry_poll", max_instances=1, coalesce=True)
+            scheduler.add_job(_scan, "interval", hours=24,
                               id="device_watch", max_instances=1, coalesce=True)
 
     if tsdb is not None and deps.get("notifier") is not None:
