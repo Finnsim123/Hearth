@@ -977,6 +977,34 @@ def build_api_router(deps: dict) -> APIRouter:
         repo.save_person(person)
         return {"avatar": person.avatar}
 
+    @api.post("/persons/{person_id}/forget")
+    async def forget_person_ep(person_id: str, body: dict | None = None) -> dict:
+        """Remove & forget a member who's left — a genuine erasure of everything
+        that's theirs, keeping the rest of the household's data. `keep_sensors`
+        (default false) leaves their bindings in place (e.g. a shared device that
+        was mis-assigned to them). The people who remain are retrained in the
+        background so their models stop leaning on the person who's gone."""
+        import asyncio
+        tsdb = deps.get("tsdb")
+        from ..domain.people import forget_person
+        res = forget_person(repo, tsdb, person_id,
+                            drop_bindings=not (body or {}).get("keep_sensors", False))
+        if not res.get("ok"):
+            raise HTTPException(404, "unknown person")
+        store = deps.get("models")
+
+        async def _refresh(pid: str) -> None:
+            try:
+                from ..domain.training.trainer import train_person
+                await asyncio.to_thread(train_person, pid, tsdb, repo, store)
+            except Exception:
+                log.exception("post-forget retrain failed for %s", pid)
+
+        if tsdb is not None and store is not None:
+            for pid in res.get("retrain", []):
+                asyncio.create_task(_refresh(pid))
+        return res
+
     # ── bindings ───────────────────────────────────────────────────────────
     @api.get("/bindings")
     def bindings() -> list[Binding]:

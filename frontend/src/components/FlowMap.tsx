@@ -11,7 +11,18 @@ import { usePrefersReducedMotion } from "../useMedia";
 type NodeData = { label: string; value: string; status: string; href: string; step: string;
                   source?: string | null; desc?: string | null };
 type EdgeData = { rate: number; status: string; label?: string };
-type Flow = { phase: string; tone: string; nodes: Record<string, NodeData>; edges: Record<string, EdgeData> };
+type ModelInfo = { person_id: string; name: string; avatar?: string | null;
+                   version: string | null; accuracy: number | null; nodes: number;
+                   preds: number; status: string };
+type Flow = { phase: string; tone: string; nodes: Record<string, NodeData>;
+              edges: Record<string, EdgeData>; models?: ModelInfo[] };
+
+// Per-person model status → dot/lane colour (trained vs still learning).
+const MODEL_STATUS: Record<string, string> = {
+  ok: "#34D399", work: "#F59E0B", idle: "var(--border)",
+};
+const mColor = (s: string) => MODEL_STATUS[s] ?? "var(--accent)";
+const initial = (name: string) => (name.trim()[0] || "?").toUpperCase();
 
 // Compact layout (narrow canvas → text stays legible at half-card width).
 const N: Record<string, { x: number; y: number; w: number; h: number; color: string; desc: string }> = {
@@ -62,8 +73,52 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
 
   if (!f) return null;
 
-  const edges = compact ? E.filter((e) => MAIN_E.includes(e.id)) : E;
-  const nodeIds = Object.keys(N).filter((id) => !compact || MAIN_N.includes(id));
+  const models = f.models ?? [];
+  const multi = models.length > 1;
+  // Full view with a handful of members: fork the model column into one box per
+  // person, all feeding the shared predictions node. Beyond 4 that gets cramped,
+  // so we fall back to the single aggregate "Models" node (with per-person dots).
+  const fork = !compact && multi && models.length <= 4;
+
+  // fork geometry: stack per-person model boxes centred on the pipeline row.
+  const MB = N.model;
+  const cyRow = MB.y + MB.h / 2;
+  const GAP = 8;
+  const hh = fork ? Math.min(48, (150 - (models.length - 1) * GAP) / models.length) : 0;
+  const totalH = models.length * hh + (models.length - 1) * GAP;
+  const stackTop = cyRow - totalH / 2;
+  const laneY = (i: number) => stackTop + i * (hh + GAP);
+  const laneMid = (i: number) => laneY(i) + hh / 2;
+
+  let baseEdges = compact ? E.filter((e) => MAIN_E.includes(e.id)) : E;
+  if (fork) {
+    // the fixed model edges are replaced by per-lane ones; re-anchor the
+    // feedback loop so it points into the bottom of the model stack.
+    baseEdges = baseEdges
+      .filter((e) => e.id !== "features_model" && e.id !== "model_predictions")
+      .map((e) => e.id === "you_model"
+        ? { ...e, d: `M576 200 L492 200 L492 ${Math.round(stackTop + totalH)}` } : e);
+  }
+  const nodeIds = Object.keys(N).filter((id) =>
+    (!compact || MAIN_N.includes(id)) && !(fork && id === "model"));
+
+  const renderEdge = (e: { d: string; dot: string }, ed: EdgeData, key: string) => {
+    const dead = ed.rate === 0 || ed.status === "idle";
+    const stroke = ed.status === "alert" ? "var(--danger)" : "var(--text-dim)";
+    const dur = ed.rate >= 3 ? 1.2 : ed.rate === 2 ? 1.9 : 2.8;
+    return (
+      <g key={key}>
+        <path d={e.d} fill="none" stroke={stroke} strokeWidth={1.6}
+              strokeOpacity={dead ? 0.28 : 0.8} markerEnd="url(#fm-ar)" />
+        {!reduce && ed.rate > 0 && Array.from({ length: ed.rate }).map((_, i) => (
+          <circle key={i} r={compact ? 2.6 : 3.4} fill={e.dot}>
+            <animateMotion dur={`${dur}s`} begin={`${((i * dur) / ed.rate).toFixed(2)}s`}
+                           repeatCount="indefinite" path={e.d} />
+          </circle>
+        ))}
+      </g>
+    );
+  };
 
   const svg = (
     <svg viewBox={compact ? "2 28 708 64" : "0 24 712 212"} role="img"
@@ -74,21 +129,35 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
         </marker>
       </defs>
 
-      {edges.map((e) => {
-        const ed = f.edges[e.id] || { rate: 0, status: "ok" };
-        const dead = ed.rate === 0 || ed.status === "idle";
-        const stroke = ed.status === "alert" ? "var(--danger)" : "var(--text-dim)";
-        const dur = ed.rate >= 3 ? 1.2 : ed.rate === 2 ? 1.9 : 2.8;
+      {baseEdges.map((e) => renderEdge(e, f.edges[e.id] || { rate: 0, status: "ok" }, e.id))}
+
+      {/* fork: one model box per person, each with its own feed + serve edges */}
+      {fork && models.map((mi, i) => {
+        const mid = laneMid(i);
+        const rate = mi.preds >= 250 ? 3 : mi.preds >= 50 ? 2 : mi.preds > 0 ? 1 : 0;
+        const dot = mColor(mi.status);
+        const detail = mi.version
+          ? (mi.accuracy ? `${Math.round(mi.accuracy * 100)}%` : "trained")
+            + (mi.nodes > 1 ? ` · ${mi.nodes} nodes` : "")
+          : "learning…";
         return (
-          <g key={e.id}>
-            <path d={e.d} fill="none" stroke={stroke} strokeWidth={1.6}
-                  strokeOpacity={dead ? 0.28 : 0.8} markerEnd="url(#fm-ar)" />
-            {!reduce && Array.from({ length: ed.rate }).map((_, i) => (
-              <circle key={i} r={compact ? 2.6 : 3.4} fill={e.dot}>
-                <animateMotion dur={`${dur}s`} begin={`${((i * dur) / ed.rate).toFixed(2)}s`}
-                               repeatCount="indefinite" path={e.d} />
-              </circle>
-            ))}
+          <g key={mi.person_id}>
+            {renderEdge({ d: `M408 60 L${MB.x} ${mid}`, dot },
+                        { rate: Math.max(1, rate), status: "ok" }, `fe${i}`)}
+            {renderEdge({ d: `M${MB.x + MB.w} ${mid} L576 60`, dot },
+                        { rate, status: mi.preds ? "ok" : "idle" }, `pe${i}`)}
+            <g style={{ cursor: "pointer" }} onClick={() => navigate("/models")}>
+              <rect x={MB.x} y={laneY(i)} width={MB.w} height={hh} rx={8}
+                    fill="var(--surface-2)" stroke={dot} strokeWidth={mi.status === "ok" ? 1.6 : 1.4} />
+              <circle cx={MB.x + 14} cy={mid} r={7.5}
+                      fill={`color-mix(in srgb, ${dot} 30%, transparent)`} stroke={dot} strokeWidth={1} />
+              <text x={MB.x + 14} y={mid + 3.5} textAnchor="middle" fontSize={9} fontWeight={700}
+                    fill="var(--text)" style={{ pointerEvents: "none" }}>{initial(mi.name)}</text>
+              <text x={MB.x + 28} y={mid - 3} fontSize={12} fontWeight={600} fill="var(--text)"
+                    style={{ pointerEvents: "none" }}>{mi.name}</text>
+              <text x={MB.x + 28} y={mid + 11} fontSize={10.5} fill="var(--text-dim)"
+                    style={{ pointerEvents: "none" }}>{detail}</text>
+            </g>
           </g>
         );
       })}
@@ -111,6 +180,30 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
             <text x={cx(id)} y={n.y + 41} textAnchor="middle" fontSize={13.5}
                   fill={nd.status === "ask" ? "var(--accent)" : "var(--text-dim)"}
                   style={{ pointerEvents: "none" }}>{nd.value}</text>
+            {/* per-person model dots — one per member, colour = trained/learning.
+                Shown on the aggregate node (compact, or full with 5+ members). */}
+            {id === "model" && multi && (() => {
+              const list = models.slice(0, 6);
+              const extra = models.length - list.length;
+              const sp = 11, slots = list.length + (extra > 0 ? 1 : 0);
+              const x0 = cx(id) - ((slots - 1) * sp) / 2;
+              const dy = n.y + n.h - 7;
+              return (
+                <g style={{ pointerEvents: "none" }}>
+                  {list.map((mi, i) => (
+                    <circle key={mi.person_id} cx={x0 + i * sp} cy={dy} r={3}
+                            fill={mColor(mi.status)} stroke="var(--surface)" strokeWidth={0.6}>
+                      <title>{mi.name}: {mi.version
+                        ? (mi.accuracy ? `${Math.round(mi.accuracy * 100)}%` : "trained") : "learning"}</title>
+                    </circle>
+                  ))}
+                  {extra > 0 && (
+                    <text x={x0 + list.length * sp} y={dy + 3.5} textAnchor="middle"
+                          fontSize={8.5} fill="var(--text-dim)">+{extra}</text>
+                  )}
+                </g>
+              );
+            })()}
           </g>
         );
       })}

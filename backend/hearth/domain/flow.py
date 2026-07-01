@@ -49,16 +49,51 @@ def flow_state(repo, tsdb) -> dict:
     events24 = _safe(lambda: tsdb.count_raw_events(24), 0) if tsdb else 0
     recent = _safe(lambda: tsdb.count_raw_events(3), None) if tsdb else None
     first = _safe(lambda: tsdb.first_raw_time(), None) if tsdb else None
-    preds24 = 0
+    preds_by_person: dict[str, int] = {}
     if tsdb:
         for p in persons:
-            preds24 += len(_safe(lambda p=p: tsdb.read_predictions(p.id, now - timedelta(days=1), now), []) or [])
+            preds_by_person[p.id] = len(
+                _safe(lambda p=p: tsdb.read_predictions(p.id, now - timedelta(days=1), now), []) or [])
+    preds24 = sum(preds_by_person.values())
     open_q = len(_safe(lambda: repo.open_questions(), []) or [])
     patterns = len(_safe(lambda: repo.clusters(status="new"), []) or [])
 
+    # One model PER PERSON (each person's promoted root classifier, plus any
+    # per-activity child models). The map used to show only the first person's
+    # root; now we surface every person's model so a multi-member home reads true.
+    def _acc(mr) -> float | None:
+        mm = mr.metrics or {}
+        return mm.get("accuracy_confirmed") or mm.get("accuracy_bootstrap")
+
+    promoted_by_person: dict[str, list] = {}
+    for mr in promoted:
+        promoted_by_person.setdefault(mr.person_id, []).append(mr)
+    models = []
+    for p in persons:
+        mine = promoted_by_person.get(p.id, [])
+        root_m = next((mr for mr in mine if mr.node == "root"), None)
+        models.append({
+            "person_id": p.id, "name": getattr(p, "name", p.id),
+            "avatar": getattr(p, "avatar", None),
+            "version": root_m.version if root_m else None,
+            "accuracy": _acc(root_m) if root_m else None,
+            "nodes": len(mine),                       # root + child classifiers
+            "preds": preds_by_person.get(p.id, 0),
+            "status": "ok" if root_m else "work",
+        })
+
+    trained = [x for x in models if x["version"]]
+    accs = [x["accuracy"] for x in trained if x["accuracy"]]
+    avg_acc = sum(accs) / len(accs) if accs else None
+    if len(trained) <= 1:                             # single member → familiar form
+        model_value = (f"{root.version} · {round(_acc(root) * 100)}%"
+                       if root and _acc(root) else root.version if root else "training…")
+    else:
+        model_value = (f"{len(trained)} models · {round(avg_acc * 100)}%"
+                       if avg_acc else f"{len(trained)} models")
+
     m = root.metrics if root else {}
     n_train = m.get("n_train")
-    acc = m.get("accuracy_confirmed") or m.get("accuracy_bootstrap")
     confirmed = (root.label_counts or {}).get("confirmed", 0) if root else 0
 
     stalled = bool(tsdb and bindings and recent == 0 and first and (now - first) > timedelta(hours=6))
@@ -88,9 +123,8 @@ def flow_state(repo, tsdb) -> dict:
                 "href": "/settings", "step": "normalise"},
         "features": {"label": "Features", "value": f"{n_train:,} windows" if n_train else "building…",
                      "status": "work" if setup else "ok", "href": "/sensors", "step": "features"},
-        "model": {"label": "Model",
-                  "value": (f"{root.version} · {round(acc * 100)}%" if root and acc
-                            else root.version if root else "training…"),
+        "model": {"label": "Models" if len(models) > 1 else "Model",
+                  "value": model_value,
                   "status": "ok" if root else "work", "href": "/models", "step": "model"},
         "predictions": {"label": "Predictions", "value": f"{preds24}/day" if preds24 else "warming up",
                         "status": "ok" if preds24 else "idle", "href": "/", "step": "serving"},
@@ -110,4 +144,5 @@ def flow_state(repo, tsdb) -> dict:
         "you_model": {"rate": _level(confirmed, 10, 100), "status": "ok"},
         "features_discovery": {"rate": 1 if patterns else 0, "status": "ok"},
     }
-    return {"phase": b["phase"], "tone": b["tone"], "nodes": nodes, "edges": edges}
+    return {"phase": b["phase"], "tone": b["tone"], "nodes": nodes, "edges": edges,
+            "models": models}

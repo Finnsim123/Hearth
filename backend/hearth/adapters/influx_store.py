@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 import logging
+import re
 import warnings
 from datetime import datetime, timedelta, timezone
 
@@ -238,6 +239,24 @@ class InfluxStore:
             points.append(p.field(field, value))
         if points:
             self.write_api.write(bucket=RAW_BUCKET, record=points)
+
+    def purge_person(self, person_id: str) -> None:
+        """Irreversibly delete every series tagged to this person — the raw history
+        of THEIR own sensors, plus their features, labels and predictions — across
+        all buckets. Shared/household sensors carry no person tag, so they're left
+        untouched. Used by 'remove & forget' when a household member leaves."""
+        pid = re.sub(r"[^A-Za-z0-9_\-]", "", person_id or "")   # ids are slugs; guard anyway
+        if not pid:
+            return
+        start = "1970-01-01T00:00:00Z"
+        stop = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        predicate = f'person="{pid}"'
+        api = self.client.delete_api()
+        for bucket in (RAW_BUCKET, FEAT_BUCKET, ML_BUCKET):
+            try:
+                api.delete(start, stop, predicate, bucket=bucket, org=self.org)
+            except Exception as exc:
+                log.warning("purge_person: delete from %s failed: %s", bucket, exc)
 
     def read_raw(self, bindings: list[Binding], start: datetime, end: datetime,
                  freq: str = "1m") -> pd.DataFrame:

@@ -289,6 +289,33 @@ class AppDb:
             s.commit()
             return p
 
+    def delete_person(self, person_id: str, drop_bindings: bool = True) -> dict:
+        """Remove a household member and everything the app DB holds for them:
+        their rules, inbox questions, models and clusters, and (unless kept) the
+        bindings for THEIR own sensors. Shared bindings (no person_id, e.g. a
+        living-room motion sensor) are never touched. Returns a tally of what was
+        deleted, for the confirmation + timeline event. Time-series erasure is a
+        separate step (see domain.people.forget_person)."""
+        counts: dict[str, int] = {}
+        with Session(self.engine) as s:
+            def _purge(model, count_key):
+                rows = s.scalars(select(model).where(model.person_id == person_id)).all()
+                counts[count_key] = len(rows)
+                for r in rows:
+                    s.delete(r)
+            if drop_bindings:
+                _purge(BindingRow, "bindings")
+            _purge(RuleRow, "rules")
+            _purge(QuestionRow, "questions")
+            _purge(ModelRow, "models")
+            _purge(ClusterRow, "clusters")
+            p = s.get(PersonRow, person_id)
+            if p is not None:
+                s.delete(p)
+                counts["person"] = 1
+            s.commit()
+        return counts
+
     # ── activities & rules ─────────────────────────────────────────────────
     def activities(self) -> list[Activity]:
         with Session(self.engine) as s:

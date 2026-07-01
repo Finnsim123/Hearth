@@ -64,6 +64,10 @@ class TimeSeriesStore(Protocol):
         """Binding names with a raw point in the last `minutes` (live heartbeat)."""
         ...
     def write_heartbeat(self, job: str) -> None: ...
+    def purge_person(self, person_id: str) -> None:
+        """Irreversibly delete every series tagged to a person (raw of their own
+        sensors, features, labels, predictions). Used by 'remove & forget'."""
+        ...
 
 
 class EntityPublisher(Protocol):
