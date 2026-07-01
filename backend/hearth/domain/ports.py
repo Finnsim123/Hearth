@@ -68,6 +68,10 @@ class TimeSeriesStore(Protocol):
         """Irreversibly delete every series tagged to a person (raw of their own
         sensors, features, labels, predictions). Used by 'remove & forget'."""
         ...
+    def person_ids_with_data(self) -> set[str]:
+        """Distinct person tags that have feature history — to spot orphaned
+        identities that could be reclaimed via relink."""
+        ...
 
 
 class EntityPublisher(Protocol):

@@ -1005,6 +1005,34 @@ def build_api_router(deps: dict) -> APIRouter:
                 asyncio.create_task(_refresh(pid))
         return res
 
+    @api.get("/persons/orphans")
+    def person_orphans() -> dict:
+        """Identities with stored history but no current person — reclaimable via
+        relink (e.g. after a rename+reseed left the old name's data behind)."""
+        from ..domain.people import orphaned_identities
+        return {"orphans": orphaned_identities(repo, deps.get("tsdb"))}
+
+    @api.post("/persons/{person_id}/relink")
+    async def relink_person_ep(person_id: str, body: dict) -> dict:
+        """Reclaim orphaned history: re-key this person onto a previous identity
+        `old_id`. No time-series is moved. Then retrain them on the recovered data."""
+        import asyncio
+        old_id = (body or {}).get("old_id", "")
+        from ..domain.people import relink_person
+        res = relink_person(repo, person_id, old_id)
+        if not res.get("ok"):
+            raise HTTPException(400, res.get("reason", "relink failed"))
+        tsdb, store = deps.get("tsdb"), deps.get("models")
+        if tsdb is not None and store is not None:
+            async def _refresh() -> None:
+                try:
+                    from ..domain.training.trainer import train_person
+                    await asyncio.to_thread(train_person, res["id"], tsdb, repo, store)
+                except Exception:
+                    log.exception("post-relink retrain failed for %s", res.get("id"))
+            asyncio.create_task(_refresh())
+        return res
+
     # ── bindings ───────────────────────────────────────────────────────────
     @api.get("/bindings")
     def bindings() -> list[Binding]:

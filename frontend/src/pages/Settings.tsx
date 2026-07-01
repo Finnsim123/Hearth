@@ -90,13 +90,15 @@ type Person = {
 
 const pad2 = (h: number) => String(h).padStart(2, "0");
 
-function PersonCard({ p: initial, onChanged }: { p: Person; onChanged?: () => void }) {
+function PersonCard({ p: initial, onChanged, orphans = [] }:
+                    { p: Person; onChanged?: () => void; orphans?: string[] }) {
   const [p, setP] = useState(initial);
   const [state, setState] = useState<SaveState>("idle");
   const [open, setOpen] = useState(false);
   const [photoErr, setPhotoErr] = useState("");
   const [danger, setDanger] = useState(false);
   const [confirmName, setConfirmName] = useState("");
+  const [reclaimId, setReclaimId] = useState("");
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const u = (patch: Partial<Person>) => { setP({ ...p, ...patch }); setState("idle"); };
@@ -116,6 +118,13 @@ function PersonCard({ p: initial, onChanged }: { p: Person; onChanged?: () => vo
   const forget = async () => {
     setBusy(true);
     try { await post(`/api/persons/${p.id}/forget`, {}).then(j); onChanged?.(); }
+    catch { setBusy(false); }
+  };
+  // Re-link: reclaim history orphaned under a previous identity (rename+reseed).
+  const relink = async () => {
+    if (!reclaimId) return;
+    setBusy(true);
+    try { await post(`/api/persons/${p.id}/relink`, { old_id: reclaimId }).then(j); onChanged?.(); }
     catch { setBusy(false); }
   };
   const onPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -241,9 +250,24 @@ function PersonCard({ p: initial, onChanged }: { p: Person; onChanged?: () => vo
 
       <SaveButton state={state} onClick={save} />
 
-      {/* membership lifecycle: pause (reversible) vs remove & forget (erasure) */}
+      {/* membership lifecycle: reclaim · pause (reversible) · remove & forget */}
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12,
                     display: "flex", flexDirection: "column", gap: 10 }}>
+        {orphans.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)", flex: 1, minWidth: 180 }}>
+              Set up under a different name before? Reclaim that earlier history.
+            </span>
+            <select value={reclaimId} onChange={(e) => setReclaimId(e.target.value)}
+                    style={{ fontSize: 12.5 }}>
+              <option value="">Earlier identity…</option>
+              {orphans.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+            <button className="btn btn-secondary" disabled={!reclaimId || busy} onClick={relink}>
+              {busy ? "Reclaiming…" : "Reclaim"}
+            </button>
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button className="btn btn-ghost" onClick={() => setEnabled(!p.enabled)}>
             {p.enabled ? "Pause" : "Resume"}
@@ -298,13 +322,17 @@ function PersonCard({ p: initial, onChanged }: { p: Person; onChanged?: () => vo
 
 function Household() {
   const [persons, setPersons] = useState<Person[] | null>(null);
-  const load = () => fetch("/api/persons").then(j).then(setPersons).catch(() => setPersons([]));
+  const [orphans, setOrphans] = useState<string[]>([]);
+  const load = () => {
+    fetch("/api/persons").then(j).then(setPersons).catch(() => setPersons([]));
+    fetch("/api/persons/orphans").then(j).then((d) => setOrphans(d.orphans ?? [])).catch(() => {});
+  };
   useEffect(() => { load(); }, []);
   return (
     <Card title="Household"
           sub="Who Hearth predicts for, and how much each person wants to hear from it.">
       {persons === null && <p style={{ color: "var(--text-dim)", fontSize: 14 }}>Loading…</p>}
-      {persons?.map((p) => <PersonCard key={p.id} p={p} onChanged={load} />)}
+      {persons?.map((p) => <PersonCard key={p.id} p={p} onChanged={load} orphans={orphans} />)}
     </Card>
   );
 }

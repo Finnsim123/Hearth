@@ -258,6 +258,23 @@ class InfluxStore:
             except Exception as exc:
                 log.warning("purge_person: delete from %s failed: %s", bucket, exc)
 
+    def person_ids_with_data(self) -> set[str]:
+        """Distinct `person` tag values that have feature history — used to spot
+        orphaned identities (data stored under an id with no current person, e.g.
+        after a rename + reseed) that could be reclaimed via relink."""
+        flux = (f'import "influxdata/influxdb/schema"\n'
+                f'schema.tagValues(bucket: "{FEAT_BUCKET}", tag: "person")')
+        out: set[str] = set()
+        try:
+            for table in self.query_api.query(flux):
+                for rec in table.records:
+                    v = rec.get_value()
+                    if v:
+                        out.add(str(v))
+        except Exception as exc:
+            log.warning("person_ids_with_data failed: %s", exc)
+        return out
+
     def read_raw(self, bindings: list[Binding], start: datetime, end: datetime,
                  freq: str = "1m") -> pd.DataFrame:
         """Wide 1-min DataFrame, one column per binding.name (UTC index).

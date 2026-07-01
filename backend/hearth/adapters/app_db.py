@@ -201,6 +201,25 @@ def _binding(r: BindingRow) -> Binding:
                    options=json.loads(r.options_json), enabled=r.enabled)
 
 
+def _rename_pred_cols(node, cur: str, old: str):
+    """Rewrite feature-column references in a rule predicate from a `cur_` prefix
+    to an `old_` prefix (used by relink). Column names are dict KEYS; logical
+    combinators (and/or/not) are recursed into, values left alone."""
+    def rn(k: str) -> str:
+        return old + k[len(cur):] if (k == cur or k.startswith(cur + "_")) else k
+    if isinstance(node, dict):
+        out = {}
+        for k, v in node.items():
+            if str(k).lower() in ("and", "or", "not"):
+                out[k] = _rename_pred_cols(v, cur, old)
+            else:
+                out[rn(str(k))] = v
+        return out
+    if isinstance(node, list):
+        return [_rename_pred_cols(x, cur, old) for x in node]
+    return node
+
+
 class AppDb:
     """Implements domain.ports.AppRepo (Phase 1 surface + persistence used by
     later phases)."""
@@ -315,6 +334,51 @@ class AppDb:
                 counts["person"] = 1
             s.commit()
         return counts
+
+    def relink_person(self, current_id: str, old_id: str) -> dict:
+        """Re-key a person to a PREVIOUS identity, so history orphaned under
+        `old_id` (e.g. after a rename+reseed) becomes theirs again. Nothing in the
+        time-series is rewritten — those series already carry `old_id` and column
+        prefixes like `old_id_iphone_*`, so we instead move the person ONTO that
+        id: rename their id, their bindings' person_id + name prefix, their rules'
+        person_id + predicate column prefixes, and their questions/models/clusters.
+        Refuses if `old_id` is already a live person (that'd be a merge, not a
+        relink). Returns a tally."""
+        if not old_id or old_id == current_id:
+            return {"ok": False, "reason": "same_id"}
+        with Session(self.engine) as s:
+            cur = s.get(PersonRow, current_id)
+            if cur is None:
+                return {"ok": False, "reason": "unknown_person"}
+            if s.get(PersonRow, old_id) is not None:
+                return {"ok": False, "reason": "old_id_in_use"}
+            counts = {"bindings": 0, "rules": 0, "questions": 0, "models": 0, "clusters": 0}
+            for b in s.scalars(select(BindingRow).where(BindingRow.person_id == current_id)).all():
+                if b.name == current_id or b.name.startswith(current_id + "_"):
+                    b.name = old_id + b.name[len(current_id):]      # alexander_iphone → alex_iphone
+                b.person_id = old_id
+                counts["bindings"] += 1
+            for r in s.scalars(select(RuleRow).where(RuleRow.person_id == current_id)).all():
+                r.person_id = old_id
+                try:
+                    r.predicate_json = json.dumps(
+                        _rename_pred_cols(json.loads(r.predicate_json), current_id, old_id))
+                except Exception:
+                    pass
+                counts["rules"] += 1
+            for model, key in ((QuestionRow, "questions"), (ModelRow, "models"),
+                               (ClusterRow, "clusters")):
+                for row in s.scalars(select(model).where(model.person_id == current_id)).all():
+                    row.person_id = old_id
+                    counts[key] += 1
+            # the person row's id is the primary key → recreate it under old_id
+            attrs = {c.name: getattr(cur, c.name) for c in PersonRow.__table__.columns}
+            attrs["id"] = old_id
+            s.delete(cur)
+            s.flush()
+            s.add(PersonRow(**attrs))
+            s.commit()
+            return {"ok": True, "counts": counts, "id": old_id, "name": attrs.get("name")}
 
     # ── activities & rules ─────────────────────────────────────────────────
     def activities(self) -> list[Activity]:

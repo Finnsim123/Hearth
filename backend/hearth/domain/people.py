@@ -68,3 +68,38 @@ def forget_person(repo, tsdb, person_id: str, *, drop_bindings: bool = True) -> 
 
     remaining = [p.id for p in persons if p.id != person_id and p.enabled]
     return {"ok": True, "name": name, "counts": counts, "retrain": remaining}
+
+
+def orphaned_identities(repo, tsdb) -> list[str]:
+    """Person ids that HAVE stored history but no current person — the candidates
+    to reclaim via relink (e.g. after a rename + reseed minted a fresh id and
+    left the old one's data behind)."""
+    if tsdb is None or not hasattr(tsdb, "person_ids_with_data"):
+        return []
+    try:
+        had = tsdb.person_ids_with_data()
+    except Exception:
+        log.debug("orphaned_identities: store query failed", exc_info=True)
+        return []
+    live = {p.id for p in repo.persons()}
+    return sorted(had - live)
+
+
+def relink_person(repo, current_id: str, old_id: str) -> dict:
+    """Re-key the person currently known as `current_id` onto a previous identity
+    `old_id`, so orphaned history under `old_id` becomes theirs — no time-series
+    rewrite, the series already carry `old_id`. Records a timeline event; the
+    caller should retrain the (now re-keyed) person to pick up the reclaimed data."""
+    res = repo.relink_person(current_id, old_id)
+    if res.get("ok"):
+        try:
+            from . import events
+            events.record_event(
+                repo, "person_relinked",
+                f"Reclaimed earlier data for {res.get('name') or old_id}",
+                f"re-linked to the identity “{old_id}” "
+                f"({res.get('counts', {}).get('bindings', 0)} sensor(s), "
+                f"{res.get('counts', {}).get('rules', 0)} rule(s) re-pointed)")
+        except Exception:
+            log.debug("relink_person: event log failed", exc_info=True)
+    return res
