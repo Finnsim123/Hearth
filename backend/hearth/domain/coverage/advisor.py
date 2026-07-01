@@ -143,6 +143,16 @@ def detect_gaps(
     return out
 
 
+def _device_rooms(repo) -> set[str]:
+    """Rooms that contain at least one HA device (from the cached catalog) — a real,
+    used room, so a blind spot there is worth flagging."""
+    try:
+        from ..hierarchy import load_device_catalog
+        return {v.get("area") for v in load_device_catalog(repo).values() if v.get("area")}
+    except Exception:
+        return set()
+
+
 def gaps_from_home(repo) -> list[SensorGap]:
     """Assemble inputs from app state and rank blind spots across the household.
 
@@ -156,9 +166,26 @@ def gaps_from_home(repo) -> list[SensorGap]:
         bindings = repo.bindings()
     except Exception:
         return []
-    referenced = {b.room for b in bindings if getattr(b, "room", None)}
+    binding_rooms = {b.room for b in bindings if getattr(b, "room", None)}
+    device_rooms = _device_rooms(repo)          # rooms that actually contain devices
+    referenced = binding_rooms | device_rooms
     out: list[SensorGap] = []
     seen: set = set()
+
+    # Device-aware ghost rooms — works even before any model exists: a room that
+    # HAS devices but no sensor Hearth can use to see activity there.
+    rr = room_roles(bindings)
+    for room in sorted(device_rooms):
+        if room and not rr.get(room):
+            g = SensorGap(kind="ghost_room", severity=0.6, room=room,
+                          suggested_role=Role.PRESENCE,
+                          detail=f"devices in {room} but nothing Hearth can use")
+            g.recommendation = (
+                f"You have devices in the {room} but nothing Hearth can use to see "
+                f"activity there — bind one on the Sensors page, or add a motion sensor.")
+            out.append(g)
+            seen.add(("ghost_room", room, ()))
+
     persons = []
     try:
         persons = repo.persons()

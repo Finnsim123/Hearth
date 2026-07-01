@@ -1555,8 +1555,29 @@ def build_api_router(deps: dict) -> APIRouter:
         if person is not None and person not in known:
             raise HTTPException(404, "no such person")
         targets = [person] if person else sorted(known)
-        return {"persons": {pid: tsdb.read_predictions(pid, start, end)
+        # Merged activities alias their history (trainer.py) but stored predictions
+        # keep the pre-merge slug, so remap at read time — covers past cells AND
+        # live predictions from a model not yet retrained. Chain is pre-resolved.
+        aliases = repo.get_setting("activity.aliases") or {}
+        return {"persons": {pid: _alias_predictions(tsdb.read_predictions(pid, start, end), aliases)
                             for pid in targets}}
+
+    def _alias_predictions(preds: list[dict], aliases: dict) -> list[dict]:
+        if not aliases:
+            return preds
+        a = lambda s: aliases.get(s, s)
+        for p in preds:
+            p["predicted"] = a(p["predicted"])
+            p["smoothed"] = a(p["smoothed"])
+            if p.get("parent"):
+                p["parent"] = a(p["parent"])
+            probs = p.get("probs")
+            if probs:
+                merged: dict[str, float] = {}
+                for k, v in probs.items():           # collapse collided keys
+                    merged[a(k)] = merged.get(a(k), 0.0) + v
+                p["probs"] = merged
+        return preds
 
     @api.post("/fasttrack/rerun")
     def fasttrack_rerun() -> dict:
