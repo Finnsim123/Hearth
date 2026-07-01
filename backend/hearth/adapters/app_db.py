@@ -312,6 +312,13 @@ class AppDb:
                             icon=r.icon, color=r.color, silent=r.silent,
                             parent_id=r.parent_id, enabled=r.enabled)
 
+    def delete_activity(self, slug: str) -> None:
+        with Session(self.engine) as s:
+            r = s.scalars(select(ActivityRow).where(ActivityRow.slug == slug)).first()
+            if r is not None:
+                s.delete(r)
+                s.commit()
+
     def rules(self) -> list[Rule]:
         with Session(self.engine) as s:
             return [Rule(id=r.id, activity_slug=r.activity_slug, person_id=r.person_id,

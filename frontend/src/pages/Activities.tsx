@@ -48,6 +48,18 @@ function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
     try { await post("/api/activities", a).then(j); setState("ok"); onSaved(); }
     catch { setState("fail"); }
   };
+  const [mergeInto, setMergeInto] = useState("");
+  const merge = async () => {
+    if (!mergeInto) return;
+    if (!window.confirm(`Merge “${a.name}” into “${parents.find((p) => p.slug === mergeInto)?.name ?? mergeInto}”? Past and future labels of “${a.name}” will count as that activity, and “${a.name}” is removed.`)) return;
+    await post("/api/activities/merge", { from_slug: a.slug, into_slug: mergeInto }).then(j);
+    onSaved();
+  };
+  const del = async () => {
+    if (!window.confirm(`Delete “${a.name}”? Its rules are disabled and any labels for it are ignored. To keep the data, use Merge instead.`)) return;
+    await post("/api/activities/delete", { slug: a.slug }).then(j);
+    onSaved();
+  };
   const mine = rules.filter((r) => r.activity_slug === a.slug);
   const parentName = a.parent_id ? parents.find((p2) => p2.id === a.parent_id)?.name : null;
   const summary = [
@@ -182,6 +194,21 @@ function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
         </button>
         {state === "ok" && <span style={{ color: "var(--ok, #34D399)", fontSize: 13 }}>Saved ✓</span>}
         {state === "fail" && <span style={{ color: "var(--danger)", fontSize: 13 }}>Couldn't save</span>}
+      </div>
+
+      {/* consolidate duplicates: merge into another activity, or delete */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                    borderTop: "1px solid var(--border)", paddingTop: 12, fontSize: 12.5 }}>
+        <span style={{ color: "var(--text-dim)" }}>Duplicate? Merge into</span>
+        <select value={mergeInto} onChange={(e) => setMergeInto(e.target.value)}>
+          <option value="">choose an activity…</option>
+          {parents.filter((p2) => p2.slug !== a.slug).map((p2) => (
+            <option key={p2.slug} value={p2.slug}>{p2.name}</option>
+          ))}
+        </select>
+        <button className="btn" disabled={!mergeInto} onClick={merge}>Merge</button>
+        <span style={{ flex: 1 }} />
+        <button className="btn btn-ghost" style={{ color: "var(--danger)" }} onClick={del}>Delete</button>
       </div>
       </div>
       )}

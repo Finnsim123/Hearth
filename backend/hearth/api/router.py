@@ -1465,6 +1465,75 @@ def build_api_router(deps: dict) -> APIRouter:
     def save_activity(a: Activity) -> Activity:
         return repo.save_activity(a)
 
+    @api.post("/activities/merge")
+    def merge_activities(body: dict) -> dict:
+        """Fold `from_slug` into `into_slug`: reassign its children, migrate its
+        rules/markers, alias its history so past + future labels count as the
+        target, then drop the duplicate. Aliases are applied at training time
+        (trainer), so no Influx rewrite is needed."""
+        frm = (body.get("from_slug") or "").strip()
+        into = (body.get("into_slug") or "").strip()
+        if not frm or not into or frm == into:
+            raise HTTPException(400, "from_slug and into_slug required and must differ")
+        by = {a.slug: a for a in repo.activities()}
+        if frm not in by or into not in by:
+            raise HTTPException(404, "activity not found")
+        src, dst = by[frm], by[into]
+        for a in repo.activities():                       # reparent children
+            if a.parent_id == src.id:
+                a.parent_id = dst.id
+                repo.save_activity(a)
+        for r in repo.rules():                            # migrate rules
+            if r.activity_slug == frm:
+                r.activity_slug = into
+                repo.save_rule(r)
+        from ..domain.markers import load_markers, save_markers
+        mks, changed = repo_markers_remap(repo, load_markers, frm, into)
+        if changed:
+            save_markers(repo, mks)
+        aliases = repo.get_setting("activity.aliases") or {}
+        aliases = {k: (into if v == frm else v) for k, v in aliases.items()}  # rechain
+        aliases[frm] = into
+        repo.set_setting("activity.aliases", aliases)
+        repo.delete_activity(frm)
+        from ..domain.events import record_event
+        record_event(repo, "activity_merged", f"Merged “{src.name}” into “{dst.name}”",
+                     "past and future labels now count as one.")
+        return {"ok": True, "merged": frm, "into": into}
+
+    def repo_markers_remap(repo, load_markers, frm, into):
+        mks = load_markers(repo)
+        changed = False
+        for m in mks:
+            if m.to_state == frm:
+                m.to_state = into; changed = True
+            if m.from_state == frm:
+                m.from_state = into; changed = True
+        return mks, changed
+
+    @api.post("/activities/delete")
+    def delete_activity_ep(body: dict) -> dict:
+        """Remove an activity. Children move up to top level; its rules are
+        disabled. Labels for a class that no longer exists are simply ignored at
+        training — use merge instead if you want to keep the data."""
+        slug = (body.get("slug") or "").strip()
+        by = {a.slug: a for a in repo.activities()}
+        if not slug or slug not in by:
+            raise HTTPException(404, "activity not found")
+        node = by[slug]
+        for a in repo.activities():
+            if a.parent_id == node.id:
+                a.parent_id = None
+                repo.save_activity(a)
+        for r in repo.rules():
+            if r.activity_slug == slug and r.enabled:
+                r.enabled = False
+                repo.save_rule(r)
+        repo.delete_activity(slug)
+        from ..domain.events import record_event
+        record_event(repo, "activity_deleted", f"Deleted activity “{node.name}”", "")
+        return {"ok": True, "deleted": slug}
+
     @api.post("/rules/regenerate")
     def regenerate_rules(body: dict | None = None) -> dict:
         """Regenerate starter rules from current bindings. Replaces previous

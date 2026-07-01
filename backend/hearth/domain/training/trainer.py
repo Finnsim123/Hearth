@@ -168,6 +168,11 @@ def train_person(person_id: str, tsdb, repo, store,
     bootstrap = bootstrap_labels(repo.rules(), feats, person_id, default_activity)
     events = tsdb.read_labels(person_id, start, end)
     labels, provenance, gold = merge_labels(bootstrap, events)
+    # merged activities: past labels of a folded slug count as the target (the
+    # merge endpoint rechains aliases, so a single lookup resolves fully).
+    aliases = repo.get_setting("activity.aliases") or {}
+    if aliases:
+        labels = labels.map(lambda lab: aliases.get(lab, lab))
 
     # ── hierarchy (LCPN, labeling/taxonomy.py) ────────────────────────────
     # root model: every label projected to its coarse state (eating → home);
