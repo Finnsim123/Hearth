@@ -298,13 +298,24 @@ class AppDb:
                     for r in s.scalars(select(ActivityRow)).all()]
 
     def save_activity(self, a: Activity) -> Activity:
+        from ..domain.labeling.palette import is_unset, pick_color
         with Session(self.engine) as s:
             r = (s.get(ActivityRow, a.id) if a.id
                  else s.scalars(select(ActivityRow).where(ActivityRow.slug == a.slug)).first())
+            color = a.color
+            # auto-assign a distinct palette colour when none was chosen, so every
+            # creation path (onboarding presets, cluster naming, the +Add box…)
+            # yields a coloured activity without the caller having to pick one.
+            # Compute BEFORE adding the new row so this read can't autoflush a
+            # half-built (slug-less) row.
+            if is_unset(color):
+                used = {row.color for row in s.scalars(select(ActivityRow)).all()
+                        if row is not r and not is_unset(row.color)}
+                color = pick_color(a.slug, used)
             if r is None:
                 r = ActivityRow()
                 s.add(r)
-            r.slug, r.name, r.icon, r.color = a.slug, a.name, a.icon, a.color
+            r.slug, r.name, r.icon, r.color = a.slug, a.name, a.icon, color
             r.phrase = a.phrase
             r.parent_id, r.enabled, r.silent = a.parent_id, a.enabled, a.silent
             s.commit()

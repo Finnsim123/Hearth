@@ -86,6 +86,10 @@ def create_app() -> FastAPI:
         try:
             from .domain.labeling.taxonomy import ensure_hierarchy
             ensure_hierarchy(deps["repo"])
+            # backfill palette colours for activities seeded before the colour
+            # system (they'd otherwise all show the grey sentinel)
+            from .domain.labeling.palette import ensure_colors
+            ensure_colors(deps["repo"])
         except Exception:
             pass
         scheduler = build_scheduler(deps)

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Icon, type IconName } from "../icons";
 import { cheerBuddy } from "../components/buddyBus";
+import { useActivityColors } from "../activityColors";
 
 type Question = { id: number; person_id: string; window_ts: string; predicted: string;
                   confidence: number; alternatives: string[] };
@@ -20,6 +21,11 @@ function QuestionCard({ q, activities, onDone }: {
   q: Question; activities: Activity[]; onDone: () => void;
 }) {
   const qc = useQueryClient();
+  const { colorOf } = useActivityColors();
+  const dot = (slug: string) => (
+    <span style={{ width: 9, height: 9, borderRadius: "50%", background: colorOf(slug),
+                   display: "inline-block", flexShrink: 0 }} />
+  );
   const answer = useMutation({
     mutationFn: (slug: string) =>
       fetch(`/api/inbox/${q.id}/answer`, { method: "POST",
@@ -48,7 +54,9 @@ function QuestionCard({ q, activities, onDone }: {
         <span style={{ fontSize: 14.5 }}>
           <strong style={{ fontWeight: 500, textTransform: "capitalize" }}>{q.person_id}</strong>,{" "}
           {fmt(q.window_ts)} — I guessed{" "}
-          <em style={{ fontStyle: "normal", color: "var(--accent)" }}>{q.predicted.replace("_", " ")}</em>{" "}
+          <em style={{ fontStyle: "normal", color: colorOf(q.predicted), fontWeight: 500,
+                       display: "inline-flex", alignItems: "center", gap: 5, verticalAlign: "middle" }}>
+            {dot(q.predicted)}{q.predicted.replace("_", " ")}</em>{" "}
           ({Math.round(q.confidence * 100)}% sure). What was it?
         </span>
         <button className="btn btn-ghost" style={{ marginLeft: "auto" }} onClick={() => skip.mutate()}>
@@ -60,7 +68,7 @@ function QuestionCard({ q, activities, onDone }: {
           <button key={slug} className={i === 0 ? "btn btn-primary" : "btn btn-secondary"}
                   disabled={answer.isPending} onClick={() => answer.mutate(slug)}
                   style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-            <Icon name={icon(slug)} size={15} />
+            {dot(slug)}<Icon name={icon(slug)} size={15} />
             {(i === 0 ? "✓ " : "") + slug.replace("_", " ")}
           </button>
         ))}

@@ -12,6 +12,7 @@ import { Icon, type IconName } from "../icons";
 import { packSiblings, enclose, type C } from "../bubbles";
 import { useIsMobile } from "../useMedia";
 import FlowMap from "../components/FlowMap";
+import { useActivityColors } from "../activityColors";
 
 type Pred = { time: string; predicted: string; smoothed: string; confidence: number;
               model_version: string; probs: Record<string, number>
@@ -25,18 +26,13 @@ type Question = { id: number; person_id: string; window_ts: string; predicted: s
                   confidence: number; alternatives: string[] };
 type Activity = { slug: string; name: string; enabled: boolean };
 
-const ACT: Record<string, string> = {
-  sleeping: "var(--act-sleeping)", away: "var(--act-away)", home: "var(--act-home)",
-  cooking: "var(--act-cooking)", eating: "var(--act-eating)", movie: "var(--act-media)",
-  working: "var(--act-working)",
-};
-const color = (a: string) => ACT[a] ?? "var(--text-dim)";
 const icon = (a: string): IconName =>
   (["sleeping", "away", "home", "cooking", "eating", "movie", "working"].includes(a) ? (a as IconName) : "activities");
 const t = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /** Hero: the member's avatar "inside" the activity scene — face on the bed. */
 function Scene({ activity, person }: { activity: string; person: Person }) {
+  const { colorOf: color } = useActivityColors();
   return (
     <div style={{ position: "relative", width: 72, height: 72, flexShrink: 0,
                   display: "flex", alignItems: "center", justifyContent: "center",
@@ -124,6 +120,7 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 function WeekHeatmap({ preds, personId, ruleBased, unreliable }:
                      { preds: Pred[]; personId: string; ruleBased: boolean; unreliable?: Set<string> }) {
   const qc = useQueryClient();
+  const { colorOf: color } = useActivityColors();
   // selection is a SET of cell start-times (epoch ms) so a drag can mark many
   // hours at once; click = one cell, click-drag = a streak.
   const [sel, setSel] = useState<Set<number>>(new Set());
@@ -242,6 +239,7 @@ type CapReport = { has_model: boolean; reliable: string[];
 
 function PersonCard({ person, preds, weekPreds }: { person: Person; preds: Pred[]; weekPreds: Pred[] }) {
   const latest = preds[0];
+  const { colorOf: color } = useActivityColors();
   const ruleBased = latest?.model_version?.startsWith("rules");
   // honesty: don't present an activity the model can't actually do reliably as if
   // it's certain. Facts (away/asleep) are always trustworthy regardless.
@@ -337,6 +335,7 @@ function JourneyCard({ j }: { j: Journey }) {
 
 function QuestionRow({ q, activities }: { q: Question; activities: Activity[] }) {
   const qc = useQueryClient();
+  const { colorOf } = useActivityColors();
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
   const send = async (slug: string) => {
@@ -386,6 +385,8 @@ function QuestionRow({ q, activities }: { q: Question; activities: Activity[] })
             {options.map((slug) => (
               <button key={slug} className="btn btn-secondary" disabled={busy} onClick={() => send(slug)}
                       style={{ display: "inline-flex", gap: 6, alignItems: "center", textTransform: "capitalize" }}>
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: colorOf(slug),
+                               display: "inline-block", flexShrink: 0 }} />
                 <Icon name={icon(slug)} size={15} />{slug.replace("_", " ")}
               </button>
             ))}

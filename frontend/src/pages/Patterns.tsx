@@ -19,9 +19,12 @@ type Cluster = {
   suggestions: Suggestion[];
 };
 type Activity = { slug: string; name: string };
-type PlainFeat = { raw: string; label: string; room: string | null; dir: "up" | "down" };
+type PlainFeat = { raw: string; label: string; room: string | null; dir: "up" | "down";
+                   entity_id?: string | null; device?: string | null };
+type DeviceGroup = { device: string | null; signals: string[] };
 type Evidence = {
   plain: PlainFeat[];
+  by_device?: DeviceGroup[];
   when: { span: string; peak_hour: number; daypart: string } | null;
   where: string[];
   cadence: { weekday_frac: number; phrase: string } | null;
@@ -71,6 +74,28 @@ function EvidenceBlock({ ev }: { ev: Evidence }) {
           {ev.contrast && <>Looks a lot like <strong>{ev.contrast.name}</strong> — maybe the same thing.</>}
         </p>
       )}
+      <SourceDevices groups={ev.by_device} />
+    </div>
+  );
+}
+
+/** Where the evidence came from, grouped by the physical device — "Bed —
+ * Withings Sleep: in bed, bed empty". Named hardware is far more legible than a
+ * wall of entity ids; signals with no known device are folded into "other
+ * sensors" and only shown when there are named devices to contrast them with. */
+function SourceDevices({ groups }: { groups?: DeviceGroup[] }) {
+  const named = (groups ?? []).filter((g) => g.device);
+  if (!named.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px",
+                  fontSize: 12, color: "var(--text-dim)" }}>
+      <span style={{ fontWeight: 600 }}>From</span>
+      {named.map((g) => (
+        <span key={g.device}>
+          <strong style={{ color: "var(--text)", fontWeight: 500 }}>{g.device}</strong>
+          {" · "}{g.signals.join(", ").toLowerCase()}
+        </span>
+      ))}
     </div>
   );
 }

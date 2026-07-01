@@ -147,6 +147,52 @@ def _contrast(card: ClusterCard, repo) -> dict | None:
         return None
 
 
+def _tag_devices(plain: list[dict], repo) -> None:
+    """Attach the owning device's label to each signal (in place), so the 'why'
+    can be read as 'your Oral-B, your bed sensor' rather than raw entity ids.
+    Best-effort: reads only the cached ha.entity_device / ha.devices maps."""
+    try:
+        from ..hierarchy import device_label_for
+    except Exception:
+        for item in plain:
+            item["device"] = None
+        return
+    cache: dict[str, str | None] = {}
+    for item in plain:
+        eid = item.get("entity_id")
+        if not eid:
+            item["device"] = None
+            continue
+        if eid not in cache:
+            try:
+                cache[eid] = device_label_for(repo, eid)
+            except Exception:
+                cache[eid] = None
+        item["device"] = cache[eid]
+
+
+def _by_device(plain: list[dict]) -> list[dict]:
+    """Group the signals by their device, strongest-first, so the UI can show
+    'Bed — Withings Sleep: in bed, bed empty' as one line. Signals with no known
+    device fall under a single device-less bucket appended at the end."""
+    order: list[str] = []
+    groups: dict[str, list[str]] = {}
+    orphans: list[str] = []
+    for item in plain:
+        dev = item.get("device")
+        if not dev:
+            orphans.append(item["label"])
+            continue
+        if dev not in groups:
+            groups[dev] = []
+            order.append(dev)
+        groups[dev].append(item["label"])
+    out = [{"device": dev, "signals": groups[dev]} for dev in order]
+    if orphans:
+        out.append({"device": None, "signals": orphans})
+    return out
+
+
 def _summary(plain: list[dict], when: dict | None, where: list[str],
              cadence: dict | None) -> str:
     bits: list[str] = []
@@ -175,6 +221,7 @@ def build_evidence(card: ClusterCard, repo, tsdb) -> dict:
 
     plain = [humanize_feature(feat, z, bindings, persons)
              for feat, z in card.signature]
+    _tag_devices(plain, repo)
     # rooms, ranked by how strongly they appear in the signature
     room_weight: Counter = Counter()
     for item, (_, z) in zip(plain, card.signature):
@@ -186,6 +233,7 @@ def build_evidence(card: ClusterCard, repo, tsdb) -> dict:
     cadence = _cadence(card.example_windows, tz)
     return {
         "plain": plain,
+        "by_device": _by_device(plain),
         "when": when,
         "where": where,
         "cadence": cadence,

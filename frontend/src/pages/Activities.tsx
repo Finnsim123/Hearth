@@ -5,7 +5,9 @@
  * Spec: docs/UI_SPEC.md §Activities.
  */
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Icon } from "../icons";
+import { PALETTE } from "../activityColors";
 
 type Activity = {
   id: number | null; slug: string; name: string; phrase: string | null;
@@ -32,6 +34,42 @@ function predicateText(p: Record<string, unknown>): string {
   const { feat, op, value } = p as { feat?: string; op?: string; value?: unknown };
   if (feat) return `${feat} ${op} ${String(value)}`;
   return JSON.stringify(p);
+}
+
+/** Colour control — the palette swatches plus a native picker for a custom hue.
+ *  The chosen colour is used everywhere this activity appears (dashboard,
+ *  behaviour, inbox…). */
+function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  const cur = (value || "").toLowerCase();
+  const known = PALETTE.some((c) => c.toLowerCase() === cur);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={{ fontSize: 13.5, fontWeight: 500 }}>Colour</span>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        {PALETTE.map((c) => {
+          const on = c.toLowerCase() === cur;
+          return (
+            <button key={c} type="button" title={c} onClick={() => onChange(c)}
+              style={{ width: 22, height: 22, borderRadius: "50%", background: c, cursor: "pointer",
+                       padding: 0, flexShrink: 0,
+                       border: on ? "2px solid var(--text)" : "1px solid var(--border)",
+                       outline: on ? "2px solid var(--text)" : "none", outlineOffset: 1 }} />
+          );
+        })}
+        <label title="Custom colour"
+          style={{ width: 22, height: 22, borderRadius: "50%", cursor: "pointer", flexShrink: 0,
+                   display: "inline-flex", alignItems: "center", justifyContent: "center",
+                   border: !known && cur ? "2px solid var(--text)" : "1px dashed var(--border)",
+                   background: !known && cur ? value : "transparent",
+                   color: "var(--text-dim)", position: "relative", overflow: "hidden" }}>
+          {known || !cur ? <Icon name="plus" size={12} /> : null}
+          <input type="color" value={known ? "#000000" : (value || "#818cf8")}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", border: "none" }} />
+        </label>
+      </div>
+    </div>
+  );
 }
 
 function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
@@ -101,11 +139,14 @@ function ActivityCard({ a: initial, rules, persons, parents, onSaved }: {
       {expanded && (
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12,
                     borderTop: "1px solid var(--border)" }}>
-      <label style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 240 }}>
-        <span style={{ fontSize: 13.5, fontWeight: 500 }}>Name</span>
-        <input value={a.name} onChange={(e) => u({ name: e.target.value })}
-               style={{ fontWeight: 600, fontSize: 15 }} />
-      </label>
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 240 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 500 }}>Name</span>
+          <input value={a.name} onChange={(e) => u({ name: e.target.value })}
+                 style={{ fontWeight: 600, fontSize: 15 }} />
+        </label>
+        <ColorPicker value={a.color} onChange={(c) => u({ color: c })} />
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -222,9 +263,13 @@ export default function Activities() {
   const [persons, setPersons] = useState<Record<string, string>>({});
   const [newName, setNewName] = useState("");
   const [regenMsg, setRegenMsg] = useState("");
+  const qc = useQueryClient();
   const load = () => {
     fetch("/api/activities").then(j).then(setActivities).catch(() => setActivities([]));
     fetch("/api/rules").then(j).then(setRules).catch(() => {});
+    // other pages share the ["activities"] react-query cache for colours/names —
+    // refresh it so a colour edit / merge / rename shows up everywhere at once.
+    qc.invalidateQueries({ queryKey: ["activities"] });
   };
   useEffect(() => {
     load();
@@ -238,7 +283,7 @@ export default function Activities() {
     if (!name) return;
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     await post("/api/activities", {
-      slug, name, phrase: null, icon: "mdi:star", color: "#818CF8",
+      slug, name, phrase: null, icon: "mdi:star",  // color omitted → backend auto-picks a distinct hue
       parent_id: null, enabled: true, silent: false,
     }).then(j).catch(() => {});
     setNewName("");

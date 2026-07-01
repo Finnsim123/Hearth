@@ -98,7 +98,7 @@ def humanize_feature(col: str, z: float, bindings: list[Binding],
     lagged = col.endswith("_lag1")
     if binding is None:
         return {"raw": col, "label": prettify(col), "room": None,
-                "role": None, "dir": "up" if up else "down"}
+                "role": None, "dir": "up" if up else "down", "entity_id": None}
 
     place = binding.room or prettify(binding.name)
     who = persons.get(binding.person_id or "", "someone")
@@ -113,4 +113,4 @@ def humanize_feature(col: str, z: float, bindings: list[Binding],
         label += " (just before)"
     return {"raw": col, "label": label[:1].upper() + label[1:],
             "room": binding.room, "role": binding.role.value,
-            "dir": "up" if up else "down"}
+            "dir": "up" if up else "down", "entity_id": binding.entity_id}
