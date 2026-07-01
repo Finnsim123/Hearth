@@ -133,6 +133,24 @@ _STATE_DOMAINS = {"sensor", "binary_sensor", "input_boolean", "input_number",
                   "alarm_control_panel", "input_select", "climate", "fan"}
 
 
+# Hearth's OWN published entities (mqtt_publisher.py): the prediction sensors it
+# writes back into HA. It must never sense — let alone train on — its own output,
+# or the model learns to predict its own predictions (a feedback loop). Matched
+# precisely (known suffixes + the availability sensor) so a user's unrelated
+# "hearth" entity, e.g. a smart fireplace, isn't caught; a device literally named
+# "Hearth" (the MQTT device) is the authoritative signal when we have it.
+_SELF_SUFFIXES = ("_activity", "_confidence", "_questions", "_override")
+
+
+def is_hearth_own(entity: dict) -> bool:
+    """True for Hearth's own prediction entities (sensor.hearth_<person>_activity,
+    …_confidence, switch/select .hearth_<person>_*, binary_sensor.hearth_alive)."""
+    obj = (entity.get("entity_id") or "").split(".", 1)[-1].lower()
+    if obj == "hearth_alive" or (obj.startswith("hearth_") and obj.endswith(_SELF_SUFFIXES)):
+        return True
+    return (entity.get("device") or "").strip().lower() == "hearth"
+
+
 def is_bindable(entity_id: str, role: Role, override: bool = False) -> bool:
     """The appealable gate: stateless domains and the diagnostics blocklist
     are hard physics; the role↔domain map is the DEFAULT, overridable when an
@@ -142,6 +160,8 @@ def is_bindable(entity_id: str, role: Role, override: bool = False) -> bool:
         return False
     if _BLOCKLIST.search(entity_id.lower()):
         return False
+    if is_hearth_own({"entity_id": entity_id}):     # never bind our own output
+        return False
     if domain in ROLE_DOMAINS.get(role, set()):
         return True
     return override and domain in _STATE_DOMAINS
@@ -150,10 +170,12 @@ def is_bindable(entity_id: str, role: Role, override: bool = False) -> bool:
 def is_noise(entity: dict) -> bool:
     """Diagnostics / stateless / blocklisted entities that should NEVER be a sensor
     — correct to leave unassigned, so don't surface them for review (RSSI, uptime,
-    firmware, buttons, scenes, …)."""
+    firmware, buttons, scenes, Hearth's own prediction sensors, …)."""
     eid = entity.get("entity_id", "")
     domain = entity.get("domain") or (eid.split(".")[0] if eid else "")
     if domain in _NEVER_DOMAINS:
+        return True
+    if is_hearth_own(entity):
         return True
     if _BLOCKLIST.search(f"{eid} {entity.get('friendly_name', '')}".lower()):
         return True
@@ -162,6 +184,8 @@ def is_noise(entity: dict) -> bool:
 
 def suggest_role(entity: dict) -> Role | None:
     """entity: one inventory item (entity_id, domain, device_class, unit, name)."""
+    if is_hearth_own(entity):       # our own prediction output is never a feature
+        return None
     text_all = f"{entity['entity_id']} {entity.get('friendly_name', '')}".lower()
     if _BLOCKLIST.search(text_all):
         return None

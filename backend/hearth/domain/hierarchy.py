@@ -63,6 +63,10 @@ def integration_relevance(domain: str | None) -> str:
 
 def device_relevance(device: Device | dict) -> str:
     d = device if isinstance(device, dict) else device.model_dump()
+    # Hearth's own MQTT device (its prediction sensors) — never sense our output.
+    if (d.get("name") or "").strip().lower() == "hearth" \
+            or (d.get("manufacturer") or "").strip().lower() == "hearth":
+        return SKIP
     if (d.get("entry_type") or "") == "service":
         return SKIP
     text = f"{d.get('name') or ''} {d.get('model') or ''} {d.get('manufacturer') or ''}".lower()
@@ -75,11 +79,16 @@ def relevance_of(entity: dict, devices: dict, integrations: dict,
                  decisions: dict | None = None) -> tuple[str, str, str]:
     """(relevance, level, reason). `devices`/`integrations` keyed by id/entry_id;
     `decisions` = {'integration':{id:rel}, 'device':{id:rel}, 'entity':{eid:rel}}."""
-    from .onboarding.advisor import is_noise, suggest_role
+    from .onboarding.advisor import is_hearth_own, is_noise, suggest_role
     decisions = decisions or {}
     eid = entity.get("entity_id", "")
     dev = devices.get(entity.get("device_id")) if entity.get("device_id") else None
     integ = integrations.get(entity.get("config_entry_id")) if entity.get("config_entry_id") else None
+
+    # 0. Hearth's own prediction output — unconditional skip, before any decision:
+    # sensing it would let the model train on its own predictions (a feedback loop).
+    if is_hearth_own({**entity, "device": (dev or {}).get("name")}):
+        return SKIP, "entity", "Hearth's own prediction — never sensed"
 
     # 1. explicit choice, most specific first
     if eid in (decisions.get("entity") or {}):
