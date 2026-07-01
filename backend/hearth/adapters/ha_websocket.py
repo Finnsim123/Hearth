@@ -173,5 +173,53 @@ class HaWebSocketSource:
                 "entity_category": r.get("entity_category"),
                 "disabled": bool(r.get("disabled_by")),
                 "state": st.get("state"),
+                # HA hierarchy links (ha_hierarchy_design.md): entity → device → integration
+                "device_id": r.get("device_id"),
+                "config_entry_id": r.get("config_entry_id"),
+                "platform": r.get("platform"),
             })
         return out
+
+    async def discover_devices(self) -> list[dict]:
+        """Device registry: physical things (manufacturer/model/area) with links up to
+        their config entries and down to their entities' device_id."""
+        conn = self._conn()
+        async with aiohttp.ClientSession() as session:
+            ws = await self._authed_ws(session, conn)
+            try:
+                devices = await self._command(ws, {"type": "config/device_registry/list"})
+                areas = await self._command(ws, {"type": "config/area_registry/list"})
+            except Exception:
+                devices, areas = [], []
+            await ws.close()
+        area_names = {a["area_id"]: a["name"] for a in areas}
+        return [{
+            "id": d.get("id"),
+            "name": d.get("name_by_user") or d.get("name"),
+            "manufacturer": d.get("manufacturer"),
+            "model": d.get("model"),
+            "area": area_names.get(d.get("area_id")),
+            "via_device_id": d.get("via_device_id"),
+            "entry_type": d.get("entry_type"),          # "service" = cloud/no hardware
+            "config_entries": d.get("config_entries") or [],
+            "disabled": bool(d.get("disabled_by")),
+        } for d in devices]
+
+    async def discover_integrations(self) -> list[dict]:
+        """Config entries: the integration each device/entity belongs to (zwave_js,
+        mobile_app, met, openweathermap, …) — the top of the HA hierarchy."""
+        conn = self._conn()
+        async with aiohttp.ClientSession() as session:
+            ws = await self._authed_ws(session, conn)
+            try:
+                entries = await self._command(ws, {"type": "config_entries/get"})
+            except Exception:
+                entries = []
+            await ws.close()
+        return [{
+            "entry_id": e.get("entry_id"),
+            "domain": e.get("domain"),
+            "title": e.get("title"),
+            "state": e.get("state"),
+            "source": e.get("source"),
+        } for e in (entries or [])]

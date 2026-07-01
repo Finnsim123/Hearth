@@ -86,7 +86,7 @@ def is_person_tracker(entity_id: str, friendly_name: str = "") -> bool:
 _BLOCKLIST = re.compile(
     r"rssi|lqi|signal_quality|signal_strength|packet_loss|ping|uptime|"
     r"cpu|memory|processor|supervisor|core_|watchman|last_updated|last_parse|"
-    r"_[1-5]d$|forecast|regenkans|zonkans|next_dawn|next_dusk|next_noon|"
+    r"_[1-5]d\b|forecast|regenkans|zonkans|next_dawn|next_dusk|next_noon|"
     r"next_rising|next_setting|battery_plus|daily_energy|spanning|"
     r"print_progress|firmware|update_available|last_response|failed_pings|"
     r"_slope$|_ema_|preset_|regulated_|"
