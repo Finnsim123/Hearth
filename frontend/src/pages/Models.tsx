@@ -335,7 +335,8 @@ function ModelCardSheet({ m, personName }: { m: Model; personName: string }) {
           </div>
         </div>
         <button className="btn btn-ghost" style={{ marginLeft: "auto" }}
-                onClick={() => window.print()}>Print / Save PDF</button>
+                onClick={() => window.open(`/models/report?person=${encodeURIComponent(m.person_id)}&print=1`, "_blank")}>
+          Print / Save PDF</button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px" }}>
@@ -1002,6 +1003,11 @@ export default function Models() {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <Icon name="models" size={22} />
         <h2 style={{ margin: 0 }}>Models</h2>
+        <button className="btn btn-ghost" style={{ marginLeft: "auto", fontSize: 13 }}
+                onClick={() => window.open("/models/report", "_blank")}
+                title="A printable, comprehensive report of every model and its stats">
+          Download report
+        </button>
       </div>
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-dim)", maxWidth: 640 }}>
         One panel per person — open it for the live model and every detail.

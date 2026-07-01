@@ -17,6 +17,7 @@ import Inbox from "./pages/Inbox";
 import Activities from "./pages/Activities";
 import Patterns from "./pages/Patterns";
 import Models from "./pages/Models";
+import ModelReport from "./pages/ModelReport";
 import Sensors from "./pages/Sensors";
 import Methodology from "./pages/Methodology";
 import Logs from "./pages/Logs";
@@ -274,6 +275,10 @@ export default function App() {
 
   // Live hand-off after setup: full-screen, no nav/buddy chrome (it has its own).
   if (location.pathname === "/welcome") return <Welcome />;
+
+  // The printable model report is a standalone document — no nav/buddy chrome,
+  // so "Save as PDF" produces a clean report instead of a screenshot of the app.
+  if (location.pathname === "/models/report") return <ModelReport />;
 
   const closeNav = () => setDrawerOpen(false);
 
