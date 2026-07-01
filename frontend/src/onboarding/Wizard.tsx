@@ -448,8 +448,15 @@ function StepHousehold({ d, set, next, back }: StepProps) {
 }
 
 type Inv = { entity_id: string; friendly_name: string | null; domain: string | null };
+type Hierarchy = {
+  present: boolean; n_integrations: number; n_devices: number;
+  skipped_integrations: { title: string; domain: string | null; entity_count: number }[];
+  kept_devices: { name: string; model: string | null; manufacturer: string | null;
+                  area: string | null; kept: number; total: number }[];
+  infra_devices: { name: string; model: string | null }[];
+};
 type TriageResp = { by: string | null; total: number; kept_count: number;
-                    clusters: TriageCluster[] };
+                    clusters: TriageCluster[]; hierarchy?: Hierarchy | null };
 
 // A taste of what Hearth unlocks in Home Assistant — looped while the scan runs,
 // then on the result screen the ones your sensors actually support are surfaced
@@ -570,6 +577,61 @@ function IdeasForYourHome({ triage, llmKey, llmModel }:
   );
 }
 
+/** How Hearth read the home through the actual HA hierarchy — integrations own
+ * devices own entities. Speaks in things the user recognises ("your Oral-B")
+ * and is honest about what it set aside wholesale (weather, a Zigbee hub). Only
+ * renders when the WS scan returned registry data. */
+function HierarchyView({ h }: { h: Hierarchy }) {
+  if (!h?.present) return null;
+  const chip = {
+    fontSize: 12.5, padding: "3px 10px", borderRadius: 99,
+    background: "var(--surface-2)", border: "1px solid var(--border)",
+  } as const;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 13.5, color: "var(--text)" }}>
+        Read through Home Assistant's structure — <strong>{h.n_devices}</strong>{" "}
+        {h.n_devices === 1 ? "device" : "devices"} across <strong>{h.n_integrations}</strong>{" "}
+        {h.n_integrations === 1 ? "integration" : "integrations"}. Knowing what each thing{" "}
+        <em>is</em> makes the keep/skip call sharper than a name ever could.
+      </div>
+      {h.kept_devices.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 4 }}>Using these devices</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {h.kept_devices.slice(0, 12).map((dv) => (
+              <span key={dv.name + (dv.model ?? "")} style={chip} title={dv.area ?? undefined}>
+                {dv.name}{dv.model && dv.model !== dv.name ? ` · ${dv.model}` : ""}
+                <span style={{ color: "var(--text-dim)" }}>
+                  {" "}· {dv.kept}/{dv.total}
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {h.skipped_integrations.length > 0 && (
+        <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+          Set aside whole integrations that aren't about your home:{" "}
+          {h.skipped_integrations.slice(0, 6).map((s, i) => (
+            <span key={s.title}>
+              {i > 0 ? ", " : ""}<strong>{s.title}</strong> ({s.entity_count})
+            </span>
+          ))}.
+        </div>
+      )}
+      {h.infra_devices.length > 0 && (
+        <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+          Ignored infrastructure:{" "}
+          {h.infra_devices.slice(0, 6).map((s, i) => (
+            <span key={s.name}>{i > 0 ? ", " : ""}{s.name}</span>
+          ))}.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StepInventory({ d, set, next, back }: StepProps & { back: () => void }) {
   const [state, setState] = useState<"scanning" | "grouping" | "done" | "error">("scanning");
   const [inventory, setInventory] = useState<Inv[]>([]);
@@ -594,6 +656,7 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
         const tr: TriageResp = await fetch("/api/triage/preview", { method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ inventory: items,
+            devices: inv.devices ?? [], integrations: inv.integrations ?? [],
             llm: d.llmKey ? { key: d.llmKey, model: d.llmModel } : null }) }).then((r) => r.json());
         if (!live) return;
         setTriage(tr);
@@ -669,6 +732,7 @@ function StepInventory({ d, set, next, back }: StepProps & { back: () => void })
               learning your routines — these defaults are tuned for accuracy, so you don't need to change
               anything. Switch a group off only to exclude something private; edits may affect results.
             </p>
+            {triage.hierarchy?.present && <HierarchyView h={triage.hierarchy} />}
             <BubbleCloud clusters={triage.clusters} kept={kept}
               onToggle={(l) => persist({ ...kept, [l]: !kept[l] })}
               onReset={() => persist(Object.fromEntries(

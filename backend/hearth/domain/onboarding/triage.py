@@ -182,10 +182,88 @@ def keepset_from(triage: dict, excluded_labels: set[str],
     return sorted(keep)
 
 
-async def triage_entities(repo, inventory: list[dict], advisor=None) -> dict:
+def _hierarchy_view(usable: list[dict], devices: list[dict],
+                    integrations: list[dict], keep: set[str]) -> dict | None:
+    """Reason about the scan the way HA is actually structured: integrations own
+    devices own entities. Returns a compact, human-first summary — whole
+    integrations skipped (weather, backup), the physical devices kept (your
+    Oral-B, your bed sensor), and infrastructure devices ignored (a Zigbee hub) —
+    so onboarding speaks in things the user recognises, not entity ids.
+
+    Returns None when no registry data was available (REST-only scan)."""
+    from ..hierarchy import SKIP, device_relevance, integration_relevance
+    if not devices and not integrations:
+        return None
+    dev_by = {d["id"]: d for d in devices if d.get("id")}
+    integ_by = {i["entry_id"]: i for i in integrations if i.get("entry_id")}
+    ents_by_dev: dict[str, list] = {}
+    ents_by_entry: dict[str, list] = {}
+    for e in usable:
+        if e.get("device_id"):
+            ents_by_dev.setdefault(e["device_id"], []).append(e)
+        if e.get("config_entry_id"):
+            ents_by_entry.setdefault(e["config_entry_id"], []).append(e)
+
+    skipped_integrations = []
+    for cid, integ in integ_by.items():
+        if integration_relevance(integ.get("domain")) != SKIP:
+            continue
+        n = len(ents_by_entry.get(cid, []))
+        if n:
+            skipped_integrations.append({
+                "title": integ.get("title") or integ.get("domain"),
+                "domain": integ.get("domain"), "entity_count": n})
+    skipped_integrations.sort(key=lambda x: -x["entity_count"])
+
+    kept_devices, infra_devices = [], []
+    for did, d in dev_by.items():
+        ents = ents_by_dev.get(did)
+        if not ents:
+            continue
+        name = d.get("name") or d.get("model") or "device"
+        if device_relevance(d) == SKIP:
+            infra_devices.append({"name": name, "model": d.get("model")})
+            continue
+        kept_n = sum(1 for e in ents if e["entity_id"] in keep)
+        if kept_n:
+            kept_devices.append({
+                "name": name, "model": d.get("model"),
+                "manufacturer": d.get("manufacturer"), "area": d.get("area"),
+                "kept": kept_n, "total": len(ents)})
+    kept_devices.sort(key=lambda x: -x["kept"])
+    return {
+        "present": True,
+        "n_integrations": len(integ_by),
+        "n_devices": sum(1 for did in dev_by if ents_by_dev.get(did)),
+        "skipped_integrations": skipped_integrations,
+        "kept_devices": kept_devices,
+        "infra_devices": infra_devices,
+    }
+
+
+def _seed_device_caches(repo, devices: list[dict], usable: list[dict]) -> None:
+    """Seed the ha.devices / ha.entity_device caches straight from onboarding, so
+    device names light up everywhere (facts picker, evidence 'why', coverage)
+    from the first run — before the first scheduled hierarchy scan."""
+    if devices:
+        repo.set_setting("ha.devices", {d["id"]: {k: d.get(k) for k in
+                         ("name", "area", "manufacturer", "model")}
+                         for d in devices if d.get("id")})
+    ed = {e["entity_id"]: e["device_id"] for e in usable if e.get("device_id")}
+    if ed:
+        repo.set_setting("ha.entity_device", ed)
+
+
+async def triage_entities(repo, inventory: list[dict], advisor=None,
+                          devices: list[dict] | None = None,
+                          integrations: list[dict] | None = None) -> dict:
     """Cluster the inventory, canonicalise into category buckets, derive the
     relevant shortlist. Stores the result in setting `entity_triage` and returns
-    it. Pure-ish: one LLM call (or none) + one setting write."""
+    it. Pure-ish: one LLM call (or none) + one setting write.
+
+    When registry data (devices/integrations) is supplied it also builds the HA
+    hierarchy view and seeds the device caches — onboarding then reasons in
+    integrations → devices, not a flat entity wall."""
     usable = [e for e in inventory if not e.get("disabled")]
     valid = {e["entity_id"] for e in usable}
 
@@ -213,6 +291,9 @@ async def triage_entities(repo, inventory: list[dict], advisor=None) -> dict:
              if is_person_tracker(e["entity_id"], e.get("friendly_name") or "")}
     keep |= floor
 
+    _seed_device_caches(repo, devices or [], usable)
+    hierarchy = _hierarchy_view(usable, devices or [], integrations or [], keep)
+
     result = {
         "by": by,
         "total": len(usable),
@@ -228,6 +309,7 @@ async def triage_entities(repo, inventory: list[dict], advisor=None) -> dict:
              "entities": c["entities"]}
             for c in clusters
         ],
+        "hierarchy": hierarchy,
         "at": datetime.now(timezone.utc).isoformat(),
     }
     repo.set_setting("entity_triage", result)

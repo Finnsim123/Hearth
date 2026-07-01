@@ -383,7 +383,9 @@ def build_api_router(deps: dict) -> APIRouter:
             from ..adapters.openrouter_llm import OpenRouterAdvisor
             advisor = OpenRouterAdvisor(_AdHocRepo(repo))
         from ..domain.onboarding.triage import triage_entities
-        res = await triage_entities(repo, inventory, advisor)
+        res = await triage_entities(repo, inventory, advisor,
+                                    devices=body.get("devices") or [],
+                                    integrations=body.get("integrations") or [])
         clusters = [{k: v for k, v in c.items() if k != "entities"}
                     for c in res.get("clusters", [])]
         return {**res, "clusters": clusters, "has_llm": bool(key)}
@@ -860,15 +862,39 @@ def build_api_router(deps: dict) -> APIRouter:
 
     @api.post("/ha/inventory")
     async def ha_inventory(body: dict) -> dict:
-        """Pre-save inventory scan: full metadata + heuristic suggestions count."""
+        """Pre-save inventory scan: full metadata + heuristic suggestions count.
+
+        Tries the WebSocket registry first (entities carry device_id /
+        config_entry_id, plus the device + integration catalogs) so triage can
+        reason in the HA hierarchy; falls back to a REST /api/states scan when WS
+        isn't reachable (older setups, restricted tokens)."""
         from ..adapters.ha_probe import rest_inventory
-        _guard_url(body.get("url", ""))
-        inventory = await rest_inventory(body.get("url", ""), body.get("token", ""))
+        url, token = body.get("url", ""), body.get("token", "")
+        _guard_url(url)
+        devices: list[dict] = []
+        integrations: list[dict] = []
+        inventory: list[dict] = []
+        try:
+            from ..adapters.ha_websocket import HaWebSocketSource
+
+            class _AdHocHa:
+                def get_connection(self, kind):
+                    return {"url": url, "token": token} if kind == "ha" else None
+            tree = await HaWebSocketSource(_AdHocHa()).discover_all()
+            inventory = tree.get("entities") or []
+            devices = tree.get("devices") or []
+            integrations = tree.get("integrations") or []
+        except Exception:
+            log.info("WS inventory unavailable — REST fallback", exc_info=True)
+        if not inventory:
+            inventory = await rest_inventory(url, token)
         suggested = heuristic_bindings(inventory)
         return {"count": len(inventory),
                 "bindable": len(suggested),
                 "domains": len({e["domain"] for e in inventory}),
-                "inventory": inventory}
+                "inventory": inventory,
+                "devices": devices,
+                "integrations": integrations}
 
     @api.post("/influx/inspect")
     def influx_inspect(body: dict) -> dict:
