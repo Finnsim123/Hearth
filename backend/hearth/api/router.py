@@ -1130,6 +1130,68 @@ def build_api_router(deps: dict) -> APIRouter:
         return {"suggestions": [{"entity_id": b.entity_id, "role": b.role.value}
                                 for b in props]}
 
+    @api.get("/hierarchy/pending")
+    def hierarchy_pending() -> dict:
+        """New devices Hearth spotted and is offering to integrate (device_watch)."""
+        return {"pending": repo.get_setting("ha.pending_nodes") or []}
+
+    @api.post("/hierarchy/scan")
+    async def hierarchy_scan() -> dict:
+        """Scan HA now for newly-added devices (also runs daily)."""
+        events = deps.get("events")
+        if events is None:
+            raise HTTPException(409, "Connect Home Assistant first")
+        from ..domain.onboarding.device_watch import scan_new_nodes
+        return await scan_new_nodes(repo, events, deps.get("notifier"))
+
+    @api.post("/hierarchy/decide")
+    async def hierarchy_decide(body: dict) -> dict:
+        """Answer a new-device offer: integrate (bind its useful entities + it folds
+        into the next retrain) or skip (remembered, not re-asked)."""
+        nid = (body.get("id") or "").strip()
+        decision = (body.get("decision") or "").strip()
+        if not nid or decision not in ("integrate", "skip"):
+            raise HTTPException(400, "id and decision (integrate|skip) required")
+        pending = repo.get_setting("ha.pending_nodes") or []
+        node = next((p for p in pending if p.get("id") == nid), None)
+        from ..domain.advisories import clear_advisory
+        from ..domain.events import record_event
+        from ..domain.hierarchy import set_decision
+        bound = 0
+        if decision == "skip":
+            set_decision(repo, "device", nid, "skip")
+        else:
+            set_decision(repo, "device", nid, "keep")
+            events = deps.get("events")
+            inv = (await events.discover_entities()) if events else []
+            by_id = {e["entity_id"]: e for e in inv}
+            from ..domain.features.person_scope import binding_owner
+            from ..domain.onboarding.advisor import _slugify, is_bindable, suggest_role
+            taken = {b.name for b in repo.bindings()}
+            have = {b.entity_id for b in repo.bindings()}
+            for eid in (node.get("entities", []) if node else []):
+                e = by_id.get(eid)
+                if not e or eid in have:
+                    continue
+                role = suggest_role(e)
+                if role is None or not is_bindable(eid, role):
+                    continue
+                name = _slugify(eid)
+                while name in taken:
+                    name += "_2"
+                taken.add(name)
+                b = Binding(entity_id=eid, role=role, name=name, room=e.get("area"), enabled=True)
+                b.person_id = binding_owner(b, repo.persons())
+                repo.save_binding(b)
+                bound += 1
+        repo.set_setting("ha.pending_nodes", [p for p in pending if p.get("id") != nid])
+        clear_advisory(repo, f"newnode:{nid}")
+        name = node.get("name") if node else nid
+        record_event(repo, "device_" + ("integrated" if decision == "integrate" else "skipped"),
+                     f"{'Integrated' if decision == 'integrate' else 'Skipped'} {name}",
+                     f"{bound} sensor(s) added." if bound else "")
+        return {"ok": True, "decision": decision, "bound": bound}
+
     @api.post("/household/relink")
     async def relink_persons() -> dict:
         """Re-link every member to their home/away entity — LLM match (messy

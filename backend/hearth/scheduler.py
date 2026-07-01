@@ -262,6 +262,18 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
             scheduler.add_job(_sync_inventory, "interval", hours=24,
                               id="inventory_sync", max_instances=1, coalesce=True)
 
+            async def _device_watch() -> None:
+                # notice newly-added HA devices and offer to integrate them (push +
+                # advisory). First scan just seeds the snapshot; later ones detect new.
+                from .domain.onboarding.device_watch import scan_new_nodes
+                try:
+                    await scan_new_nodes(repo, events, deps.get("notifier"))
+                except Exception:
+                    log.exception("device watch failed")
+
+            scheduler.add_job(_device_watch, "interval", hours=24,
+                              id="device_watch", max_instances=1, coalesce=True)
+
     if tsdb is not None and deps.get("notifier") is not None:
         scheduler.add_job(check_milestones, "interval", minutes=30,
                           args=[repo, tsdb, deps["notifier"]], id="milestones",
