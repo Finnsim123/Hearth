@@ -90,17 +90,33 @@ type Person = {
 
 const pad2 = (h: number) => String(h).padStart(2, "0");
 
-function PersonCard({ p: initial }: { p: Person }) {
+function PersonCard({ p: initial, onChanged }: { p: Person; onChanged?: () => void }) {
   const [p, setP] = useState(initial);
   const [state, setState] = useState<SaveState>("idle");
   const [open, setOpen] = useState(false);
   const [photoErr, setPhotoErr] = useState("");
+  const [danger, setDanger] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const u = (patch: Partial<Person>) => { setP({ ...p, ...patch }); setState("idle"); };
   const save = async () => {
     setState("saving");
     try { await post("/api/persons", p).then(j); setState("ok"); }
     catch { setState("fail"); }
+  };
+  // Disable = pause (keep everything); honoured by ingest + trainer. Saves at once.
+  const setEnabled = async (enabled: boolean) => {
+    const next = { ...p, enabled };
+    setP(next);
+    try { await post("/api/persons", next).then(j); } catch { setP(p); }
+  };
+  // Remove & forget = irreversible erasure of this member (backend purges their
+  // time-series + app-DB rows, keeps the rest of the household, retrains the rest).
+  const forget = async () => {
+    setBusy(true);
+    try { await post(`/api/persons/${p.id}/forget`, {}).then(j); onChanged?.(); }
+    catch { setBusy(false); }
   };
   const onPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -132,7 +148,12 @@ function PersonCard({ p: initial }: { p: Person }) {
                  color: "var(--text)", padding: "12px 14px", textAlign: "left" }}>
         <Avatar name={p.name} value={p.avatar} size={40} />
         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <strong style={{ fontSize: 14.5 }}>{p.name || "Unnamed"}</strong>
+          <strong style={{ fontSize: 14.5 }}>
+            {p.name || "Unnamed"}
+            {!p.enabled && <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)",
+              border: "1px solid var(--border)", borderRadius: 99, padding: "1px 7px", marginLeft: 8 }}>
+              Paused</span>}
+          </strong>
           <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{summary}</span>
         </div>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -219,6 +240,56 @@ function PersonCard({ p: initial }: { p: Person }) {
       </label>
 
       <SaveButton state={state} onClick={save} />
+
+      {/* membership lifecycle: pause (reversible) vs remove & forget (erasure) */}
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12,
+                    display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button className="btn btn-ghost" onClick={() => setEnabled(!p.enabled)}>
+            {p.enabled ? "Pause" : "Resume"}
+          </button>
+          <span style={{ fontSize: 12.5, color: "var(--text-dim)", flex: 1, minWidth: 180 }}>
+            {p.enabled
+              ? "Stops predicting and asking about them — keeps everything, reversible."
+              : "Paused: no predictions or questions. Resume anytime; nothing was lost."}
+          </span>
+          {!danger && (
+            <button onClick={() => setDanger(true)}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13,
+                       color: "var(--danger)", padding: "6px 8px" }}>
+              Remove…
+            </button>
+          )}
+        </div>
+
+        {danger && (
+          <div style={{ border: "1px solid var(--danger)", borderRadius: 10, padding: 14,
+                        display: "flex", flexDirection: "column", gap: 10,
+                        background: "color-mix(in srgb, var(--danger) 7%, transparent)" }}>
+            <strong style={{ fontSize: 14 }}>Remove {p.name} and forget everything</strong>
+            <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.5 }}>
+              Permanently erases {p.name || "this person"}: their sensors' history, labels, models
+              and rules. The rest of your household is untouched, and Hearth retrains the others so
+              they stop relying on {p.name || "them"}. <strong style={{ color: "var(--text)" }}>This
+              can't be undone.</strong>
+            </p>
+            <input value={confirmName} onChange={(e) => setConfirmName(e.target.value)}
+                   placeholder={`Type "${p.name}" to confirm`}
+                   style={{ fontSize: 13, padding: "7px 10px" }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={forget}
+                disabled={busy || confirmName.trim() !== (p.name || "").trim()}
+                style={{ background: "var(--danger)", color: "#fff", border: "none",
+                         borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 600,
+                         cursor: "pointer", opacity: busy || confirmName.trim() !== (p.name || "").trim() ? 0.5 : 1 }}>
+                {busy ? "Removing…" : "Remove permanently"}
+              </button>
+              <button className="btn btn-ghost"
+                      onClick={() => { setDanger(false); setConfirmName(""); }}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
       </div>
       )}
     </div>
@@ -227,12 +298,13 @@ function PersonCard({ p: initial }: { p: Person }) {
 
 function Household() {
   const [persons, setPersons] = useState<Person[] | null>(null);
-  useEffect(() => { fetch("/api/persons").then(j).then(setPersons).catch(() => setPersons([])); }, []);
+  const load = () => fetch("/api/persons").then(j).then(setPersons).catch(() => setPersons([]));
+  useEffect(() => { load(); }, []);
   return (
     <Card title="Household"
           sub="Who Hearth predicts for, and how much each person wants to hear from it.">
       {persons === null && <p style={{ color: "var(--text-dim)", fontSize: 14 }}>Loading…</p>}
-      {persons?.map((p) => <PersonCard key={p.id} p={p} />)}
+      {persons?.map((p) => <PersonCard key={p.id} p={p} onChanged={load} />)}
     </Card>
   );
 }

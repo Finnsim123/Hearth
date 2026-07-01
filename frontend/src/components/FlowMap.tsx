@@ -80,13 +80,14 @@ export default function FlowMap({ compact = false }: { compact?: boolean }) {
   // so we fall back to the single aggregate "Models" node (with per-person dots).
   const fork = !compact && multi && models.length <= 4;
 
-  // fork geometry: stack per-person model boxes centred on the pipeline row.
+  // fork geometry: stack per-person model boxes in a band that clears the
+  // viewBox top and the you/discovery row (y≈173). Centre on the band, not the
+  // pipeline row — a tall stack centred at y=60 would clip above the top edge.
   const MB = N.model;
-  const cyRow = MB.y + MB.h / 2;
-  const GAP = 8;
-  const hh = fork ? Math.min(48, (150 - (models.length - 1) * GAP) / models.length) : 0;
+  const GAP = 8, BAND = 135, STACK_CENTER = 95;
+  const hh = fork ? Math.min(48, (BAND - (models.length - 1) * GAP) / models.length) : 0;
   const totalH = models.length * hh + (models.length - 1) * GAP;
-  const stackTop = cyRow - totalH / 2;
+  const stackTop = STACK_CENTER - totalH / 2;
   const laneY = (i: number) => stackTop + i * (hh + GAP);
   const laneMid = (i: number) => laneY(i) + hh / 2;
 
