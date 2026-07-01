@@ -122,6 +122,23 @@ def load_device_catalog(repo) -> dict:
     return d if isinstance(d, dict) else {}
 
 
+def device_for_entity(repo, entity_id: str) -> dict | None:
+    """The cached device an entity belongs to (or None) — via ha.entity_device."""
+    did = (repo.get_setting("ha.entity_device") or {}).get(entity_id)
+    return load_device_catalog(repo).get(did) if did else None
+
+
+def device_label_for(repo, entity_id: str) -> str | None:
+    """A short human label for an entity's device, e.g. 'Bed — Withings Sleep'."""
+    d = device_for_entity(repo, entity_id)
+    if not d:
+        return None
+    name, model = d.get("name"), d.get("model")
+    if name and model and model.lower() not in name.lower():
+        return f"{name} — {model}"
+    return name or model or None
+
+
 def set_decision(repo, level: str, node_id: str, relevance: str) -> None:
     if level not in ("integration", "device", "entity") or not node_id:
         return

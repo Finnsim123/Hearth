@@ -198,8 +198,9 @@ def _announce_verdict_change(repo, fact: FoundationalFact, prev: str | None,
 def candidate_bindings(repo, gate: str) -> list[dict]:
     """Sensors a user could bind to this gate (by role). For the wizard/Settings."""
     role = _GATE_ROLE.get(gate)
+    from ..hierarchy import device_label_for
     return [{"binding_name": b.name, "entity_id": b.entity_id, "room": b.room,
-             "person_id": b.person_id}
+             "person_id": b.person_id, "device": device_label_for(repo, b.entity_id)}
             for b in repo.bindings() if role is not None and b.role == role]
 
 

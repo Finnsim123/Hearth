@@ -35,6 +35,8 @@ async def scan_new_nodes(repo, events, notifier=None) -> dict:
     repo.set_setting("ha.devices", {d["id"]: {k: d.get(k) for k in
                      ("name", "area", "manufacturer", "model")}
                      for d in devices if d.get("id")})
+    repo.set_setting("ha.entity_device", {e["entity_id"]: e["device_id"]
+                     for e in entities if e.get("device_id")})
 
     integ_by = {i["entry_id"]: i for i in integrations if i.get("entry_id")}
     dev_by = {d["id"]: d for d in devices if d.get("id")}

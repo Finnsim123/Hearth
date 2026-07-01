@@ -25,7 +25,9 @@ def list_markers() -> dict:
     markers = load_markers(_repo) if _repo else []
     binds, acts = [], []
     try:
-        binds = [{"name": b.name, "entity_id": b.entity_id, "room": b.room}
+        from ..domain.hierarchy import device_label_for
+        binds = [{"name": b.name, "entity_id": b.entity_id, "room": b.room,
+                  "device": device_label_for(_repo, b.entity_id)}
                  for b in _repo.bindings() if getattr(b, "enabled", True)] if _repo else []
     except Exception:
         binds = []
