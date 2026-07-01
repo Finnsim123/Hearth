@@ -25,12 +25,16 @@ async def scan_new_nodes(repo, events, notifier=None) -> dict:
     from .. import events as ev_log
     from ..hierarchy import device_relevance, load_decisions, relevance_of
     try:
-        integrations = await events.discover_integrations()
-        devices = await events.discover_devices()
-        entities = await events.discover_entities()
+        tree = await events.discover_all()
+        integrations, devices, entities = tree["integrations"], tree["devices"], tree["entities"]
     except Exception:
         log.exception("hierarchy scan failed")
         return {"new": 0}
+    # cache the device catalog so other surfaces (facts picker, coverage, drill-down)
+    # can show device context cheaply without hitting HA again.
+    repo.set_setting("ha.devices", {d["id"]: {k: d.get(k) for k in
+                     ("name", "area", "manufacturer", "model")}
+                     for d in devices if d.get("id")})
 
     integ_by = {i["entry_id"]: i for i in integrations if i.get("entry_id")}
     dev_by = {d["id"]: d for d in devices if d.get("id")}

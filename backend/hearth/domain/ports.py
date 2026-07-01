@@ -35,6 +35,18 @@ class EventSource(Protocol):
         """Gap-fill after reconnect, via HA REST history API."""
         ...
 
+    # ── HA hierarchy discovery (ha_hierarchy_design.md) ───────────────────────
+    async def discover_entities(self) -> list[dict]: ...
+    async def discover_all(self) -> dict:
+        """One WS session → {integrations, devices, entities}."""
+        ...
+    async def watch_registry(self) -> AsyncIterator[str]:
+        """Yield on each device_registry_updated event (for instant new-device detection)."""
+        ...
+    async def list_device_ids(self) -> set[str]:
+        """Cheap poll: just the device-id set (no get_states)."""
+        ...
+
 
 class TimeSeriesStore(Protocol):
     """Raw, feature and ML buckets (adapter: influx_store). ADR-3: swappable."""

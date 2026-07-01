@@ -1202,9 +1202,8 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(409, "Connect Home Assistant first")
         from ..domain.hierarchy import (device_relevance, integration_relevance,
                                         load_decisions, relevance_of)
-        integrations = await events.discover_integrations()
-        devices = await events.discover_devices()
-        entities = await events.discover_entities()
+        tree = await events.discover_all()
+        integrations, devices, entities = tree["integrations"], tree["devices"], tree["entities"]
         integ_by = {i["entry_id"]: i for i in integrations if i.get("entry_id")}
         dev_by = {d["id"]: d for d in devices if d.get("id")}
         dec = load_decisions(repo)

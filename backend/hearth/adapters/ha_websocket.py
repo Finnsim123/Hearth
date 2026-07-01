@@ -143,6 +143,52 @@ class HaWebSocketSource:
                         out.append(_to_state(item.get("entity_id", eid), item))
         return out
 
+    async def discover_all(self) -> dict:
+        """One WS session → {integrations, devices, entities}. Cheaper than three
+        separate connects; the new-device scan and the /hierarchy view use this."""
+        conn = self._conn()
+        async with aiohttp.ClientSession() as session:
+            ws = await self._authed_ws(session, conn)
+            try:
+                states = await self._command(ws, {"type": "get_states"})
+                ereg = await self._command(ws, {"type": "config/entity_registry/list"})
+                dreg = await self._command(ws, {"type": "config/device_registry/list"})
+                areas = await self._command(ws, {"type": "config/area_registry/list"})
+                entries = await self._command(ws, {"type": "config_entries/get"})
+            finally:
+                await ws.close()
+        area_names = {a["area_id"]: a["name"] for a in areas}
+        reg = {r["entity_id"]: r for r in ereg}
+        entities = []
+        for st in states:
+            eid = st["entity_id"]
+            attrs = st.get("attributes", {})
+            r = reg.get(eid, {})
+            entities.append({
+                "entity_id": eid, "domain": eid.split(".")[0],
+                "friendly_name": attrs.get("friendly_name"),
+                "device_class": attrs.get("device_class") or r.get("original_device_class"),
+                "state_class": attrs.get("state_class"),
+                "unit": attrs.get("unit_of_measurement"),
+                "area": area_names.get(r.get("area_id")),
+                "entity_category": r.get("entity_category"),
+                "disabled": bool(r.get("disabled_by")), "state": st.get("state"),
+                "device_id": r.get("device_id"), "config_entry_id": r.get("config_entry_id"),
+                "platform": r.get("platform"),
+            })
+        devices = [{
+            "id": d.get("id"), "name": d.get("name_by_user") or d.get("name"),
+            "manufacturer": d.get("manufacturer"), "model": d.get("model"),
+            "area": area_names.get(d.get("area_id")), "via_device_id": d.get("via_device_id"),
+            "entry_type": d.get("entry_type"), "config_entries": d.get("config_entries") or [],
+            "disabled": bool(d.get("disabled_by")),
+        } for d in dreg]
+        integrations = [{
+            "entry_id": e.get("entry_id"), "domain": e.get("domain"),
+            "title": e.get("title"), "state": e.get("state"), "source": e.get("source"),
+        } for e in (entries or [])]
+        return {"integrations": integrations, "devices": devices, "entities": entities}
+
     async def watch_registry(self) -> AsyncIterator[str]:
         """Yield on every `device_registry_updated` event (reconnecting). Near-zero
         cost — fires ONLY when HA's device registry actually changes, so a new device

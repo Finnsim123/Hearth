@@ -114,6 +114,14 @@ def load_decisions(repo) -> dict:
             "entity": d.get("entity") or {}}
 
 
+def load_device_catalog(repo) -> dict:
+    """Cached {device_id: {name, area, manufacturer, model}} from the last scan —
+    so any surface can show device context (facts picker, coverage, drill-down)
+    without another HA round-trip."""
+    d = repo.get_setting("ha.devices")
+    return d if isinstance(d, dict) else {}
+
+
 def set_decision(repo, level: str, node_id: str, relevance: str) -> None:
     if level not in ("integration", "device", "entity") or not node_id:
         return
