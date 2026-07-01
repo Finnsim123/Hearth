@@ -1480,12 +1480,18 @@ def build_api_router(deps: dict) -> APIRouter:
         out = []
         for b in bindings:
             trace = traces.get(b.name, [])
-            if not trace:
-                status = "no_data"
-            elif max(trace) - min(trace) < 1e-9:
-                status = "constant"
-            else:
+            n_obs = counts.get(b.name, 0)
+            if trace:
+                status = "constant" if max(trace) - min(trace) < 1e-9 else "alive"
+            elif n_obs > 0:
+                # Reporting, but string-valued (person home/away, media title…):
+                # raw_traces is numeric-only, so there's no sparkline — yet the
+                # sensor is genuinely live. It must NOT read as "no_data": that's
+                # exactly what stranded the household presence banner forever
+                # (person.* state is a string, never a number).
                 status = "alive"
+            else:
+                status = "no_data"
             # deterministic reliability verdict (no LLM needed). The clear
             # statuses map directly; an alive-but-rarely-changing sensor goes
             # through the shared heuristic on its 7-day change rate.
@@ -1496,7 +1502,7 @@ def build_api_router(deps: dict) -> APIRouter:
             else:
                 reliability, rel_reason = heuristic_reliability(
                     {"distinct_values": 2, "flatline_frac": 0.0,
-                     "changes_per_day": round(counts.get(b.name, 0) / 7, 2)})
+                     "changes_per_day": round(n_obs / 7, 2)})
             kind = "binary" if b.role.value in BINARY_ROLES else "numeric"
             suffixes = recipe_for(b.role).suffixes
             feature = f"{b.name}_{suffixes[0]}" if suffixes else b.name
