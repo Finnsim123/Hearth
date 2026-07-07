@@ -97,7 +97,8 @@ def event_dynamics(prepared: pd.DataFrame, bindings: list[Binding]):
 # count as a category count and summarise the DISTRIBUTION — no floor plan or
 # coordinates needed. Set-based only (this batch): distinct rooms, concentration,
 # spread. Degrades cleanly to zeros on homes with no room labels / one sensor.
-MOBILITY_COLS = ["mob_rooms_active", "mob_top_room_frac", "mob_room_entropy"]
+MOBILITY_COLS = ["mob_rooms_active", "mob_top_room_frac", "mob_room_entropy",
+                 "mob_room_switches"]
 
 
 def mobility_stats(room_counts: dict[str, float]) -> dict[str, float]:
@@ -114,6 +115,28 @@ def mobility_stats(room_counts: dict[str, float]) -> dict[str, float]:
     ent = (-sum(p * math.log(p) for p in ps) / math.log(n)) if n > 1 else 0.0
     return {"mob_rooms_active": float(n), "mob_top_room_frac": float(max(ps)),
             "mob_room_entropy": float(ent)}
+
+
+def room_switches(ch: pd.DataFrame, col_to_room: dict[str, str]) -> float:
+    """How many times activity moved between rooms across the window, in time
+    order — the 'pacing / restlessness' axis (someone cooking stays put; someone
+    tidying or pacing hops rooms). `ch` is the window's per-minute × per-sensor
+    change mask; each minute's room is the one with the most changes."""
+    if ch.empty:
+        return 0.0
+    cols = [c for c in ch.columns if c in col_to_room]
+    if not cols:
+        return 0.0
+    seq: list[str] = []
+    for _, minute in ch[cols].iterrows():
+        counts: dict[str, int] = {}
+        for col, changed in minute.items():
+            if changed:
+                rm = col_to_room[col]
+                counts[rm] = counts.get(rm, 0) + 1
+        if counts:
+            seq.append(max(counts, key=counts.get))
+    return float(sum(1 for a, b in zip(seq, seq[1:]) if a != b))
 
 
 def prepare(raw: pd.DataFrame, bindings: list[Binding]) -> pd.DataFrame:
@@ -205,12 +228,14 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
                 if rm and cnt > 0:
                     room_counts[rm] = room_counts.get(rm, 0.0) + float(cnt)
             row.update(mobility_stats(room_counts))
+            row["mob_room_switches"] = room_switches(ch, col_to_room)
         else:
             row["evt_count"] = 0.0
             row["evt_active_sensors"] = 0.0
             row["evt_dominant_share"] = 0.0
             row["evt_idle_minutes"] = IDLE_CAP_MIN
             row.update(mobility_stats({}))
+            row["mob_room_switches"] = 0.0
         for b in bindings:
             recipe = recipe_for(b.role)
             # role-aware lookback: same window END (we), per-role start. Default
