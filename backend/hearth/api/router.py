@@ -1646,6 +1646,41 @@ def build_api_router(deps: dict) -> APIRouter:
         raw = tsdb.read_raw(bindings, start, end)
         return cluster_sensors(raw)
 
+    @api.get("/bindings/leadlag")
+    def bindings_leadlag(hours: int = 336) -> dict:
+        """The home's temporal WIRING — which sensor reliably precedes another and
+        by how long (bathroom → bedroom light ~2 min). Lagged cross-correlation of
+        per-minute activity. Cached (~6h) since it's a wide, slow-changing read."""
+        tsdb = deps.get("tsdb")
+        if tsdb is None:
+            return {"edges": [], "note": "InfluxDB not connected"}
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        at = repo.get_setting("discovery.leadlag.at")
+        cached = repo.get_setting("discovery.leadlag")
+        fresh = at and (now - datetime.fromisoformat(at)) < timedelta(hours=6)
+        if cached is not None and fresh:
+            edges = cached
+        else:
+            from ..domain.discovery.leadlag import lead_lag_edges
+            hrs = max(24, min(int(hours), 168 * 4))
+            raw = tsdb.read_raw([b for b in repo.bindings() if b.enabled],
+                                now - timedelta(hours=hrs), now)
+            edges = lead_lag_edges(raw)
+            repo.set_setting("discovery.leadlag", edges)
+            repo.set_setting("discovery.leadlag.at", now.isoformat())
+        from ..domain.hierarchy import device_label_for
+        by = {b.name: b for b in repo.bindings()}
+
+        def _lbl(name: str) -> dict:
+            b = by.get(name)
+            if b is None:
+                return {"name": name}
+            return {"name": name, "entity_id": b.entity_id, "room": b.room,
+                    "device": device_label_for(repo, b.entity_id)}
+        out = [{**e, "from_label": _lbl(e["from"]), "to_label": _lbl(e["to"])} for e in edges]
+        return {"edges": out}
+
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:
         events = deps.get("events")

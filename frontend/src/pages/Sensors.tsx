@@ -10,6 +10,7 @@ import { useIsMobile } from "../useMedia";
 import { cheerBuddy } from "../components/buddyBus";
 import BubbleCloud from "../components/BubbleCloud";
 import DeviceHierarchy from "../components/DeviceHierarchy";
+import HomeWiring from "../components/HomeWiring";
 
 type Binding = {
   id: number; entity_id: string; role: string; name: string;
@@ -961,6 +962,7 @@ export default function Sensors() {
 
       <DeviceHierarchy />
       <UnassignedSensors onAssigned={reload} />
+      <HomeWiring />
 
       {members.some((m) => !m.person_alive) && (() => {
         const unlinked = members.filter((m) => !m.has_person);
