@@ -141,9 +141,15 @@ def behaviour(person: str | None = None, days: int = 7) -> dict:
         body = assemble_body(pid, io, disp_rows, tz=tz, now=end, range_start=disp_start)
     except Exception:
         body = None
+    try:
+        from ..domain.behaviour.footprint import footprint
+        home_footprint = footprint(_tsdb, _repo, pid, days=days)
+    except Exception:
+        home_footprint = None
     return {"summary": s.model_dump(mode="json"),
             "trends": [c.model_dump(mode="json") for c in t],
             "body": body.model_dump(mode="json") if body else None,
+            "footprint": home_footprint,
             "marker_flags": _marker_flags(pid, s.today),
             "persons": plist, "activities": acts}
 

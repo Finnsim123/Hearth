@@ -40,8 +40,10 @@ type Summary = {
   sessions: Sess[]; consistency: Consistency;
 };
 type MarkerFlag = { time: string; name: string; to: string };
+type Footprint = { rooms: number | null; roaming: number | null; roaming_label: string;
+                   pacing: number | null; pacing_label: string; trend: string | null; windows: number };
 type Data = { summary: Summary | null; trends: Trend[]; body: Body | null;
-              marker_flags?: MarkerFlag[];
+              marker_flags?: MarkerFlag[]; footprint?: Footprint | null;
               persons: { id: string; name: string }[];
               activities: { slug: string; name: string; color: string }[] };
 
@@ -274,6 +276,14 @@ export default function Behaviour() {
             </Card>
           )}
 
+          {/* home footprint — how movement spreads across the rooms */}
+          {data.footprint && (
+            <Card title="Home footprint"
+              sub="How activity moves across your rooms — from presence sensors, not the model.">
+              <FootprintCard fp={data.footprint} />
+            </Card>
+          )}
+
           {/* sleep & away — the trustworthy facts */}
           <Card title="Sleep & time away" sub="Read straight from your sensors — these are known, not guessed.">
             <FactRow label="Asleep" perDay={s.sleep_per_day_min} color={colorOf("asleep")} />
@@ -308,6 +318,48 @@ const fmtVal = (v: number, unit: string) =>
   : unit === "floors" ? `${Math.round(v)} floors`
   : unit === "steps" ? `${Math.round(v).toLocaleString()} steps`
   : Math.round(v).toLocaleString();
+
+/** Home footprint — mobility features (mob_*) as plain language. Descriptive:
+ *  rooms touched, how spread (roaming), how much moving about (pacing). */
+function FootprintCard({ fp }: { fp: Footprint }) {
+  const pct = (v: number | null) => Math.round(Math.max(0, Math.min(1, v ?? 0)) * 100);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {fp.rooms != null && (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", minWidth: 110 }}>
+            <div style={{ fontSize: 20, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fp.rooms}</div>
+            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>rooms per active spell</div>
+          </div>
+        )}
+        {fp.pacing != null && (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", minWidth: 110 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 600, textTransform: "capitalize" }}>{fp.pacing_label}</div>
+            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>moving about</div>
+          </div>
+        )}
+      </div>
+      {fp.roaming != null && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5,
+                        color: "var(--text-dim)", marginBottom: 4 }}>
+            <span>{fp.roaming_label}</span>
+            <span>settled ←→ roaming</span>
+          </div>
+          <div style={{ height: 8, background: "var(--surface-2)", borderRadius: 5 }}>
+            <div style={{ height: "100%", width: `${pct(fp.roaming)}%`, borderRadius: 5,
+                          background: "var(--accent)" }} />
+          </div>
+        </div>
+      )}
+      {fp.trend && (
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+          <span style={{ color: "var(--accent)" }}>↗</span> {fp.trend}.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function BodyBand({ body, colorOf, nameOf }: {
   body: Body; colorOf: (s: string) => string; nameOf: (s: string) => string;
