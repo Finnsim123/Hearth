@@ -202,21 +202,22 @@ def _binding(r: BindingRow) -> Binding:
 
 
 def _rename_pred_cols(node, cur: str, old: str):
-    """Rewrite feature-column references in a rule predicate from a `cur_` prefix
-    to an `old_` prefix (used by relink). Column names are dict KEYS; logical
-    combinators (and/or/not) are recursed into, values left alone."""
-    def rn(k: str) -> str:
-        return old + k[len(cur):] if (k == cur or k.startswith(cur + "_")) else k
-    if isinstance(node, dict):
-        out = {}
-        for k, v in node.items():
-            if str(k).lower() in ("and", "or", "not"):
-                out[k] = _rename_pred_cols(v, cur, old)
-            else:
-                out[rn(str(k))] = v
-        return out
-    if isinstance(node, list):
-        return [_rename_pred_cols(x, cur, old) for x in node]
+    """Rewrite feature-column references in a rule/composite predicate from a
+    `cur_` prefix to an `old_` prefix (used by relink). Matches the AST grammar
+    in features/composites.py: {"all"|"any": [nodes]}, {"not": node}, and leaf
+    {"feat": <column>, "op": .., "value": ..} — the column is the `feat` VALUE."""
+    if not isinstance(node, dict):
+        return node
+    if "all" in node:
+        return {"all": [_rename_pred_cols(c, cur, old) for c in node["all"]]}
+    if "any" in node:
+        return {"any": [_rename_pred_cols(c, cur, old) for c in node["any"]]}
+    if "not" in node:
+        return {"not": _rename_pred_cols(node["not"], cur, old)}
+    if "feat" in node:
+        feat = str(node["feat"])
+        renamed = old + feat[len(cur):] if (feat == cur or feat.startswith(cur + "_")) else feat
+        return {**node, "feat": renamed}
     return node
 
 
@@ -328,6 +329,10 @@ class AppDb:
             _purge(QuestionRow, "questions")
             _purge(ModelRow, "models")
             _purge(ClusterRow, "clusters")
+            # a login account may be tied to this member — keep the account but
+            # clear the dangling link so it doesn't point at a deleted person.
+            for u in s.scalars(select(UserRow).where(UserRow.person_id == person_id)).all():
+                u.person_id = None
             p = s.get(PersonRow, person_id)
             if p is not None:
                 s.delete(p)
@@ -352,8 +357,20 @@ class AppDb:
                 return {"ok": False, "reason": "unknown_person"}
             if s.get(PersonRow, old_id) is not None:
                 return {"ok": False, "reason": "old_id_in_use"}
+            # BindingRow.name is UNIQUE — a leftover old_id-prefixed binding (or a
+            # bound person entity named old_id) would make the rename below collide.
+            # Refuse rather than half-apply and raise mid-transaction.
+            mine = s.scalars(select(BindingRow).where(BindingRow.person_id == current_id)).all()
+            mine_ids = {b.id for b in mine}
+            targets = {old_id + b.name[len(current_id):] for b in mine
+                       if b.name == current_id or b.name.startswith(current_id + "_")}
+            # compare by id, not person_id — a stale old_id binding may have
+            # person_id NULL, and `!= current_id` never matches NULL in SQL.
+            if targets and any(c.id not in mine_ids for c in s.scalars(
+                    select(BindingRow).where(BindingRow.name.in_(targets))).all()):
+                return {"ok": False, "reason": "old_id_bindings_exist"}
             counts = {"bindings": 0, "rules": 0, "questions": 0, "models": 0, "clusters": 0}
-            for b in s.scalars(select(BindingRow).where(BindingRow.person_id == current_id)).all():
+            for b in mine:
                 if b.name == current_id or b.name.startswith(current_id + "_"):
                     b.name = old_id + b.name[len(current_id):]      # alexander_iphone → alex_iphone
                 b.person_id = old_id
@@ -371,6 +388,9 @@ class AppDb:
                 for row in s.scalars(select(model).where(model.person_id == current_id)).all():
                     row.person_id = old_id
                     counts[key] += 1
+            # keep any login account pointing at the re-keyed person
+            for u in s.scalars(select(UserRow).where(UserRow.person_id == current_id)).all():
+                u.person_id = old_id
             # the person row's id is the primary key → recreate it under old_id
             attrs = {c.name: getattr(cur, c.name) for c in PersonRow.__table__.columns}
             attrs["id"] = old_id

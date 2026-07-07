@@ -70,6 +70,50 @@ def markers_for(repo, person_id: str) -> list[Marker]:
             if m.enabled and m.person_id in (None, person_id)]
 
 
+# ── lead/lag → marker suggestions ────────────────────────────────────────────
+# A lead/lag edge (sensor A precedes sensor B by τ) becomes a candidate marker
+# when B is a STATE-defining sensor: A firing ~τ min before the bed fills is a
+# lead-in to sleep. We only suggest (the user confirms — markers are never
+# auto-created), and only for roles that map to a canonical gate state.
+_ROLE_STATE = {"bed": "asleep", "person": "away"}
+
+
+def suggest_markers_from_leadlag(repo, edges: list[dict], *,
+                                 min_strength: float = 0.35) -> list[dict]:
+    """From lead/lag edges, propose markers whose TARGET sensor defines a state
+    (bed → asleep, tracker → away). Returns dicts (binding_name, to_state,
+    lead_min, strength, from/to labels, reason) — never saves. Skips edges whose
+    target isn't state-defining, whose state has no activity, or that duplicate an
+    existing marker."""
+    try:
+        by = {b.name: b for b in repo.bindings()}
+        act_slugs = {a.slug for a in repo.activities()}
+    except Exception:
+        return []
+    existing = {(m.binding_name, m.to_state) for m in load_markers(repo)}
+    out: list[dict] = []
+    for e in edges:
+        if e.get("strength", 0) < min_strength:
+            continue
+        target = by.get(e.get("to"))
+        source = by.get(e.get("from"))
+        if target is None or source is None:
+            continue
+        state = _ROLE_STATE.get(getattr(target.role, "value", target.role))
+        if state is None or state not in act_slugs:
+            continue
+        if (e["from"], state) in existing:
+            continue
+        out.append({
+            "binding_name": e["from"], "to_state": state,
+            "lead_min": int(e.get("lag_min", 0)),
+            "strength": round(min(1.0, float(e.get("strength", 0))), 3),
+            "from": e["from"], "to": e["to"],
+            "reason": f"fires ~{e.get('lag_min', 0)} min before {state}",
+        })
+    return out
+
+
 # ── signal → binding ─────────────────────────────────────────────────────────
 def binding_from_feature(feature: str) -> str:
     """Strip the extractor suffix off a feature name to recover the binding name,

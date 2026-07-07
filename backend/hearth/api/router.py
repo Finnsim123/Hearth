@@ -1679,7 +1679,10 @@ def build_api_router(deps: dict) -> APIRouter:
             return {"name": name, "entity_id": b.entity_id, "room": b.room,
                     "device": device_label_for(repo, b.entity_id)}
         out = [{**e, "from_label": _lbl(e["from"]), "to_label": _lbl(e["to"])} for e in edges]
-        return {"edges": out}
+        from ..domain.markers import suggest_markers_from_leadlag
+        suggestions = [{**s, "from_label": _lbl(s["from"]), "to_label": _lbl(s["to"])}
+                       for s in suggest_markers_from_leadlag(repo, edges)]
+        return {"edges": out, "suggested_markers": suggestions}
 
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:
