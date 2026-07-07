@@ -146,10 +146,16 @@ def behaviour(person: str | None = None, days: int = 7) -> dict:
         home_footprint = footprint(_tsdb, _repo, pid, days=days)
     except Exception:
         home_footprint = None
+    try:
+        from ..domain.behaviour.rhythm import rhythm
+        daily_rhythm = rhythm(_tsdb, _repo, pid)
+    except Exception:
+        daily_rhythm = None
     return {"summary": s.model_dump(mode="json"),
             "trends": [c.model_dump(mode="json") for c in t],
             "body": body.model_dump(mode="json") if body else None,
             "footprint": home_footprint,
+            "rhythm": daily_rhythm,
             "marker_flags": _marker_flags(pid, s.today),
             "persons": plist, "activities": acts}
 

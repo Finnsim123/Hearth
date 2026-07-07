@@ -42,8 +42,11 @@ type Summary = {
 type MarkerFlag = { time: string; name: string; to: string };
 type Footprint = { rooms: number | null; roaming: number | null; roaming_label: string;
                    pacing: number | null; pacing_label: string; trend: string | null; windows: number };
+type Rhythm = { daily_regularity: number | null; weekly_regularity: number | null;
+                dominant_period_h: number | null; regularity_label: string;
+                period_label: string; hours: number };
 type Data = { summary: Summary | null; trends: Trend[]; body: Body | null;
-              marker_flags?: MarkerFlag[]; footprint?: Footprint | null;
+              marker_flags?: MarkerFlag[]; footprint?: Footprint | null; rhythm?: Rhythm | null;
               persons: { id: string; name: string }[];
               activities: { slug: string; name: string; color: string }[] };
 
@@ -284,6 +287,14 @@ export default function Behaviour() {
             </Card>
           )}
 
+          {/* daily rhythm — how regular the routine is, and on what cycle */}
+          {data.rhythm && data.rhythm.daily_regularity != null && (
+            <Card title="Daily rhythm"
+              sub="How regular your routine is over the last few weeks — descriptive only.">
+              <RhythmCard r={data.rhythm} />
+            </Card>
+          )}
+
           {/* sleep & away — the trustworthy facts */}
           <Card title="Sleep & time away" sub="Read straight from your sensors — these are known, not guessed.">
             <FactRow label="Asleep" perDay={s.sleep_per_day_min} color={colorOf("asleep")} />
@@ -355,6 +366,35 @@ function FootprintCard({ fp }: { fp: Footprint }) {
       {fp.trend && (
         <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
           <span style={{ color: "var(--accent)" }}>↗</span> {fp.trend}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Daily rhythm — periodicity of the activity signal as plain language: a
+ *  regularity bar (24h autocorrelation) + the dominant repeating cycle. */
+function RhythmCard({ r }: { r: Rhythm }) {
+  const reg = Math.round(Math.max(0, Math.min(1, r.daily_regularity ?? 0)) * 100);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <p style={{ margin: 0, fontSize: 13.5 }}>
+        You keep <strong>{r.regularity_label}</strong>
+        {r.period_label ? <> — the strongest cycle repeats <strong>{r.period_label}</strong></> : null}.
+      </p>
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5,
+                      color: "var(--text-dim)", marginBottom: 4 }}>
+          <span>day-to-day regularity</span>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>{reg}%</span>
+        </div>
+        <div style={{ height: 8, background: "var(--surface-2)", borderRadius: 5 }}>
+          <div style={{ height: "100%", width: `${reg}%`, borderRadius: 5, background: "var(--accent)" }} />
+        </div>
+      </div>
+      {r.weekly_regularity != null && r.weekly_regularity >= 0.25 && (
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
+          Weekly pattern too — weekdays and weekends differ in a repeating way.
         </p>
       )}
     </div>
