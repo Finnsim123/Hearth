@@ -8,6 +8,7 @@ Nothing here knows an entity name; everything is keyed on Binding.role.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -89,6 +90,32 @@ def event_dynamics(prepared: pd.DataFrame, bindings: list[Binding]):
     return {"cols": cols, "changes": changes, "idle_min": idle_min}
 
 
+# Home-mobility features (per window, person-level) — the indoor analogue of the
+# CDR mobility literature (Björkegren & Grosman; Isaacman et al. 2011): a person's
+# movement across the home carries activity signal (roaming vs settled; cooking is
+# concentrated in one room, tidying spans several). We treat each room's event
+# count as a category count and summarise the DISTRIBUTION — no floor plan or
+# coordinates needed. Set-based only (this batch): distinct rooms, concentration,
+# spread. Degrades cleanly to zeros on homes with no room labels / one sensor.
+MOBILITY_COLS = ["mob_rooms_active", "mob_top_room_frac", "mob_room_entropy"]
+
+
+def mobility_stats(room_counts: dict[str, float]) -> dict[str, float]:
+    """Summarise how the window's activity is spread across rooms.
+      mob_rooms_active — distinct rooms with any activity (range).
+      mob_top_room_frac — share of activity in the busiest room (0..1; 1 = one room).
+      mob_room_entropy — normalised Shannon entropy of the room distribution
+                         (0 = all in one room, 1 = evenly spread) — the 'roaming' axis."""
+    total = sum(room_counts.values())
+    n = len(room_counts)
+    if total <= 0 or n == 0:
+        return {"mob_rooms_active": 0.0, "mob_top_room_frac": 0.0, "mob_room_entropy": 0.0}
+    ps = [c / total for c in room_counts.values() if c > 0]
+    ent = (-sum(p * math.log(p) for p in ps) / math.log(n)) if n > 1 else 0.0
+    return {"mob_rooms_active": float(n), "mob_top_room_frac": float(max(ps)),
+            "mob_room_entropy": float(ent)}
+
+
 def prepare(raw: pd.DataFrame, bindings: list[Binding]) -> pd.DataFrame:
     """1-min resample + per-ROLE forward-fill limits (role metadata, ADR-8)."""
     if raw.empty:
@@ -129,6 +156,7 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
     mask per window (O(n x windows) — this was a multi-hour stage on 90-day
     fast-tracks before)."""
     dyn = event_dynamics(prepared, bindings)
+    col_to_room = {b.name: b.room for b in bindings if b.room}   # mobility grouping
     zone = ZoneInfo(tz)
     aligned = all(g.minute % 30 == 0 and g.second == 0 for g in grid)
     slices: dict[datetime, pd.DataFrame] = {}
@@ -169,11 +197,20 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
             row["evt_dominant_share"] = (float(per_sensor.max() / total)
                                          if total > 0 else 0.0)
             row["evt_idle_minutes"] = idle_at_end.get(ws, IDLE_CAP_MIN)
+            # home-mobility: fold this window's per-sensor events into per-room
+            # counts, then summarise the spread across rooms
+            room_counts: dict[str, float] = {}
+            for col, cnt in per_sensor.items():
+                rm = col_to_room.get(col)
+                if rm and cnt > 0:
+                    room_counts[rm] = room_counts.get(rm, 0.0) + float(cnt)
+            row.update(mobility_stats(room_counts))
         else:
             row["evt_count"] = 0.0
             row["evt_active_sensors"] = 0.0
             row["evt_dominant_share"] = 0.0
             row["evt_idle_minutes"] = IDLE_CAP_MIN
+            row.update(mobility_stats({}))
         for b in bindings:
             recipe = recipe_for(b.role)
             # role-aware lookback: same window END (we), per-role start. Default
