@@ -67,6 +67,10 @@ def binding_tiers(bindings: list[Binding]) -> dict[str, int]:
 def tier_of_column(col: str, prefixes: dict[str, int]) -> int:
     """Feature column → tier; longest matching binding prefix wins;
     unmatched columns (hour_of_day, composites) are tier 0 = prior."""
+    # home-mobility / anchor-distance are derived from presence movement across
+    # rooms — behavioural (tier 2), not a time-of-day prior.
+    if col.startswith("mob_") or col.startswith("dist_to_"):
+        return 2
     best, best_len = 0, -1
     for name, tier in prefixes.items():
         if (col == name or col.startswith(name + "_")) and len(name) > best_len:

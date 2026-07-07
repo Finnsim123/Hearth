@@ -89,11 +89,38 @@ def _match_binding(col: str, bindings: list[Binding]) -> tuple[Binding | None, s
     return best, suffix
 
 
+# Global (non-binding) home-mobility / anchor-distance columns → plain phrases.
+# (up_phrase, down_phrase); dist_to_<place> is handled generically below.
+_MOB_PHRASE: dict[str, tuple[str, str]] = {
+    "mob_rooms_active": ("using several rooms", "using one room"),
+    "mob_room_entropy": ("roaming between rooms", "settled in one room"),
+    "mob_room_switches": ("moving around a lot", "staying put"),
+    "mob_top_room_frac": ("concentrated in one room", "spread across rooms"),
+}
+
+
+def _global_phrase(base: str, up: bool) -> str | None:
+    if base in _MOB_PHRASE:
+        return _MOB_PHRASE[base][0 if up else 1]
+    if base.startswith("dist_to_"):
+        place = base[len("dist_to_"):]
+        return f"away from the {place}" if up else f"near the {place}"
+    return None
+
+
 def humanize_feature(col: str, z: float, bindings: list[Binding],
                      persons: dict[str, str]) -> dict:
     """One signature feature -> {raw, label, room, role, dir}. `z`>0 means the
     feature sat ABOVE its usual level in this cluster (picks the up-phrase)."""
     up = z >= 0
+    # global mobility features carry no binding — phrase them before the match
+    gbase = col[:-5] if col.endswith("_lag1") else col
+    gphrase = _global_phrase(gbase, up)
+    if gphrase is not None:
+        if col.endswith("_lag1"):
+            gphrase += " (just before)"
+        return {"raw": col, "label": gphrase[:1].upper() + gphrase[1:], "room": None,
+                "role": None, "dir": "up" if up else "down", "entity_id": None}
     binding, suffix = _match_binding(col, bindings)
     lagged = col.endswith("_lag1")
     if binding is None:
