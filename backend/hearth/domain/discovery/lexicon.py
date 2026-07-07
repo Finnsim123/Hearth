@@ -129,6 +129,13 @@ def humanize_feature(col: str, z: float, bindings: list[Binding],
 
     place = binding.room or prettify(binding.name)
     who = persons.get(binding.person_id or "", "someone")
+    if suffix == "missing":                           # missingness indicator
+        label = f"no reading from {place}" if up else f"{place} reporting"
+        if lagged:
+            label += " (just before)"
+        return {"raw": col, "label": label[:1].upper() + label[1:], "room": binding.room,
+                "role": binding.role.value, "dir": "up" if up else "down",
+                "entity_id": binding.entity_id}
     tmpl = _PHRASE.get((binding.role, suffix))
     if tmpl is None:                                  # unknown suffix: generic
         verb = "higher" if up else "lower"

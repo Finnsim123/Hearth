@@ -385,6 +385,16 @@ def impute(df: pd.DataFrame, bindings: list[Binding]) -> pd.DataFrame:
     """Role-driven semantic imputation. -1 = 'sensor absent' (bed), 0 = 'no
     event' (everything else); lag columns fall back to their base column."""
     df = df.copy()
+    # Missingness indicators (Björkegren & Grosman): flag when a binding produced
+    # NO value this window, computed BEFORE the fill below — so the model can tell
+    # "sensor observed absent/off" from "no reading at all", instead of reading an
+    # imputed sentinel as real signal. One flag per binding (not per suffix) to
+    # keep the feature count modest on small-data homes.
+    for b in bindings:
+        recipe = recipe_for(b.role)
+        cols = [f"{b.name}_{s}" for s in recipe.suffixes if f"{b.name}_{s}" in df.columns]
+        if cols:
+            df[f"{b.name}_missing"] = df[cols].isna().all(axis=1).astype(float)
     for b in bindings:
         recipe = recipe_for(b.role)
         for suffix in recipe.suffixes:

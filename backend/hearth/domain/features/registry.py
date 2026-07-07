@@ -48,7 +48,7 @@ def all_recipes() -> dict[Role, Recipe]:
     return dict(_REGISTRY)
 
 
-PIPELINE_VERSION = "5"  # bump when extract_windows adds/changes columns (v5: dist_to_<anchor>)
+PIPELINE_VERSION = "6"  # bump when extract_windows adds/changes columns (v6: <binding>_missing)
 
 
 def feature_set_version(extra: list[dict] | None = None,
