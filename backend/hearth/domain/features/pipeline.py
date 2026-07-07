@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import math
+import re
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -139,6 +141,114 @@ def room_switches(ch: pd.DataFrame, col_to_room: dict[str, str]) -> float:
     return float(sum(1 for a, b in zip(seq, seq[1:]) if a != b))
 
 
+# ── anchor-distance (Isaacman-style "distance to points of interest") ─────────
+# A person's graph-distance from where they are to meaningful rooms (bed, door)
+# is activity signal — and, crucially, SYNTHETIC: distance-to-bed climbing through
+# the day and collapsing at night is a sleep cue even in a home with no bed
+# occupancy sensor, as long as the bedroom is a labelled room with any sensor.
+DIST_CAP = 6.0                                   # hops when unknown/unreachable
+_ANCHOR_ROOM_HINTS = {
+    "bed": re.compile(r"bed|bedroom|slaap"),                          # nl: slaapkamer
+    "door": re.compile(r"\bhall\b|hallway|entr|entree|foyer|porch|voordeur"),
+}
+
+
+def detect_anchors(bindings: list[Binding]) -> dict[str, str]:
+    """Map anchor keys → a room, from sensor ROLE first (a BED sensor's room, a
+    DOOR sensor's room), then room-NAME hints — so a bedroom with only a motion
+    sensor still anchors 'bed' (the point of the synthetic proximity feature)."""
+    anchors: dict[str, str] = {}
+    for b in bindings:
+        if not b.room:
+            continue
+        if b.role == Role.BED:
+            anchors.setdefault("bed", b.room)
+        elif b.role == Role.DOOR:
+            anchors.setdefault("door", b.room)
+    rooms = sorted({b.room for b in bindings if b.room})
+    for key, rx in _ANCHOR_ROOM_HINTS.items():
+        if key not in anchors:
+            for r in rooms:
+                if rx.search(r.lower()):
+                    anchors[key] = r
+                    break
+    return anchors
+
+
+def learn_room_graph(room_seq: list[str]) -> dict[str, list[str]]:
+    """Undirected room adjacency from a sequence of dominant rooms: consecutive
+    distinct rooms are treated as neighbours (they hand off to each other)."""
+    adj: dict[str, set] = {}
+    for a, b in zip(room_seq, room_seq[1:]):
+        if a != b:
+            adj.setdefault(a, set()).add(b)
+            adj.setdefault(b, set()).add(a)
+    return {k: sorted(v) for k, v in adj.items()}
+
+
+def room_distance(graph: dict[str, list[str]], src: str, dst: str) -> int | None:
+    """BFS hop distance src→dst on the adjacency graph; None if unreachable."""
+    if src == dst:
+        return 0
+    if src not in graph:
+        return None
+    seen, q = {src}, deque([(src, 0)])
+    while q:
+        node, d = q.popleft()
+        for nb in graph.get(node, ()):  # type: ignore[arg-type]
+            if nb == dst:
+                return d + 1
+            if nb not in seen:
+                seen.add(nb)
+                q.append((nb, d + 1))
+    return None
+
+
+def anchor_distances(graph: dict[str, list[str]], anchors: dict[str, str],
+                     dominant_room: str | None) -> dict[str, float]:
+    """dist_to_<anchor> hops from the window's busiest room to each anchor room;
+    DIST_CAP when the room is unknown (no activity) or unreachable."""
+    out: dict[str, float] = {}
+    for key, room in anchors.items():
+        d = None if dominant_room is None else room_distance(graph, dominant_room, room)
+        out[f"dist_to_{key}"] = float(d) if d is not None else DIST_CAP
+    return out
+
+
+def refresh_room_graph(tsdb, repo, days: int = 14) -> dict[str, list[str]]:
+    """Learn + cache the home's room-adjacency graph from recent presence history
+    (settings key `room.graph`). Cheap-ish and slow-changing, so callers throttle
+    it to ~daily. Returns the graph (also cached)."""
+    binds = [b for b in repo.bindings()
+             if getattr(b, "enabled", True) and b.room and b.role in EVENT_ROLES]
+    if not binds:
+        return {}
+    end = datetime.now(timezone.utc)
+    raw = tsdb.read_raw(binds, end - timedelta(days=days), end)
+    if raw is None or raw.empty:
+        return {}
+    prepared = prepare(raw, binds)
+    cols = [b.name for b in binds if b.name in prepared.columns
+            and pd.api.types.is_numeric_dtype(prepared[b.name])]
+    if not cols:
+        return {}
+    col_to_room = {b.name: b.room for b in binds}
+    changes = prepared[cols].diff().abs().gt(0.5)
+    seq: list[str] = []
+    for _, minute in changes.iterrows():
+        counts: dict[str, int] = {}
+        for col, changed in minute.items():
+            if changed:
+                rm = col_to_room.get(col)
+                if rm:
+                    counts[rm] = counts.get(rm, 0) + 1
+        if counts:
+            seq.append(max(counts, key=counts.get))
+    graph = learn_room_graph(seq)
+    repo.set_setting("room.graph", graph)
+    return graph
+
+
 def prepare(raw: pd.DataFrame, bindings: list[Binding]) -> pd.DataFrame:
     """1-min resample + per-ROLE forward-fill limits (role metadata, ADR-8)."""
     if raw.empty:
@@ -169,7 +279,9 @@ def window_grid(start: datetime, end: datetime, stride_min: int) -> list[datetim
 
 def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
                     grid: list[datetime], tz: str = "UTC",
-                    time_granularity: str = "coarse") -> pd.DataFrame:
+                    time_granularity: str = "coarse",
+                    room_graph: dict[str, list[str]] | None = None,
+                    anchors: dict[str, str] | None = None) -> pd.DataFrame:
     """One row per window start: temporal features + per-binding recipe outputs
     (columns '{binding.name}_{suffix}'). Person-agnostic — caller filters
     bindings to shared + this person's.
@@ -229,6 +341,9 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
                     room_counts[rm] = room_counts.get(rm, 0.0) + float(cnt)
             row.update(mobility_stats(room_counts))
             row["mob_room_switches"] = room_switches(ch, col_to_room)
+            if anchors:
+                dominant = max(room_counts, key=room_counts.get) if room_counts else None
+                row.update(anchor_distances(room_graph or {}, anchors, dominant))
         else:
             row["evt_count"] = 0.0
             row["evt_active_sensors"] = 0.0
@@ -236,6 +351,8 @@ def extract_windows(prepared: pd.DataFrame, bindings: list[Binding],
             row["evt_idle_minutes"] = IDLE_CAP_MIN
             row.update(mobility_stats({}))
             row["mob_room_switches"] = 0.0
+            if anchors:
+                row.update(anchor_distances(room_graph or {}, anchors, None))
         for b in bindings:
             recipe = recipe_for(b.role)
             # role-aware lookback: same window END (we), per-role start. Default
@@ -290,12 +407,15 @@ def bindings_for_person(all_bindings: list[Binding], person_id: str) -> list[Bin
 def compute_features(prepared: pd.DataFrame, bindings: list[Binding],
                      grid: list[datetime], tz: str,
                      composites: list[dict], lag_features: list[str],
-                     time_granularity: str = "coarse", spec=None) -> pd.DataFrame:
+                     time_granularity: str = "coarse", spec=None,
+                     room_graph: dict[str, list[str]] | None = None,
+                     anchors: dict[str, str] | None = None) -> pd.DataFrame:
     """The pure pipeline: extract -> composites -> lags -> (spec features) ->
     impute. `spec` is the active FeatureSpec or None; when None the output is
     exactly the historical recipe pipeline (no regression). Spec columns are
     added alongside recipe columns (never overwriting them) and imputed to 0."""
-    df = extract_windows(prepared, bindings, grid, tz, time_granularity)
+    df = extract_windows(prepared, bindings, grid, tz, time_granularity,
+                         room_graph=room_graph, anchors=anchors)
     df = apply_composites(df, composites)
     df = add_lags(df, lag_features)
     if spec is not None and getattr(spec, "features", None):
@@ -324,13 +444,16 @@ def build_windows(tsdb, repo, person_id: str, start: datetime, end: datetime,
     tz = repo.get_setting("timezone", "UTC") or "UTC"
     tg = repo.get_setting("time_granularity", "coarse") or "coarse"
     spec = load_active_spec(repo)
+    room_graph = repo.get_setting("room.graph") or {}
+    anchors = detect_anchors(bindings)             # dist_to_<anchor> features
     preroll = max(120, max_window_min(bindings))   # cover the slowest role's lookback
     raw = tsdb.read_raw(bindings, start - timedelta(minutes=preroll), end)
     prepared = prepare(raw, bindings) if not raw.empty else raw
     grid = window_grid(start, end, stride_min)
     if not grid:
         return pd.DataFrame()
-    feats = compute_features(prepared, bindings, grid, tz, composites, lag_features, tg, spec)
+    feats = compute_features(prepared, bindings, grid, tz, composites, lag_features, tg, spec,
+                             room_graph=room_graph, anchors=anchors)
     tsdb.write_features(person_id, active_feature_set_version(repo, spec), feats)
     return feats
 
@@ -339,6 +462,15 @@ def build_latest_windows(tsdb, repo) -> None:
     """Scheduler entrypoint: build any complete-but-unwritten windows for every
     enabled person, then heartbeat."""
     now = datetime.now(timezone.utc)
+    # keep the home's room-adjacency graph fresh for dist_to_<anchor> features —
+    # slow-changing, so at most once a day, before building windows off it.
+    try:
+        last = repo.get_setting("room.graph.at")
+        if not last or (now - datetime.fromisoformat(last)) > timedelta(hours=24):
+            refresh_room_graph(tsdb, repo)
+            repo.set_setting("room.graph.at", now.isoformat())
+    except Exception:
+        log.debug("room-graph refresh skipped", exc_info=True)
     fset = active_feature_set_version(repo)
     for person in repo.persons():
         if not person.enabled:
