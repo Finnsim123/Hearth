@@ -133,22 +133,27 @@ _STATE_DOMAINS = {"sensor", "binary_sensor", "input_boolean", "input_number",
                   "alarm_control_panel", "input_select", "climate", "fan"}
 
 
-# Hearth's OWN published entities (mqtt_publisher.py): the prediction sensors it
-# writes back into HA. It must never sense — let alone train on — its own output,
-# or the model learns to predict its own predictions (a feedback loop). Matched
-# precisely (known suffixes + the availability sensor) so a user's unrelated
-# "hearth" entity, e.g. a smart fireplace, isn't caught; a device literally named
-# "Hearth" (the MQTT device) is the authoritative signal when we have it.
-_SELF_SUFFIXES = ("_activity", "_confidence", "_questions", "_override")
+# Hearth's OWN published entities (mqtt_publisher.py + custom_components/hearth):
+# the prediction sensors and diagnostics it writes back into HA. It must never
+# sense — let alone train on — its own output, or the model learns to predict its
+# own predictions (a feedback loop). Matched precisely (known suffixes + the
+# standalone sensors) so a user's unrelated "hearth" entity, e.g. a smart
+# fireplace, isn't caught; a device literally named "Hearth" (or "Hearth — <p>")
+# is the authoritative signal when we have it.
+_SELF_SUFFIXES = ("_activity", "_confidence", "_questions", "_override",
+                  "_accuracy")
+_SELF_EXACT = {"hearth_alive", "hearth_attention"}
 
 
 def is_hearth_own(entity: dict) -> bool:
-    """True for Hearth's own prediction entities (sensor.hearth_<person>_activity,
-    …_confidence, switch/select .hearth_<person>_*, binary_sensor.hearth_alive)."""
+    """True for Hearth's own prediction/diagnostic entities
+    (sensor.hearth_<person>_activity, …_confidence, …_accuracy,
+    switch/select .hearth_<person>_*, binary_sensor.hearth_alive/_attention)."""
     obj = (entity.get("entity_id") or "").split(".", 1)[-1].lower()
-    if obj == "hearth_alive" or (obj.startswith("hearth_") and obj.endswith(_SELF_SUFFIXES)):
+    if obj in _SELF_EXACT or (obj.startswith("hearth_") and obj.endswith(_SELF_SUFFIXES)):
         return True
-    return (entity.get("device") or "").strip().lower() == "hearth"
+    dev = (entity.get("device") or "").strip().lower()
+    return dev == "hearth" or dev.startswith("hearth —") or dev.startswith("hearth -")
 
 
 def is_bindable(entity_id: str, role: Role, override: bool = False) -> bool:

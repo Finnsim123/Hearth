@@ -67,6 +67,21 @@ class HearthClient:
         except aiohttp.ClientError as exc:
             raise HearthApiError(str(exc)) from exc
 
+    # ── model diagnostics (accuracy sensor + attention binary_sensor) ───────
+    async def models(self) -> list[dict]:
+        """The model registry — the live (promoted) root model per person carries
+        the honest accuracy metrics."""
+        return await self._get("/api/models")
+
+    async def cadence(self) -> dict:
+        """{person_id: {phase, interval_days, …}} — the adaptive training cadence."""
+        return await self._get("/api/models/cadence")
+
+    async def advisories(self) -> list[dict]:
+        """Active, non-dismissed advisories (things Hearth wants you to know)."""
+        data = await self._get("/api/advisories")
+        return data.get("advisories") or []
+
     # ── two-way controls (override + questions opt-out) ─────────────────────
     async def controls(self) -> dict:
         """{"activities": [slug…], "persons": {pid: {override, questions}}}."""

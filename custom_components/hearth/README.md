@@ -51,6 +51,19 @@ Connects HA to your local Hearth instance and closes the loop, no YAML, no autom
   the integration catches the `mobile_app_notification_action` event and POSTs it
   to Hearth with its API token. That's the whole active-learning loop.
 
+- **Model diagnostics** (in the devices' Diagnostics sections — the honesty,
+  where you can automate on it):
+  - `sensor.hearth_<person>_accuracy` — the model's honest headline accuracy (%).
+    Attributes name the *basis* (real-world spot-checks vs answers-so-far),
+    validation status, training phase (daily-while-learning → weekly-when-stable),
+    model version and training size. Gate automations on model health, or alert
+    when accuracy drops.
+  - `binary_sensor.hearth_attention` (device_class `problem`, on the Hearth hub
+    device) — ON while Hearth has active advisories (model leaning on the wrong
+    sensors, a new device to integrate, a demoted sensor…), titles in the
+    attributes. One automation — `to: "on"` → notify — and Hearth can always
+    reach you.
+
 ## Install
 
 1. HACS → custom repositories → add this repo (category: Integration) → install → restart HA.
