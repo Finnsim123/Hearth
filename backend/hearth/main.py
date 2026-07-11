@@ -165,7 +165,7 @@ def create_app() -> FastAPI:
     # webhook (TODO: bearer scope check), and — ONLY while no users exist —
     # the wizard's probe + setup endpoints. The SPA itself is public; it
     # gates itself on /api/auth/me.
-    from .api.scopes import integration_allowed
+    from .api.scopes import integration_allowed, readonly_allowed
     PUBLIC = {"/api/health", "/api/auth/login", "/api/auth/reset", "/api/auth/forgot"}
     SETUP_ONLY = {"/api/setup/complete", "/api/ha/test", "/api/ha/inventory",
                   "/api/influx/inspect", "/api/tokens", "/api/feature-spec/estimate",
@@ -185,7 +185,11 @@ def create_app() -> FastAPI:
         authz = request.headers.get("authorization", "")
         if authz.startswith("Bearer hrt_"):
             scope = repo.api_token_scope(authz[7:])
-            if scope == "integration" and integration_allowed(path, request.method):
+            allowed = (integration_allowed(path, request.method)
+                       if scope == "integration"
+                       else readonly_allowed(path, request.method)
+                       if scope == "readonly" else False)
+            if allowed:
                 return await call_next(request)
             return JSONResponse({"detail": "Token invalid, revoked, or out of scope"},
                                 status_code=403)
