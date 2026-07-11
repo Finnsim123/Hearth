@@ -1934,8 +1934,18 @@ def build_api_router(deps: dict) -> APIRouter:
                               force=bool(body.get("force", False)))
         if record is None:
             return {"trained": False, "reason": "not enough data or one class only"}
+        # fresh model → immediately re-audit what it leans on, so a wrong-sensor
+        # reliance surfaces as a finding right when the user is looking
+        audit_findings = 0
+        if record.promoted:
+            try:
+                from ..domain.binding_audit import run_binding_audit
+                audit_findings = len(run_binding_audit(repo))
+            except Exception:
+                log.exception("post-train binding audit failed")
         return {"trained": True, "version": record.version,
-                "promoted": record.promoted, "metrics": record.metrics}
+                "promoted": record.promoted, "metrics": record.metrics,
+                "audit_findings": audit_findings}
 
     @api.post("/models/{model_id}/promote")
     def promote(model_id: int) -> dict:

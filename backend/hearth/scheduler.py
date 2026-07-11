@@ -119,6 +119,18 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
             repo.set_setting("training.status",
                              {"running": running, "at": datetime.now(timezone.utc).isoformat()})
 
+        def _audit_bindings() -> None:
+            # the ACT half of the self-awareness loop: after models change, check
+            # whether any lean on a device's AMBIENT entity while its direct
+            # sibling sits unused — findings become one-tap advisories.
+            from .domain.binding_audit import run_binding_audit
+            try:
+                n = len(run_binding_audit(repo))
+                if n:
+                    log.info("binding audit: %d finding(s) raised", n)
+            except Exception:
+                log.exception("binding audit failed")
+
         def _train_all() -> None:
             from .domain.health import clear_issue, record_issue
             if not _admit(TRAINING):
@@ -145,6 +157,7 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
                              cta={"label": "Logs", "href": "/settings#logs"})
             elif ok:
                 clear_issue(repo, "training_failed")
+                _audit_bindings()       # fresh models → immediately re-audit
 
         scheduler.add_job(_train_all, "cron", day_of_week="sun", hour=3,
                           id="weekly_training", max_instances=1)
@@ -182,6 +195,7 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
                         continue
                     _set_training(True)
                     train_person(person.id, tsdb, repo, deps.get("models"))
+                    _audit_bindings()   # the very first model deserves a check too
                 except Exception:
                     log.exception("first-train check failed for %s", person.id)
                 finally:
@@ -189,6 +203,10 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
 
         scheduler.add_job(_first_train_if_ready, "interval", minutes=30,
                           id="first_train", max_instances=1, coalesce=True)
+        # daily backstop: catches applied fixes, importance drift between trains,
+        # and installs upgraded from before the audit existed
+        scheduler.add_job(_audit_bindings, "interval", hours=24,
+                          id="binding_audit", max_instances=1, coalesce=True)
 
         def _drift_check() -> None:
             from .domain.training.drift import run_drift_check
