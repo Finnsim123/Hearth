@@ -361,7 +361,28 @@ export default function ModelReport() {
   const onlyPerson = params.get("person");
   const autoPrint = params.get("print") === "1";
 
-  useEffect(() => { document.title = "Hearth — Model Report"; }, []);
+  useEffect(() => {
+    document.title = "Hearth — Model Report";
+    // theme.css sets `overflow-x: clip` on html/body (for the app's sticky
+    // sidebar). `clip` on the ROOT breaks print pagination in both Chromium and
+    // WebKit — the printed document comes out as one blank page. A stylesheet
+    // override proved fragile, so force it INLINE (wins every cascade, all
+    // media). Safe here: this standalone page has no sidebar. Restored on leave.
+    const els: HTMLElement[] = [document.documentElement, document.body];
+    const root = document.getElementById("root");
+    if (root) els.push(root);
+    const prev = els.map((el) => el.getAttribute("style"));
+    for (const el of els) {
+      el.style.setProperty("overflow", "visible", "important");
+      el.style.setProperty("overflow-x", "visible", "important");
+      el.style.setProperty("height", "auto", "important");
+      el.style.setProperty("max-width", "none", "important");
+    }
+    return () => els.forEach((el, i) => {
+      if (prev[i] === null) el.removeAttribute("style");
+      else el.setAttribute("style", prev[i] as string);
+    });
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -391,22 +412,29 @@ export default function ModelReport() {
 
   const ready = models !== null;
   useEffect(() => {
-    if (ready && autoPrint) { const t = setTimeout(() => window.print(), 600); return () => clearTimeout(t); }
+    if (!ready || !autoPrint) return;
+    // print only after focus + two paints — window.print() from a freshly
+    // window.open()ed tab before first paint yields an empty preview
+    const t = setTimeout(() => {
+      window.focus();
+      requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+    }, 800);
+    return () => clearTimeout(t);
   }, [ready, autoPrint]);
 
   const shown = persons.filter((p) => (!onlyPerson || p.id === onlyPerson) && byPerson[p.id]);
   const generated = new Date().toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
 
   return (
-    <div style={{ background: "#f3f3f6", minHeight: "100vh", color: INK }}>
+    <div className="report-wrap" style={{ background: "#f3f3f6", minHeight: "100vh", color: INK }}>
       <style>{`
         @media print {
           @page { margin: 15mm; }
           .no-print { display: none !important; }
           .sheet { box-shadow: none !important; margin: 0 !important; width: auto !important; }
-          /* theme.css sets overflow-x: clip on html/body (for the app's sticky
-             sidebar) — 'clip' on the root breaks Chromium's print fragmentation
-             and yields BLANK pages. Neutralise it for this document. */
+          .report-wrap { min-height: 0 !important; background: #fff !important; }
+          /* belt-and-braces alongside the inline overrides set on mount:
+             root-level overflow:clip blanks printed pages in Chromium+WebKit */
           html, body, #root {
             overflow: visible !important;
             height: auto !important;
@@ -424,7 +452,7 @@ export default function ModelReport() {
         display: "flex", alignItems: "center", gap: 12, padding: "10px 16px",
         background: "#fff", borderBottom: `1px solid ${LINE}` }}>
         <strong style={{ color: INK }}>Model Report</strong>
-        <span style={{ fontSize: 12.5, color: DIM }}>Save as PDF to keep or share.</span>
+        <span style={{ fontSize: 12.5, color: DIM }}>Save as PDF to keep or share. (r2)</span>
         <button onClick={() => window.print()} style={{ marginLeft: "auto", cursor: "pointer",
           background: ACCENT, color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px",
           fontSize: 13, fontWeight: 600 }}>Print / Save PDF</button>
