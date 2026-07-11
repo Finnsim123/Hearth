@@ -1684,6 +1684,51 @@ def build_api_router(deps: dict) -> APIRouter:
                        for s in suggest_markers_from_leadlag(repo, edges)]
         return {"edges": out, "suggested_markers": suggestions}
 
+    @api.get("/audit/bindings")
+    def audit_bindings_ep(refresh: bool = False) -> dict:
+        """The binding auto-audit's findings: places where the model leans on a
+        device's AMBIENT entity while a direct sibling sits unused. refresh=true
+        re-runs detection against the promoted models' importances."""
+        from ..domain.binding_audit import run_binding_audit
+        if refresh:
+            findings = run_binding_audit(repo)
+        else:
+            findings = repo.get_setting("audit.findings")
+            if findings is None:
+                findings = run_binding_audit(repo)
+        return {"findings": findings or []}
+
+    @api.post("/audit/bindings/apply")
+    async def audit_apply(body: dict) -> dict:
+        """Apply ONE approved finding (bind the sibling / stop training on the
+        ambient one), then retrain in the background — the promotion gate only
+        keeps the new model if the fix actually helped."""
+        import asyncio
+        from ..domain.binding_audit import apply_finding
+        findings = repo.get_setting("audit.findings") or []
+        finding = next((f for f in findings
+                        if f.get("binding_id") == body.get("binding_id")
+                        and f.get("kind") == body.get("kind")), None)
+        if finding is None:
+            raise HTTPException(404, "no such finding (already applied?)")
+        res = apply_finding(repo, finding, candidate=body.get("candidate"))
+        if not res.get("ok"):
+            raise HTTPException(409, res.get("reason", "could not apply"))
+        tsdb, store = deps.get("tsdb"), deps.get("models")
+        if body.get("retrain", True) and tsdb is not None and store is not None:
+            async def _refresh() -> None:
+                from ..domain.training.trainer import train_person
+                for p in repo.persons():
+                    if not p.enabled:
+                        continue
+                    try:
+                        await asyncio.to_thread(train_person, p.id, tsdb, repo, store)
+                    except Exception:
+                        log.exception("post-audit retrain failed for %s", p.id)
+            asyncio.create_task(_refresh())
+            res["retraining"] = True
+        return res
+
     @api.get("/bindings/suggest")
     async def suggest() -> list[Binding]:
         events = deps.get("events")

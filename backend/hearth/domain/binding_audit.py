@@ -140,6 +140,71 @@ def audit_bindings(repo, importance: dict[str, float]) -> list[dict]:
     return findings
 
 
+def apply_finding(repo, finding: dict, candidate: str | None = None) -> dict:
+    """Apply ONE user-approved finding (the 'always ask' hand):
+      bind_sibling     bind the chosen direct sibling (role via suggest_role,
+                       room inherited, owner via binding_owner) AND stop training
+                       on the ambient binding (model_excluded — it stays ingested
+                       and visible to discovery).
+      exclude_ambient  just stop training on the ambient binding.
+    Returns {ok, excluded, bound?}; the caller retrains + the promotion gate
+    verifies the change actually helped."""
+    from .features.person_scope import binding_owner
+    from .onboarding.advisor import is_bindable, suggest_role
+    from .schemas import Role
+
+    kind = finding.get("kind")
+    ambient = next((b for b in repo.bindings()
+                    if b.id == finding.get("binding_id")
+                    or b.name == finding.get("binding_name")), None)
+    if ambient is None:
+        return {"ok": False, "reason": "binding_gone"}
+
+    bound = None
+    if kind == "bind_sibling":
+        eid = candidate or (finding.get("candidates") or [None])[0]
+        if not eid:
+            return {"ok": False, "reason": "no_candidate"}
+        if any(b.entity_id == eid for b in repo.bindings()):
+            return {"ok": False, "reason": "already_bound"}
+        domain = eid.split(".")[0]
+        role = suggest_role({"entity_id": eid, "domain": domain})
+        if role is None and domain == "switch":
+            role = Role.POWER                      # a bare appliance switch
+        if role is None or not is_bindable(eid, role, override=True):
+            return {"ok": False, "reason": "not_bindable"}
+        taken = {b.name for b in repo.bindings()}
+        base = re.sub(r"[^a-z0-9]+", "_", eid.split(".", 1)[-1].lower()).strip("_") or "sensor"
+        name = base
+        n = 2
+        while name in taken:
+            name, n = f"{base}_{n}", n + 1
+        nb = Binding(entity_id=eid, role=role, name=name, room=ambient.room)
+        nb.person_id = binding_owner(nb, repo.persons())
+        bound = repo.save_binding(nb)
+
+    repo.save_binding(ambient.model_copy(update={"model_excluded": True}))
+
+    # retire the finding + tidy the advisory
+    left = [f for f in (repo.get_setting("audit.findings") or [])
+            if not (f.get("binding_id") == finding.get("binding_id")
+                    and f.get("kind") == kind)]
+    repo.set_setting("audit.findings", left)
+    try:
+        from . import advisories, events
+        if not left:
+            advisories.clear_advisory(repo, "bindaudit")
+        detail = (f"bound {bound.entity_id} as {bound.role.value}, " if bound else "") \
+            + f"stopped training on {ambient.name}"
+        events.record_event(repo, "binding_audit",
+                            f"Fixed a wrong-sensor reliance ({ambient.name})", detail)
+    except Exception:
+        log.debug("apply_finding: event/advisory failed", exc_info=True)
+    return {"ok": True, "excluded": ambient.name,
+            "bound": {"entity_id": bound.entity_id, "role": bound.role.value,
+                      "name": bound.name} if bound else None}
+
+
 def run_binding_audit(repo) -> list[dict]:
     """Audit against the promoted models' pooled importances, store the findings
     (settings key `audit.findings`), and raise ONE dismissible advisory when

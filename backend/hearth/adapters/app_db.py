@@ -196,9 +196,14 @@ class SettingRow(Base):
 
 
 def _binding(r: BindingRow) -> Binding:
+    # model_excluded rides inside options_json (no schema migration); it's popped
+    # out into the first-class field so domain code (trainer's discovery⟂model
+    # split, the binding audit) reads it as a plain attribute.
+    opts = json.loads(r.options_json)
+    excluded = bool(opts.pop("model_excluded", False))
     return Binding(id=r.id, entity_id=r.entity_id, role=Role(r.role), name=r.name,
                    room=r.room, person_id=r.person_id,
-                   options=json.loads(r.options_json), enabled=r.enabled)
+                   options=opts, enabled=r.enabled, model_excluded=excluded)
 
 
 def _rename_pred_cols(node, cur: str, old: str):
@@ -270,7 +275,12 @@ class AppDb:
                 s.add(r)
             r.entity_id, r.role, r.name = b.entity_id, b.role.value, b.name
             r.room, r.person_id, r.enabled = b.room, b.person_id, b.enabled
-            r.options_json = json.dumps(b.options)
+            opts = dict(b.options)
+            if b.model_excluded:
+                opts["model_excluded"] = True     # persisted inside options_json
+            else:
+                opts.pop("model_excluded", None)
+            r.options_json = json.dumps(opts)
             s.commit()
             return _binding(r)
 
