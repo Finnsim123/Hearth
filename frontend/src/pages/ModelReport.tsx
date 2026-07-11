@@ -79,14 +79,20 @@ function H({ children }: { children: React.ReactNode }) {
 function Section({ children }: { children: React.ReactNode }) {
   return <div style={{ breakInside: "avoid", marginTop: 16 }}>{children}</div>;
 }
-function StatusPill({ status, nConfirmed }: { status?: string; nConfirmed: number }) {
+function StatusPill({ status, nConfirmed, nGold = 0 }:
+                    { status?: string; nConfirmed: number; nGold?: number }) {
   if (status !== "provisional" && status !== "validated") return null;
   const prov = status === "provisional";
+  // "Validated" (≥30 human answers) while still gathering random spot-checks
+  // reads over-confident — say both truths in one pill.
+  const label = prov ? `Provisional · ${nConfirmed}/30 confirmed`
+    : nGold < 30 ? `Validated on answers · spot-checks pending (${nGold}/30)`
+    : "Validated";
   return (
     <span style={{ fontSize: 10.5, padding: "2px 9px", borderRadius: 99, fontWeight: 700,
                    color: prov ? WARN : OK, background: prov ? "#fbf1e2" : "#e7f6ee",
                    border: `1px solid ${prov ? "#f0dcc0" : "#c9ecd8"}` }}>
-      {prov ? `Provisional · ${nConfirmed}/30 confirmed` : "Validated"}
+      {label}
     </span>
   );
 }
@@ -133,7 +139,8 @@ function PersonReport({ person, models, cap, insight, drift, first }: {
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap",
                     borderBottom: `2px solid ${INK}`, paddingBottom: 6 }}>
         <h2 style={{ margin: 0, fontSize: 22, color: INK }}>{person.name}</h2>
-        <StatusPill status={mt.validation_status} nConfirmed={mt.n_confirmed ?? 0} />
+        <StatusPill status={mt.validation_status} nConfirmed={mt.n_confirmed ?? 0}
+                    nGold={mt.n_gold ?? 0} />
         <span style={{ marginLeft: "auto", fontSize: 11, color: DIM }}>
           {live ? `${live.version} · ${live.algo} · trained ${fmtDate(live.trained_at)}` : "no model yet"}
         </span>
@@ -166,11 +173,13 @@ function PersonReport({ person, models, cap, insight, drift, first }: {
             </p>
           )}
 
-          {mine != null && flat != null && (
+          {mine != null && flat != null && (mine > 0 || flat > 0) && (
             <p style={{ marginTop: 10, marginBottom: 0, fontSize: 12, color: DIM }}>
               <b style={{ color: INK }}>Earns its complexity?</b> {pct(mine)} here vs a plain flat
-              model's {pct(flat)} on the same split — {mine >= flat
-                ? "the hierarchy is pulling its weight." : "the flat model is as good; the hierarchy isn't adding much."}
+              model's {pct(flat)} on the same split — {
+                mine > flat + 0.005 ? "the hierarchy is pulling its weight."
+                : mine < flat - 0.005 ? "the flat model does better; the hierarchy isn't helping here."
+                : "the flat model does just as well; the hierarchy isn't adding anything yet."}
             </p>
           )}
 

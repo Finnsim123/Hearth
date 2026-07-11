@@ -345,7 +345,10 @@ function ModelCardSheet({ m, personName }: { m: Model; personName: string }) {
   const fb = mt.flat_baseline;
   const mine = mt.accuracy_gold ?? mt.accuracy_confirmed;
   const flat = fb?.accuracy_gold ?? fb?.accuracy_confirmed;
-  const beatsFlat = mine != null && flat != null ? mine >= flat : null;
+  const flatVerdict = mine == null || flat == null || (mine === 0 && flat === 0) ? null
+    : mine > flat + 0.005 ? "the hierarchy is pulling its weight."
+    : mine < flat - 0.005 ? "the flat model does better; the hierarchy isn't helping here."
+    : "the flat model does just as well; the hierarchy isn't adding anything yet.";
   return (
     <div style={{ border: "1px solid var(--accent)", borderRadius: 12, padding: 18,
                   display: "flex", flexDirection: "column", gap: 14,
@@ -385,11 +388,10 @@ function ModelCardSheet({ m, personName }: { m: Model; personName: string }) {
         </div>
       </div>
 
-      {fb && mine != null && flat != null && (
+      {flatVerdict && (
         <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)" }}>
           <strong>Earns its complexity?</strong> This model scores {pct(mine)} vs a plain
-          flat model's {pct(flat)} on the same split —{" "}
-          {beatsFlat ? "the hierarchy is pulling its weight." : "the flat model is as good; the hierarchy isn't helping here."}
+          flat model's {pct(flat)} on the same split — {flatVerdict}
         </p>
       )}
 
