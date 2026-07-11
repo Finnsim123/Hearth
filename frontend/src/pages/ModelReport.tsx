@@ -404,11 +404,20 @@ export default function ModelReport() {
           @page { margin: 15mm; }
           .no-print { display: none !important; }
           .sheet { box-shadow: none !important; margin: 0 !important; width: auto !important; }
-          html, body { background: #fff !important; }
+          /* theme.css sets overflow-x: clip on html/body (for the app's sticky
+             sidebar) — 'clip' on the root breaks Chromium's print fragmentation
+             and yields BLANK pages. Neutralise it for this document. */
+          html, body, #root {
+            overflow: visible !important;
+            height: auto !important;
+            background: #fff !important;
+          }
         }
         .report a { color: ${ACCENT}; }
         .report table { page-break-inside: auto; }
         .report tr { page-break-inside: avoid; }
+        /* keep the tint bars/pills visible on paper */
+        .report, .report * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       `}</style>
 
       <div className="no-print" style={{ position: "sticky", top: 0, zIndex: 5,
