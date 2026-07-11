@@ -991,7 +991,11 @@ export default function Models() {
   const [drift, setDrift] = useState<Record<string, DriftReport>>({});
   const [auto, setAuto] = useState(false);
   const [driftBusy, setDriftBusy] = useState(false);
-  const load = () => fetch("/api/models").then(j).then(setModels).catch(() => setModels([]));
+  const [cadence, setCadence] = useState<Record<string, Cadence>>({});
+  const load = () => {
+    fetch("/api/models").then(j).then(setModels).catch(() => setModels([]));
+    fetch("/api/models/cadence").then(j).then(setCadence).catch(() => setCadence({}));
+  };
   const loadDrift = () => fetch("/api/drift").then(j).then(setDrift).catch(() => setDrift({}));
   useEffect(() => {
     load();
@@ -1052,7 +1056,7 @@ export default function Models() {
         return (
           <PersonPanel key={pid} person={{ id: pid, name }} models={list}
                        drift={drift[pid]} auto={auto} onToggleAuto={toggleAuto}
-                       onRecompute={recompute} driftBusy={driftBusy}
+                       onRecompute={recompute} driftBusy={driftBusy} cadence={cadence[pid]}
                        onAction={() => { load(); loadDrift(); }} onTrain={train} training={training} />
         );
       })}
