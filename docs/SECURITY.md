@@ -147,6 +147,7 @@ Residual items that are deployment/ops concerns, not code holes:
 
 ## What we deliberately don't do (v1)
 
-OAuth/OIDC SSO, TOTP 2FA, per-entity ACLs — homelab scope, tracked as
-post-v1 ideas. The architecture doesn't preclude them: auth is middleware +
-`security.py`, swappable without touching domain code.
+OAuth/OIDC SSO, per-entity ACLs — homelab scope, tracked as post-v1 ideas.
+(TOTP 2FA *is* implemented — see the section above.) The architecture doesn't
+preclude the rest: auth is middleware + `security.py`, swappable without touching
+domain code.

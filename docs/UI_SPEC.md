@@ -10,7 +10,12 @@ an explanation of how it was computed.
 ## Navigation
 
 ```
-⌂ Dashboard · ✉ Inbox · ⊞ Activities · ✦ Patterns · ⚙ Models · ⌁ Sensors · ⚙ Settings
+⌂ Dashboard · Behaviour · Activity · ✉ Inbox · ⊞ Activities · ✦ Patterns ·
+⚙ Models · ⌁ Sensors · System · ⚙ Settings
+
+(the nav is grouped: Dashboard / Behaviour / Activity up top, then Inputs
+[Sensors], The model [Activities · Patterns · Models], Predictions [Inbox], then
+System / Settings)
 ```
 
 The sidebar footer is intentionally minimal: **Settings**, the theme toggle,
@@ -22,7 +27,7 @@ side by side) that open each tool. Everything else — Logs, Account, How it wor
 
 **Implemented** in `frontend/src/onboarding/` (`Wizard.tsx` + `ui.tsx`); backend
 calls all wired to the real API. UX pattern, identical on every step: progress
-bar (ember fill) -> "Step n of 10" label -> title -> one-paragraph explainer in
+bar (ember fill) -> "Step n of 11" label -> title -> one-paragraph explainer in
 plain language -> fields with inline hints ("where do I find this") and inline
 validation -> a "what's happening" callout explaining what Hearth does with the
 input -> footer with Back / Continue (+ prominent Skip on optional steps).

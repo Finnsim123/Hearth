@@ -119,8 +119,9 @@ Capabilities beyond the three core pillars:
   `unknown`, so automations don't act on a shaky guess.
 - **MQTT output channel:** predictions published as retained HA-discovery
   entities for non-HA hubs (Homey, Node-RED, openHAB) and broker-centric setups.
-  One-way today; two-way controls (questions opt-out, manual override over MQTT)
-  remain to build.
+  Two-way: the `questions/set` and `override/set` command topics (a discovery
+  `switch` + `select`) let any MQTT consumer toggle asking and set a manual
+  override, so behaviour matches the native HA integration. ✅ built.
 - **Levers as data + UI:** training / asking / output policies and the above are
   editable in Settings; the Sensors page shows pending approvals, the feature
   spec and reliability flags; the Models page shows per-version trend + compare.

@@ -61,10 +61,19 @@ The funnel, in order:
 4. **Role suggestion**: what's left is matched to a *role* (next stage). Anything
    with no recognisable role is left unbound but visible, so you can bind it by
    hand.
-5. **LLM selectivity** (if a key is configured): a language model re-reads the
+5. **Self-recognition** (`is_hearth_own`): Hearth's own prediction entities — the
+   ones it publishes back to HA over MQTT (`sensor.hearth_<person>_activity`, the
+   confidence/questions/override entities, the "Hearth" device) — are excluded, so
+   the model can never train on its own output (a feedback loop).
+6. **LLM selectivity** (if a key is configured): a language model re-reads the
    survivors and prunes ones that are technically bindable but useless, and
    rescues ones the patterns missed.
-6. **De-duplication** on entity id.
+7. **De-duplication** on entity id.
+
+(The scan operates on the full HA hierarchy — **integrations → devices →
+entities** — so a device's identity sets a sensible default before the per-entity
+role check: a toothbrush is kept, a cloud/weather integration or a Zigbee
+coordinator is skipped wholesale.)
 
 > This is a **cold-start prior**, not a claim that filtered entities are
 > signal-free. A filtered sensor can be re-admitted later if the data shows it
@@ -103,7 +112,11 @@ evidence tier (§M).
 
 Each sensor is tagged with the **room** (Home Assistant *area*) it lives in.
 Hearth doesn't predict per-room, but it uses room coverage to tell you *where it
-can see well and where it's blind* — the bubble chart on the dashboard. Room
+can see well and where it's blind* — the bubble chart on the dashboard. The chart
+is **device-aware**: a multi-sensor gadget's dots are grouped as one device (so it
+doesn't inflate a room's apparent coverage), pure diagnostics are dropped, and a
+room that HA knows about but has no usable sensor shows as a dashed "ghost room" —
+a blind spot flagged even before there's a model. Room
 names are canonicalised (case + spelling folded, semantic duplicates merged) so
 a rescan can't split one room into `Living_room` and `livingroom`.
 
@@ -198,7 +211,7 @@ recipes above are the whole feature set.
 
 ## I. Event dynamics & time
 
-On top of the per-sensor recipes, Hearth adds two cross-cutting feature families:
+On top of the per-sensor recipes, Hearth adds several cross-cutting feature families:
 
 - **Event dynamics** (count of state changes in the window, which sensor
   dominated, and **minutes of silence** before the window end). Forty silent
@@ -208,6 +221,16 @@ On top of the per-sensor recipes, Hearth adds two cross-cutting feature families
   hour lets a tree memorise "at 19:00 they're usually cooking" and stop reading
   the sensors — the *clock-crutch* failure. Coarse time keeps the legitimate
   "it's night-ish" prior without the lookup table.
+- **Home mobility** — how movement spreads across the rooms this window: how many
+  rooms were active, how concentrated vs roaming, and how much room-hopping
+  (pacing). The indoor analogue of the mobile-phone mobility literature.
+- **Anchor distance** — graph-distance from where you are to a meaningful room
+  (the bed, the door), on a room-adjacency graph learned from your own movement.
+  This *synthesises* signals you're missing: distance-to-bed collapsing at night
+  is a sleep cue even with no bed sensor.
+- **Missingness indicators** — a flag per binding for "no reading at all this
+  window", captured before imputation, so the model can tell a sensor observed
+  off from a sensor that's simply silent — important on sparsely-sensed homes.
 
 > Your time encoding is set to **{{ time_granularity }}**.
 

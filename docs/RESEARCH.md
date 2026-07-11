@@ -232,8 +232,15 @@ Cook & Krishnan "Activity Recognition on Streaming Sensor Data") vs Hearth:
    dominant sensor and TIME-SINCE-LAST-EVENT, not only window aggregates.
    Added: `evt_count`, `evt_active_sensors`, `evt_dominant_share`,
    `evt_idle_minutes` (idleness clock, capped 240 min) over direct event
-   roles (presence/door/media). PIPELINE_VERSION=2 bumps the feature-set
-   hash — old and new schemas never mix (ADR-7).
+   roles (presence/door/media). Later families followed the same discipline —
+   **home mobility** (`mob_rooms_active`/`_top_room_frac`/`_room_entropy`/
+   `_room_switches`, from per-room event spread — the indoor analogue of the CDR
+   mobility literature), **anchor distance** (`dist_to_bed`/`dist_to_door`, BFS
+   hops on a learned room graph, synthesising a sleep cue with no bed sensor),
+   and **missingness indicators** (`<binding>_missing`, so the model tells
+   "observed off" from "no reading"). Each addition bumps PIPELINE_VERSION
+   (now **6**), which bumps the feature-set hash — old and new schemas never mix
+   (ADR-7).
 2. **Learned transition smoothing** — discriminative temporal smoothing:
    a Laplace-smoothed transition matrix learned from the household's own
    coarse-label history (stored per person at train time), applied as a

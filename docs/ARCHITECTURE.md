@@ -464,13 +464,18 @@ React + TypeScript SPA, served by the backend container at `:8420`; REST for CRU
 WebSocket for live predictions/training logs. Everything user-facing follows the
 Hearth design language (DESIGN.md): warm ember `#F59E0B` on cool slate, one
 accent that always carries meaning, the 47-icon outline set sharing the Ember
-mark's stroke language, and dark/light/system theming via CSS tokens. Pages: **Onboarding wizard** ·
-**Dashboard** (live activity per person, confidence, SHAP "because" strip) ·
-**Inbox** (label/confirm) · **Activities** (taxonomy + rules) · **Patterns**
-(cluster cards) · **Models** (registry, metrics, confusion matrix, AUC curves,
-SHAP global importance, drift; train/rollback buttons) · **Sensors** (bindings,
-freshness, ingest health) · **Settings** (HA/MQTT/Influx connections, tokens,
-notification budgets, persons).
+mark's stroke language, and dark/light/system theming via CSS tokens. A
+**landing page** greets first-time and logged-out visitors before the wizard/login.
+Pages: **Onboarding wizard** · **Dashboard** (live activity per person,
+confidence, SHAP "because" strip, device-grouped coverage map) · **Behaviour**
+(routines over time, home footprint, daily rhythm) · **Activity** (a timeline of
+events + advisories) · **Inbox** (label/confirm) · **Activities** (taxonomy +
+rules) · **Patterns** (cluster cards) · **Models** (registry, honest metrics,
+confusion matrix, calibration, drift, per-activity capability; train/rollback;
+printable **Model Report** at `/models/report`) · **Sensors** (bindings, the
+integration→device→entity hierarchy, home wiring, ingest health) · **System**
+(vitals + resource governor + health issues) · **Settings** (connections, the
+household with rename/pause/forget/reclaim, model & AI levers, accounts + 2FA).
 
 ## 8. Deployment
 

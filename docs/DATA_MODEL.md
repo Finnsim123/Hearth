@@ -14,9 +14,13 @@ Two stores, strict separation of concerns:
 
 | Bucket | Retention | Contents |
 |---|---|---|
-| `hearth_raw` | 180 d (configurable) | Mirrored entity states, 1 measurement per binding |
-| `hearth_features` | 365 d | Materialized feature windows |
-| `hearth_ml` | infinite | Predictions, labels, model metrics, heartbeats |
+| `hearth_raw` | 90 d (configurable, `retention.days`) | Mirrored entity states, 1 measurement per binding |
+| `hearth_features` | kept indefinitely | Materialized feature windows |
+| `hearth_ml` | kept indefinitely | Predictions, labels, model metrics, heartbeats |
+
+Raw is the only bucket with a finite default (`DEFAULT_RAW_RETENTION_DAYS = 90`,
+override via the `retention.days` setting); features and ML are the durable record
+and are never auto-expired.
 
 ### 1.1 `hearth_raw`
 
@@ -47,7 +51,7 @@ training is refused.
 ```
 predictions:  tags person, model_version       fields predicted(str), confidence,
                                                prob_<class>..., smoothed(str)
-labels:       tags person, provenance(bootstrap|discovered|confirmed), source
+labels:       tags person, provenance(bootstrap|llm|discovered|confirmed), source
               fields label(str), activity(str, optional sub), window_ts(float)
 metrics:      tags person, model_version       fields accuracy_confirmed,
                                                accuracy_bootstrap, f1_<class>,
@@ -102,6 +106,14 @@ executable feature spec), `feature.power_mode` (conservative|full),
 `discovery.pending` (sensors awaiting approval) and `discovery.integrate`
 (re-analysis/retrain progress for the buddy).
 
+Later subsystems added more keys: the HA-hierarchy scan caches (`ha.devices`,
+`ha.entity_device`, `ha.pending_nodes`), the learned room-adjacency graph
+(`room.graph` + `room.graph.at`) and lead/lag wiring (`discovery.leadlag`),
+activity-merge aliases (`activity.aliases`), the shared advisory/event feeds
+(`system.advisories`, `system.events`), foundational-fact verdicts
+(`foundational.facts` / `foundational.verdicts`), markers, transition matrices
+(`transitions.{person}`), and the LLM-credit push flag (`llm.push_sent`).
+
 ## 3. Roles and their feature recipes (initial set)
 
 | Role | Example entities | Features per window (prefix = binding name) |
@@ -122,6 +134,14 @@ executable feature spec), `feature.power_mode` (conservative|full),
 Cross-binding composites (declared in recipe config, not code): lights-off+in-bed,
 media+sofa, fumes+kitchen-presence, pre-alarm indicator, partner-context flags,
 lag features (window t−1, t−2 of selected columns).
+
+Global (non-binding) per-window families also emitted by the builder: event
+dynamics (`evt_count`, `evt_active_sensors`, `evt_dominant_share`,
+`evt_idle_minutes`); home mobility (`mob_rooms_active`, `mob_top_room_frac`,
+`mob_room_entropy`, `mob_room_switches`); anchor distance (`dist_to_bed`,
+`dist_to_door` — BFS hops on the learned room graph); and per-binding missingness
+indicators (`<binding>_missing`, set before imputation). Each change to this set
+bumps `PIPELINE_VERSION` (currently 6) and therefore the feature-set hash.
 
 Beyond these fixed recipes, the AI feature architect (ARCH §6b) can add features
 from a safe transform whitelist (`features/transforms.py`), keyed to each

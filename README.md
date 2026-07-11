@@ -155,13 +155,15 @@ After setup, the UI is insight, settings and a feedback loop:
 | Page | What it's for |
 |---|---|
 | **Dashboard** | What Hearth thinks each person is doing right now, the day's activity ribbon, the sensor-coverage map, and anything that needs you. |
-| **Behaviour** | Your habits and routines over time — when things happen, what follows what, and shifts from week to week. |
+| **Behaviour** | Your habits and routines over time — when things happen, what follows what, and shifts from week to week. Includes the home footprint and daily-rhythm read-outs. |
+| **Activity** | A timeline of what Hearth has done and noticed — model retrains, new sensors, advisories, milestones. |
 | **Inbox** | The questions Hearth asks when it's unsure. One tap to answer; bulk-label a time range. |
 | **Activities** | Your activity taxonomy and the labeling rules behind it. |
 | **Patterns** | Recurring routines Hearth discovered but can't name yet. Name one and it labels weeks of history at once. |
 | **Models** | The glass box: honest metrics, confusion matrix, feature importances, version trends, and Train now. |
-| **Sensors** | Every bound sensor, its role and reliability, newly discovered sensors waiting for approval, and the AI's feature design. |
-| **Settings** | Connections, the household, model and AI levers, email, the weekly newsletter, themes, accounts and two-factor, and updates. |
+| **Sensors** | Every bound sensor, its role and reliability, the integration→device→entity hierarchy, newly discovered devices waiting for approval, the home-wiring (lead/lag) view, and the AI's feature design. |
+| **System** | Live vitals — CPU/memory/disk, job heartbeats, the resource governor's state, and health issues. |
+| **Settings** | Connections, the household (rename / pause / remove & forget / reclaim), model and AI levers, email, the weekly newsletter, themes, accounts and two-factor, and updates. |
 | **Methodology** | A plain-language, personalised walkthrough of how Hearth turns your sensors into "what you're doing". |
 
 ### Getting predictions out
