@@ -2027,7 +2027,27 @@ def build_api_router(deps: dict) -> APIRouter:
                 person_id=ev.person_id, window_ts=ev.window_ts,
                 model_version="correction", predicted=activity, smoothed=activity,
                 confidence=1.0, probabilities={activity: 1.0}))
-        return {"labeled_windows": len(events)}
+        # The live lanes also write predictions at 5-min stamps between the 30-min
+        # grid points. The heatmap colours an hour by MAJORITY vote across its
+        # rows, so grid-stamp corrections alone get outvoted ~12:2 wherever the
+        # model had already predicted — the cell looked uncorrectable. Overwrite
+        # every existing row in the range at ITS OWN timestamp (same series →
+        # fields merge in place) so the whole hour votes for the correction.
+        overwritten = 0
+        try:
+            for row in tsdb.read_predictions(body["person_id"], start_dt, end_dt):
+                if row.get("model_version") == "correction":
+                    continue
+                ts = datetime.fromisoformat(row["time"])
+                tsdb.write_prediction(Prediction(
+                    person_id=body["person_id"], window_ts=ts,
+                    model_version="correction", predicted=activity,
+                    smoothed=activity, confidence=1.0,
+                    probabilities={activity: 1.0}))
+                overwritten += 1
+        except Exception:
+            log.exception("bulk label: off-grid prediction overwrite failed")
+        return {"labeled_windows": len(events), "overwritten": overwritten}
 
     @api.post("/inbox/{question_id}/skip")
     def skip(question_id: int) -> dict:
