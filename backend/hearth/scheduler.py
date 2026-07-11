@@ -132,9 +132,15 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
                 log.exception("binding audit failed")
 
         def _train_all() -> None:
+            # ADAPTIVE cadence (training/cadence.py): training takes seconds, so a
+            # young model retrains DAILY while it's still improving; once the
+            # promotion gate keeps saying "no better" it backs off to every 3 days,
+            # then weekly. A promoted improvement or a burst of new confirmed
+            # labels snaps it back to daily.
             from .domain.health import clear_issue, record_issue
+            from .domain.training.cadence import should_train
             if not _admit(TRAINING):
-                log.info("weekly training deferred — system %s",
+                log.info("training deferred — system %s",
                          gov_runtime.state().name.lower())
                 return
             _set_training(True)
@@ -143,12 +149,14 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
                 for person in repo.persons():
                     if not person.enabled:
                         continue
+                    if not should_train(repo, person.id):
+                        continue                    # not due yet — stable model
                     tried += 1
                     try:
                         train_person(person.id, tsdb, repo, deps.get("models"))
                         ok += 1
                     except Exception:
-                        log.exception("weekly training failed for %s", person.id)
+                        log.exception("training failed for %s", person.id)
             finally:
                 _set_training(False)
             if tried and ok == 0:       # every model failed → surface it
@@ -159,8 +167,8 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
                 clear_issue(repo, "training_failed")
                 _audit_bindings()       # fresh models → immediately re-audit
 
-        scheduler.add_job(_train_all, "cron", day_of_week="sun", hour=3,
-                          id="weekly_training", max_instances=1)
+        scheduler.add_job(_train_all, "cron", hour=3,
+                          id="adaptive_training", max_instances=1)
 
         async def _weekly_newsletter() -> None:
             # Sunday morning recap, after the overnight retrain so accuracy is

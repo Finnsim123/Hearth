@@ -1947,6 +1947,14 @@ def build_api_router(deps: dict) -> APIRouter:
                 "promoted": record.promoted, "metrics": record.metrics,
                 "audit_findings": audit_findings}
 
+    @api.get("/models/cadence")
+    def models_cadence() -> dict:
+        """Per-person adaptive training cadence: daily while improving, easing to
+        weekly once the promotion gate keeps saying 'no better'."""
+        from ..domain.training.cadence import cadence_for
+        return {p.id: cadence_for(repo, p.id)
+                for p in repo.persons() if p.enabled}
+
     @api.post("/models/{model_id}/promote")
     def promote(model_id: int) -> dict:
         repo.promote_model(model_id)

@@ -49,6 +49,30 @@ type Model = {
   label_counts: Record<string, number>; metrics: Metrics;
 };
 
+type Cadence = { due: boolean; streak: number; interval_days: number;
+                 last_trained: string | null; phase: "first" | "learning" | "plateauing" | "stable" };
+
+/** Adaptive-cadence status in plain words — daily while improving, easing off
+ *  once the promotion gate keeps saying "no better". */
+function CadenceLine({ c }: { c?: Cadence }) {
+  if (!c) return null;
+  const text =
+    c.phase === "first" ? "First model pending — it trains the moment there's enough data." :
+    c.phase === "learning" ? "Training daily while it's still improving." :
+    c.phase === "plateauing" ? "Improvement is slowing — training every 3 days now." :
+    "Stable — training weekly. A real improvement or a batch of new answers snaps it back to daily.";
+  return (
+    <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-dim)", display: "flex",
+                alignItems: "center", gap: 6 }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                     background: c.phase === "stable" ? "var(--ok, #34D399)"
+                       : c.phase === "first" ? "var(--text-dim)" : "var(--accent)" }} />
+      {text}
+      {c.due && c.phase !== "first" && <span>· next run tonight</span>}
+    </p>
+  );
+}
+
 const j = (r: Response) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); };
 const pct = (v: number | null | undefined) => (v === null || v === undefined) ? "—" : `${(v * 100).toFixed(1)}%`;
 
@@ -799,11 +823,12 @@ function InsightLine({ personId }: { personId: string }) {
  *  every deep view as a named fold — all content preserved, progressively
  *  disclosed. */
 function PersonPanel({ person, models, drift, auto, onToggleAuto, onRecompute, driftBusy,
-                       onAction, onTrain, training }: {
+                       onAction, onTrain, training, cadence }: {
   person: { id: string; name: string };
   models: Model[]; drift: DriftReport | null | undefined; auto: boolean;
   onToggleAuto: () => void; onRecompute: () => void; driftBusy: boolean;
   onAction: () => void; onTrain: (pid: string) => void; training: string;
+  cadence?: Cadence;
 }) {
   const [open, setOpen] = useState(false);
   const sorted = [...models].sort((a, b) => (b.trained_at ?? "").localeCompare(a.trained_at ?? ""));
@@ -841,6 +866,7 @@ function PersonPanel({ person, models, drift, auto, onToggleAuto, onRecompute, d
                       borderTop: "1px solid var(--border)" }}>
           {live ? <LiveChips m={live} />
                 : <p style={{ margin: 0, color: "var(--text-dim)" }}>No model yet.</p>}
+          <CadenceLine c={cadence} />
           <InsightLine personId={person.id} />
           {hasPerf && (
             <Fold title="Performance detail" hint="per-class · confusion · where it does well & badly">
