@@ -181,6 +181,17 @@ discovery entities, so any hub that speaks HA-style MQTT discovery — Homey, No
 openHAB — picks them up automatically. Use this when you're not on Home Assistant or
 prefer broker wiring; if you use the HA integration, leave MQTT off.
 
+### Talk to Hearth from Claude (MCP)
+
+Hearth ships a small **[Model Context Protocol](https://modelcontextprotocol.io)
+server** ([`mcp/`](mcp/README.md)) that connects your instance to Claude. Instead
+of opening the dashboard, you can just *ask*: "what's everyone doing right now?",
+"how's Alex's model doing — is it validated yet?", "which patterns need naming?"
+→ "name pattern 12 'reading'", "what questions is Hearth waiting on?" → "answer
+#48 with cooking". It's read-first with a few safe actions (answer a question,
+name a pattern, trigger a train); destructive ops stay in the UI. Setup is a
+five-minute stdio config with an API token — see **[mcp/README.md](mcp/README.md)**.
+
 ### The weekly newsletter *(optional)*
 
 A designed weekly recap of each member's habits, emailed Sunday morning — headline
@@ -290,6 +301,7 @@ git pull && docker compose up -d --build
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Accounts, sessions, two-factor, where every secret lives |
 | [`docs/RESEARCH.md`](docs/RESEARCH.md) | Hard problems, prior art, the HEPA / world-model and LLM bets |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phased build plan with acceptance criteria |
+| [`mcp/README.md`](mcp/README.md) | Connect Hearth to Claude — the MCP server: why, setup, tools |
 
 ---
 
