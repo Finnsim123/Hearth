@@ -411,15 +411,42 @@ export default function ModelReport() {
   }, {}), [models]);
 
   const ready = models !== null;
+
+  // Print by copying the rendered sheet into a FRESH blank window with only a
+  // minimal shell — no app stylesheet, no React, nothing inherited. The report
+  // is styled entirely inline, so the copy is complete; this sidesteps every
+  // SPA/global-CSS × browser-paginator interaction (which produced blank PDFs).
+  const printClean = () => {
+    const sheet = document.querySelector(".sheet");
+    const w = sheet ? window.open("", "_blank") : null;
+    if (!sheet || !w) { window.print(); return; }        // popup blocked → fallback
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+<title>Hearth — Model Report</title>
+<style>
+  @page { margin: 15mm; }
+  html, body { margin: 0; background: #fff; }
+  body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .sheet { box-shadow: none !important; margin: 0 auto !important; border-radius: 0 !important; }
+  table { page-break-inside: auto; } tr { page-break-inside: avoid; }
+  /* WebKit can blank whole pages trying to honour break-inside: avoid — the
+     reliability > pagination trade: let content fragment freely. */
+  * { break-inside: auto !important; page-break-inside: auto !important;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+</style></head><body>${sheet.outerHTML}</body></html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 400);
+  };
+
   useEffect(() => {
     if (!ready || !autoPrint) return;
-    // print only after focus + two paints — window.print() from a freshly
-    // window.open()ed tab before first paint yields an empty preview
-    const t = setTimeout(() => {
-      window.focus();
-      requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
-    }, 800);
+    // give the data-dependent sections a moment to paint, then print clean;
+    // window.open here is not user-gesture-initiated, so printClean falls back
+    // to plain window.print() if the browser blocks the popup.
+    const t = setTimeout(printClean, 900);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, autoPrint]);
 
   const shown = persons.filter((p) => (!onlyPerson || p.id === onlyPerson) && byPerson[p.id]);
@@ -452,8 +479,8 @@ export default function ModelReport() {
         display: "flex", alignItems: "center", gap: 12, padding: "10px 16px",
         background: "#fff", borderBottom: `1px solid ${LINE}` }}>
         <strong style={{ color: INK }}>Model Report</strong>
-        <span style={{ fontSize: 12.5, color: DIM }}>Save as PDF to keep or share. (r2)</span>
-        <button onClick={() => window.print()} style={{ marginLeft: "auto", cursor: "pointer",
+        <span style={{ fontSize: 12.5, color: DIM }}>Save as PDF to keep or share. (r3)</span>
+        <button onClick={printClean} style={{ marginLeft: "auto", cursor: "pointer",
           background: ACCENT, color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px",
           fontSize: 13, fontWeight: 600 }}>Print / Save PDF</button>
         <button onClick={() => window.close()} style={{ cursor: "pointer", background: "transparent",
