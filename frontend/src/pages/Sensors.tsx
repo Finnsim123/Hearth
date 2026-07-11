@@ -9,6 +9,7 @@ import { Icon } from "../icons";
 import { useIsMobile } from "../useMedia";
 import { cheerBuddy } from "../components/buddyBus";
 import BubbleCloud from "../components/BubbleCloud";
+import BindingAudit from "../components/BindingAudit";
 import DeviceHierarchy from "../components/DeviceHierarchy";
 import HomeWiring from "../components/HomeWiring";
 
@@ -960,6 +961,7 @@ export default function Sensors() {
         </div>
       </div>
 
+      <BindingAudit />
       <DeviceHierarchy />
       <UnassignedSensors onAssigned={reload} />
       <HomeWiring />
