@@ -1285,12 +1285,15 @@ def build_api_router(deps: dict) -> APIRouter:
             from ..domain.onboarding.advisor import _slugify, is_bindable, suggest_role
             taken = {b.name for b in repo.bindings()}
             have = {b.entity_id for b in repo.bindings()}
+            newly: list[str] = []
+            unplaced: list[dict] = []
             for eid in node.get("entities", []):
                 e = by_id.get(eid)
                 if not e or eid in have:
                     continue
                 role = suggest_role(e)
                 if role is None or not is_bindable(eid, role):
+                    unplaced.append(e)           # heuristics can't name this one
                     continue
                 name = _slugify(eid)
                 while name in taken:
@@ -1299,13 +1302,57 @@ def build_api_router(deps: dict) -> APIRouter:
                 b = Binding(entity_id=eid, role=role, name=name, room=e.get("area"), enabled=True)
                 b.person_id = binding_owner(b, repo.persons())
                 repo.save_binding(b)
+                newly.append(eid)
                 bound += 1
+            # Entities the heuristics couldn't place (a toothbrush, an exotic
+            # BLE gadget) get the same LLM look onboarding would have given
+            # them — saying Yes to the device IS the consent. Without this,
+            # "integrate" on novel hardware added 0 sensors and did nothing.
+            llm_bound = 0
+            if unplaced and repo.get_connection("llm"):
+                try:
+                    from ..adapters.openrouter_llm import OpenRouterAdvisor
+                    for b in await OpenRouterAdvisor(repo).propose_bindings(
+                            unplaced, repo.persons()):
+                        if b.entity_id in have or b.entity_id in newly:
+                            continue
+                        while b.name in taken:
+                            b.name += "_2"
+                        taken.add(b.name)
+                        b.person_id = b.person_id or binding_owner(b, repo.persons())
+                        repo.save_binding(b)
+                        newly.append(b.entity_id)
+                        llm_bound += 1
+                        bound += 1
+                except Exception:
+                    log.exception("new-device LLM binding pass failed — "
+                                  "heuristic bindings only")
+            # scoped re-analysis + retrain over the new entities, exactly like
+            # the Sensors-page approve flow (feature architect designs their
+            # features; ensure_history absorbs the feature-set change).
+            if newly and deps.get("tsdb") is not None:
+                import asyncio
+
+                from ..domain.onboarding.integrate import integrate
+                advisor = None
+                if repo.get_connection("llm"):
+                    from ..adapters.openrouter_llm import OpenRouterAdvisor
+                    advisor = OpenRouterAdvisor(repo)
+                asyncio.create_task(integrate(
+                    repo, approved_ids=list(newly), advisor=advisor,
+                    events=events, tsdb=deps.get("tsdb"),
+                    store=deps.get("models")))
         repo.set_setting("ha.pending_nodes", [p for p in pending if p.get("id") != nid])
         clear_advisory(repo, f"newnode:{nid}")
         name = node.get("name") or nid
+        detail = f"{bound} sensor(s) added" if bound else ""
+        if decision != "skip" and bound:
+            if llm_bound:
+                detail += f" ({llm_bound} recognised by the AI)"
+            detail += " — analyzing + retraining."
         record_event(repo, "device_" + ("integrated" if decision == "integrate" else "skipped"),
                      f"{'Integrated' if decision == 'integrate' else 'Skipped'} {name}",
-                     f"{bound} sensor(s) added." if bound else "")
+                     detail)
         return {"ok": True, "decision": decision, "bound": bound, "name": name}
 
     @api.post("/hierarchy/decide")

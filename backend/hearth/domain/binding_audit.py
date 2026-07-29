@@ -38,6 +38,21 @@ _APPLIANCE = re.compile(
     r"machine|boiler|tv\b|television")
 # Sibling domains that can carry a DIRECT "the machine is doing something" signal.
 _DIRECT_DOMAINS = {"switch", "binary_sensor", "sensor", "media_player", "light"}
+# Domains that mean the device can DO something (an appliance), not just
+# measure. A device with none of these is a pure monitor — every entity on it
+# is telemetry, so it can never offer a "direct human signal" and proposing
+# one is a category error (seen live: an air monitor's fan-status binary and
+# its offline_since diagnostic suggested as fixes, after brightness was).
+_ACTUATOR_DOMAINS = {"switch", "light", "media_player", "climate", "fan",
+                     "vacuum", "lock", "cover", "humidifier", "water_heater"}
+# For sensor/binary_sensor siblings, require POSITIVE action evidence in the
+# name (power draw, running state, door/motion/presence) — absence of bad
+# words is not enough, as the brightness→fan→offline_since sequence proved.
+_ACTIONY = re.compile(
+    r"power|watt|current|amper|verbruik|running|active|bezig|in_use|"
+    r"door|deur|motion|beweg|occup|presence|aanwezig|open|button|knop")
+_DIAGNOSTIC = re.compile(
+    r"offline|online|since|uptime|rssi|signal|firmware|update|connect|link")
 
 
 def reliance_by_binding(importance: dict[str, float],
@@ -70,8 +85,11 @@ def _device_entities(repo) -> dict[str, list[str]]:
 
 def _looks_direct(entity_id: str) -> bool:
     """Could this UNBOUND entity carry the device's direct on/off/power signal?
-    Judged from the entity id alone (that's all the cache holds): domain +
-    a non-diagnostic name. suggest_role does the real call at bind time."""
+    Judged from the entity id alone (that's all the cache holds). Actuator
+    domains qualify on domain alone; sensor/binary_sensor need POSITIVE
+    action evidence in the name — a blocklist alone kept losing whack-a-mole
+    (brightness, then fan status, then offline_since, each proposed in turn
+    as an air monitor's "direct signal")."""
     from .onboarding.advisor import is_noise
     domain = entity_id.split(".")[0]
     if domain not in _DIRECT_DOMAINS:
@@ -79,14 +97,17 @@ def _looks_direct(entity_id: str) -> bool:
     if is_noise({"entity_id": entity_id, "domain": domain}):
         return False
     obj = entity_id.split(".", 1)[-1].lower()
+    if _DIAGNOSTIC.search(obj):
+        return False
+    if domain in ("switch", "media_player", "light"):
+        return True
     # ambient-metric names are exactly what we're steering AWAY from — incl.
     # light-LEVEL sensors (brightness/illuminance): a room being bright is
-    # ambient drift, not a human doing something (seen live: the audit kept
-    # proposing a *_brightness binary as the "direct" fix for an air monitor)
+    # ambient drift, not a human doing something
     if re.search(r"temp|humid|vocht|lucht|co2|pressure|druk|lux|illum|"
-                 r"bright|helder|luminance", obj):
+                 r"bright|helder|luminance|fan", obj):
         return False
-    return True
+    return bool(_ACTIONY.search(obj))
 
 
 def audit_bindings(repo, importance: dict[str, float]) -> list[dict]:
@@ -124,10 +145,19 @@ def audit_bindings(repo, importance: dict[str, float]) -> list[dict]:
         did = ent_dev.get(b.entity_id)
         dev = catalog.get(did) if did else None
         dev_label = (dev or {}).get("name") or (dev or {}).get("model")
-        siblings = [e for e in dev_ents.get(did, []) if did
-                    and e != b.entity_id and e not in bound_eids and _looks_direct(e)]
         appliancey = bool(_APPLIANCE.search(
             f"{b.entity_id} {b.name} {dev_label or ''}".lower()))
+        # pure monitors (air quality stations, weather sensors, phones-as-
+        # telemetry): no actuator domain anywhere on the device and no
+        # appliance-ish name — EVERYTHING on it is telemetry, so there is no
+        # direct signal to propose and modest reliance on it is legitimate
+        # occupancy seasoning, not a smell. No finding at all.
+        has_actuator = any(e.split(".")[0] in _ACTUATOR_DOMAINS
+                           for e in dev_ents.get(did, []))
+        if not has_actuator and not appliancey:
+            continue
+        siblings = [e for e in dev_ents.get(did, []) if did
+                    and e != b.entity_id and e not in bound_eids and _looks_direct(e)]
         if siblings:
             findings.append({
                 "kind": "bind_sibling", "binding_id": b.id, "binding_name": b.name,

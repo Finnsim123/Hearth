@@ -49,13 +49,24 @@ def test_one_card_per_device_with_combined_reliance():
     assert f["candidates"] == ["switch.air_monitor_power"]
 
 
-def test_brightness_binaries_are_not_direct_signals():
+def test_telemetry_names_are_not_direct_signals():
+    # the live whack-a-mole sequence: brightness, then fan status, then a
+    # diagnostic — none is a human doing something
     assert not _looks_direct("binary_sensor.nieuwendijk_brightness")
     assert not _looks_direct("sensor.room_illuminance")
+    assert not _looks_direct("binary_sensor.nieuwendijk_fan")
+    assert not _looks_direct("sensor.alexs_air_quality_sensor_offline_since")
+    assert not _looks_direct("sensor.iphone_battery_level")   # no action evidence
     assert _looks_direct("switch.coffee_machine_power")
-    # a device whose only sibling is a brightness binary -> no bind_sibling card
-    repo = _setup(extra_entities=["binary_sensor.nieuwendijk_brightness"])
-    assert all(f["kind"] != "bind_sibling" for f in audit_bindings(repo, IMP))
+    assert _looks_direct("binary_sensor.front_door_open")     # positive evidence
+
+
+def test_pure_monitor_devices_raise_no_findings_at_all():
+    # air monitor: sensors + a fan-status binary + a diagnostic, NO actuator
+    # domain, not appliance-named -> modest reliance is fine, zero cards
+    repo = _setup(extra_entities=["binary_sensor.nieuwendijk_fan",
+                                  "sensor.alexs_air_quality_sensor_offline_since"])
+    assert audit_bindings(repo, IMP) == []
 
 
 def test_disabled_binding_blocks_reproposal():
