@@ -19,6 +19,7 @@ champion/challenger prune trial verified by the promotion gate.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -28,6 +29,69 @@ log = logging.getLogger(__name__)
 MIN_VAL_ROWS = 20      # below this, permutation estimates are noise — fall back
 N_REPEATS = 2          # shuffles per column (mean taken); 2 keeps a 600-col
                        # matrix in the tens of seconds on a small val slice
+
+# ── the noise gate: strikes across retrains (stability selection) ────────────
+# One bad week can't condemn a good sensor: a feature only becomes an
+# "uninformative" candidate after repeatedly failing to beat shuffling on
+# held-out data. Rounds are recorded at most every STRIKE_MIN_GAP_DAYS so daily
+# retrains (whose val windows overlap) don't count the same evidence twice.
+STRIKE_EPS = 1e-6            # importance ≤ this = "shuffling didn't hurt" = noise
+STRIKE_ROUNDS_KEPT = 4       # rolling window of independent-ish rounds
+STRIKES_TO_CANDIDATE = 3     # flagged in ≥3 of the last 4 rounds → candidate
+STRIKE_MIN_GAP_DAYS = 3      # min days between rounds (val window must move)
+
+
+def _strike_key(person_id: str, node: str) -> str:
+    return f"selection.strikes.{person_id}.{node}"
+
+
+def record_strike_round(repo, person_id: str, node: str,
+                        imp: dict[str, float], now: datetime | None = None) -> bool:
+    """Record one strike round from a train's held-out permutation importances.
+    Only call with PERMUTATION importances (the impurity fallback is the biased
+    ruler — it must never issue strikes). Returns True if a round was recorded,
+    False when skipped (too soon after the previous round)."""
+    from ..features.pipeline import TEMPORAL_COLS
+    now = now or datetime.now(timezone.utc)
+    key = _strike_key(person_id, node)
+    data = repo.get_setting(key) or {}
+    rounds = data.get("rounds") or []
+    if rounds:
+        try:
+            last = datetime.fromisoformat(rounds[-1]["at"])
+            if now - last < timedelta(days=STRIKE_MIN_GAP_DAYS):
+                return False               # overlapping val window — same evidence
+        except (KeyError, ValueError):
+            pass
+    scored = {c: v for c, v in imp.items() if c not in TEMPORAL_COLS}
+    if not scored:
+        return False
+    rounds.append({
+        "at": now.isoformat(),
+        "flagged": sorted(c for c, v in scored.items() if v <= STRIKE_EPS),
+        "seen": sorted(scored),
+    })
+    repo.set_setting(key, {"rounds": rounds[-STRIKE_ROUNDS_KEPT:]})
+    return True
+
+
+def strike_candidates(repo, person_id: str, node: str = "root") -> list[str]:
+    """Features flagged uninformative in ≥ STRIKES_TO_CANDIDATE of the last
+    STRIKE_ROUNDS_KEPT rounds — and SEEN (scored) in at least that many rounds,
+    so a newly-added feature can't be condemned on thin evidence."""
+    data = repo.get_setting(_strike_key(person_id, node)) or {}
+    rounds = data.get("rounds") or []
+    if len(rounds) < STRIKES_TO_CANDIDATE:
+        return []
+    flags: dict[str, int] = {}
+    seen: dict[str, int] = {}
+    for r in rounds:
+        for c in r.get("seen", []):
+            seen[c] = seen.get(c, 0) + 1
+        for c in r.get("flagged", []):
+            flags[c] = flags.get(c, 0) + 1
+    return sorted(c for c, n in flags.items()
+                  if n >= STRIKES_TO_CANDIDATE and seen.get(c, 0) >= STRIKES_TO_CANDIDATE)
 
 
 def holdout_permutation_importance(est, X_val: pd.DataFrame, y_val: pd.Series,

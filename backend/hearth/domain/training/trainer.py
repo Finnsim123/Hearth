@@ -321,10 +321,17 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
     # coffee-machine thermometer ends up "important". Falls back to impurity on
     # a too-small val slice; the method is recorded so downstream (binding audit,
     # evidence profile, UI) knows what it's reading.
-    from .selection import holdout_permutation_importance
+    from .selection import holdout_permutation_importance, record_strike_round
     imp = holdout_permutation_importance(est, X_val, y_val)
     if imp:
         metrics["importance_method"] = "permutation_holdout"
+        try:
+            # the noise gate's ledger: features that failed to beat shuffling
+            # collect a strike (rate-limited so overlapping val windows from
+            # daily retrains don't count the same evidence twice)
+            record_strike_round(repo, person_id, node, imp, now=end)
+        except Exception:
+            log.debug("strike recording failed", exc_info=True)
     else:
         imp = est.importances()            # glass-box; {} for estimators without
         metrics["importance_method"] = "impurity"
