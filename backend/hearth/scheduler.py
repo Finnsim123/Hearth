@@ -166,6 +166,23 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
             elif ok:
                 clear_issue(repo, "training_failed")
                 _audit_bindings()       # fresh models → immediately re-audit
+                _selection_trials()     # …and let selection act on the strikes
+
+        def _selection_trials() -> None:
+            # the acting half of feature selection: prune features with enough
+            # strikes (challenger must pass the gate) / audition old drops back in
+            from .domain.training.selection import run_selection_trial
+            for person in repo.persons():
+                if not person.enabled:
+                    continue
+                try:
+                    res = run_selection_trial(person.id, tsdb, repo)
+                    if res.get("adopted"):
+                        log.info("selection trial (%s): %s adopted — %s",
+                                 person.id, res.get("mode"),
+                                 res.get("dropped") or res.get("readmitted"))
+                except Exception:
+                    log.exception("selection trial failed for %s", person.id)
 
         scheduler.add_job(_train_all, "cron", hour=3,
                           id="adaptive_training", max_instances=1)

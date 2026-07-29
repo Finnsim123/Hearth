@@ -164,6 +164,19 @@ def train_person(person_id: str, tsdb, repo, store,
             except Exception:
                 pass
 
+    # features soft-dropped by the selection trial (selection.py): proven
+    # uninformative on held-out data across multiple retrains, and the pruned
+    # set passed the champion/challenger gate. Matrix-only; discovery still
+    # sees them; the comeback audition can re-admit them.
+    from .selection import dropped_features
+    sel_drop = [c for c in feats.columns if c in set(dropped_features(repo, person_id))]
+    if sel_drop:
+        feats = feats.drop(columns=sel_drop)
+        try:
+            excluded = set(excluded) | set(sel_drop)
+        except Exception:
+            pass
+
     default_activity = repo.get_setting("default_activity", "home") or "home"
     bootstrap = bootstrap_labels(repo.rules(), feats, person_id, default_activity)
     events = tsdb.read_labels(person_id, start, end)

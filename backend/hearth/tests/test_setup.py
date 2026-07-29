@@ -299,9 +299,12 @@ def test_api_token_bearer_scope(client):
     assert r.status_code in (200, 404)
     # …but NOT without it (was anonymous before this change)
     assert fresh.post("/api/feedback/action", json={"action": "HEARTH_1_0"}).status_code == 401
-    # …and out-of-scope endpoints are refused
-    assert fresh.get("/api/models", headers=bearer).status_code == 403
+    # the assistant/MCP read surface is bearer-readable (scopes.py BEARER_READ)
+    assert fresh.get("/api/models", headers=bearer).status_code == 200
+    # …but out-of-scope endpoints are refused
+    assert fresh.get("/api/tokens", headers=bearer).status_code == 403
     assert fresh.post("/api/tokens", headers=bearer, json={}).status_code == 403
+    assert fresh.post("/api/models/rollback", headers=bearer, json={}).status_code == 403
     # readable path is NOT writable: POST /api/persons must be denied (method-aware)
     assert fresh.post("/api/persons", headers=bearer, json={"name": "Mallory"}).status_code == 403
     # bad token refused
