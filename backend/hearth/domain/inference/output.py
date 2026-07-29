@@ -46,9 +46,18 @@ def load_output_policy(repo) -> OutputPolicy:
         return OutputPolicy()
 
 
-def apply_abstain(state: str, confidence: float, pol: OutputPolicy) -> str:
-    """Return UNKNOWN when abstaining is enabled and confidence is below the
-    threshold; otherwise the state unchanged. Applied to the PUBLISHED state."""
-    if pol.abstain_enabled and confidence < pol.abstain_threshold:
+def apply_abstain(state: str, confidence: float, pol: OutputPolicy,
+                  pred_set: list | None = None) -> str:
+    """Return UNKNOWN when abstaining is enabled and either (a) the conformal
+    prediction set is EMPTY — at the calibrated level this window doesn't look
+    like ANY known activity, the principled novelty signal — or (b) confidence
+    is below the plain threshold. pred_set=None (no calibration yet, rules
+    fallback, realtime path) keeps the original threshold-only behaviour.
+    Applied to the PUBLISHED state; raw prediction stays visible either way."""
+    if not pol.abstain_enabled:
+        return state
+    if pred_set is not None and len(pred_set) == 0:
+        return UNKNOWN
+    if confidence < pol.abstain_threshold:
         return UNKNOWN
     return state

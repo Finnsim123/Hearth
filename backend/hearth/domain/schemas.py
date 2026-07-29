@@ -224,6 +224,9 @@ class Prediction(BaseModel):
     probabilities: dict[str, float]
     explanation: list[tuple[str, float]] = Field(default_factory=list)  # (feature, shap)
     evidence: float | None = None  # direct-tier SHAP share (features/evidence.py)
+    pred_set: list[str] = Field(default_factory=list)  # conformal set (most-likely
+                               # first): 1 = commit, 2+ = honest ambiguity,
+                               # [] = looks like nothing known (abstain signal)
     parent: str | None = None  # coarse state when predicted is a fine activity
                                # ("home" + "eating" are simultaneously true)
     coarse_confidence: float | None = None  # root model's confidence in parent

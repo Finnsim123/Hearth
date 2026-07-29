@@ -356,6 +356,13 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
     metrics["feature_count"] = int(X_train.shape[1])
     metrics["validation_status"] = validation_status(
         metrics.get("n_confirmed", 0), cfg.min_confirmed_for_validated)
+    # conformal calibration on the SAME pooled OOS rows (conformal.py): the
+    # per-node q̂ ships inside the record's metrics, so promotion/rollback
+    # automatically carries the right threshold with the right model.
+    from ..inference.conformal import calibrate_from_pooled
+    conf = calibrate_from_pooled(probs_p, y_p, prov_p, gold_p)
+    if conf:
+        metrics["conformal"] = conf
     train_acc = float((est.predict_proba(X_train).idxmax(axis=1) == y_train).mean())
     metrics["accuracy_train"] = round(train_acc, 4)
     metrics["hyperparams"] = params

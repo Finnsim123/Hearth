@@ -418,6 +418,11 @@ from(bucket: "{FEAT_BUCKET}")
             p = p.field("explanation", _json.dumps(pred.explanation[:3]))
         if pred.coarse_confidence is not None:
             p = p.field("coarse_confidence", float(pred.coarse_confidence))
+        if pred.pred_set and pred.pred_set != [pred.predicted]:
+            # only when the conformal set carries information beyond the argmax
+            # (ambiguous 2+ set, or the empty novelty set)
+            import json as _json
+            p = p.field("pred_set", _json.dumps(pred.pred_set))
         for cls, prob in pred.probabilities.items():
             p = p.field(f"prob_{cls}", float(prob))
         self.write_api.write(bucket=ML_BUCKET, record=p)
@@ -503,6 +508,9 @@ from(bucket: "{ML_BUCKET}")
                 "explanation": (json.loads(r["explanation"])
                                 if "explanation" in df.columns
                                 and pd.notna(r.get("explanation")) else []),
+                "pred_set": (json.loads(r["pred_set"])
+                             if "pred_set" in df.columns
+                             and pd.notna(r.get("pred_set")) else None),
             })
         return out
 

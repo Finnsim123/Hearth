@@ -81,6 +81,9 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
 
     promoted = [m for m in repo.models(person_id) if m.promoted]
     record = next((m for m in promoted if m.node == "root"), None)
+    # per-node conformal thresholds ride inside each record's metrics, so the
+    # threshold always matches the model that produced the probabilities
+    conformals = {m.node: (m.metrics or {}).get("conformal") for m in promoted}
     # hierarchy (LCPN): one fine classifier per coarse state that has one
     child_probs: dict[str, pd.DataFrame] = {}
     child_explains: dict[str, pd.DataFrame] = {}
@@ -192,12 +195,14 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         confidence = float(row.max())
         parent = None
         coarse_confidence = None
+        node_used = "root"                    # which node's probs get published
         active_explains = explains            # which model explains THIS window
         if predicted in child_probs:
             # top-down: the root said e.g. "home"; the home-node classifier
             # now picks among home's children (or "just home" = parent slug).
             # "home" and "eating" are simultaneously true — that's the point.
             node_key = predicted             # child_explains is keyed by the NODE
+            node_used = node_key
             fine_row = child_probs[node_key].loc[ts]
             fine = str(fine_row.idxmax())
             coarse_confidence = confidence
@@ -229,14 +234,22 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                          "%.2f capped to %.2f", person_id, evidence * 100,
                          confidence, WEAK_CONFIDENCE_CAP)
                 confidence = WEAK_CONFIDENCE_CAP
+        probabilities = {c: float(v) for c, v in row.items()}
+        # conformal set from the published node's calibrated threshold:
+        # 1 = commit, 2+ = honest ambiguity, [] = novelty (drives abstain)
+        from .conformal import prediction_set
+        pset = None
+        if version != RULES_VERSION:
+            pset = prediction_set(probabilities, conformals.get(node_used))
         smoothed = _apply_smoothing(history, predicted, confidence)
-        smoothed = apply_abstain(smoothed, confidence, out_pol)
+        smoothed = apply_abstain(smoothed, confidence, out_pol, pred_set=pset)
         pred = Prediction(person_id=person_id, window_ts=ts.to_pydatetime(),
                           model_version=version, predicted=predicted,
                           smoothed=smoothed, confidence=confidence,
-                          probabilities={c: float(v) for c, v in row.items()},
+                          probabilities=probabilities,
                           explanation=explanation, evidence=evidence,
-                          parent=parent, coarse_confidence=coarse_confidence)
+                          parent=parent, coarse_confidence=coarse_confidence,
+                          pred_set=pset if pset is not None else [predicted])
         if override:                       # manual override pins the published state
             pred = override_prediction(pred, override)
             if label_override:             # …and teaches the model while it's fresh
