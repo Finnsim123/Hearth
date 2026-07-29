@@ -315,7 +315,19 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
             metrics["flat_baseline"] = bl      # hierarchy must beat this (F3)
     if excluded:
         metrics["excluded_features"] = sorted(excluded)
-    imp = est.importances()                # glass-box; {} for estimators without
+    # Importance = HELD-OUT permutation importance (what actually helps on data
+    # the model never saw), not impurity — Gini importance is biased toward
+    # continuous/high-cardinality features (Strobl 2007), which is exactly how a
+    # coffee-machine thermometer ends up "important". Falls back to impurity on
+    # a too-small val slice; the method is recorded so downstream (binding audit,
+    # evidence profile, UI) knows what it's reading.
+    from .selection import holdout_permutation_importance
+    imp = holdout_permutation_importance(est, X_val, y_val)
+    if imp:
+        metrics["importance_method"] = "permutation_holdout"
+    else:
+        imp = est.importances()            # glass-box; {} for estimators without
+        metrics["importance_method"] = "impurity"
     if imp:
         ranked = sorted(imp.items(), key=lambda kv: -kv[1])
         metrics["feature_importances"] = {c: round(float(v), 4) for c, v in ranked[:15]}
