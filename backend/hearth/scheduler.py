@@ -233,6 +233,20 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
         scheduler.add_job(_audit_bindings, "interval", hours=24,
                           id="binding_audit", max_instances=1, coalesce=True)
 
+        async def _confirm_yesterday() -> None:
+            # morning label harvest: segment yesterday's predictions into runs,
+            # ask about the flappy/uncertain ones + ONE random gold probe —
+            # batched into the Inbox with a single summary push, so the label
+            # supply grows without spending the live asking budget.
+            from .domain.labeling.harvest import run_harvest
+            try:
+                await run_harvest(repo, tsdb, deps.get("notifier"))
+            except Exception:
+                log.exception("confirm-yesterday harvest failed")
+
+        scheduler.add_job(_confirm_yesterday, "cron", hour=8, minute=15,
+                          id="label_harvest", max_instances=1)
+
         def _drift_check() -> None:
             from .domain.training.drift import run_drift_check
             try:

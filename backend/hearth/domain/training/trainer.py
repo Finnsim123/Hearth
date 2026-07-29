@@ -305,13 +305,22 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
     params = (_hyperparams(repo, f"{person_id}.{node}", fset, X_train, y_train, force, cfg)
               if cfg.model_family == "random_forest" else {})
 
+    # confident-learning suspects from the PREVIOUS train: their weight drops
+    # to SUSPECT_WEIGHT (never zero — a wrong flag mustn't erase a right label).
+    # Read-before-fit / write-after-eval keeps the loop non-circular: this
+    # fit's own flags only affect the NEXT train.
+    from .label_quality import confident_flags, suspect_multipliers, update_suspects
+    w_suspect = suspect_multipliers(repo, person_id, feats.index)
+
     def _fit_fold(tm):
         e = make_estimator(cfg.model_family, **params)
         Xt, yt = feats[tm], labels[tm]
         if e.supports_sample_weight:
+            import numpy as np
             age_days = (end - Xt.index).total_seconds() / 86400
-            w = 0.5 ** (age_days / cfg.recency_half_life_days)
-            e.fit(Xt, yt, sample_weight=w.to_numpy())
+            w = np.asarray(0.5 ** (age_days / cfg.recency_half_life_days), dtype=float)
+            w = w * w_suspect.reindex(Xt.index).fillna(1.0).to_numpy()
+            e.fit(Xt, yt, sample_weight=w)
         else:
             e.fit(Xt, yt)
         return e
@@ -347,6 +356,21 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
                     est.predict_proba(X_chk), y_chk)
             est.calibrate(X_val, y_val)        # refit on full val for deployment
             metrics["calibrated"] = True
+    # confident-learning pass (Northcutt 2021) on the SAME pooled OOS probs the
+    # metrics used: flag windows the CV models confidently place in a different
+    # class than their label claims. Flags act next train (down-weight); human
+    # labels among them additionally queue a morning-recap re-ask.
+    try:
+        cl_flags = confident_flags(probs_p, y_p)
+        update_suspects(repo, person_id, node, cl_flags, prov_p)
+        if cl_flags:
+            metrics["label_suspects"] = len(cl_flags)
+            log.info("[%s] %s-node: %d suspect label(s) flagged (worst: %s@%s)",
+                     person_id, node, len(cl_flags),
+                     cl_flags[0]["given"], cl_flags[0]["ts"])
+    except Exception:
+        log.debug("label-quality pass failed", exc_info=True)
+
     if baseline_labels is not None:
         bl = _flat_baseline_metrics(feats, baseline_labels, provenance, gold,
                                     folds, end, cfg)

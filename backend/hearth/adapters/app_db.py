@@ -580,6 +580,16 @@ class AppDb:
                           .order_by(QuestionRow.created_at.desc())).first()
             return self._question(r) if r is not None else None
 
+    def question_windows_since(self, person: str, since: datetime) -> set[datetime]:
+        """window_ts of every question (any status) asked since `since` — the
+        confirm-yesterday harvester uses this to never re-ask a window the live
+        policy already covered."""
+        with Session(self.engine) as s:
+            rows = s.scalars(select(QuestionRow.window_ts).where(
+                QuestionRow.person_id == person,
+                QuestionRow.window_ts >= since)).all()
+            return {t if t.tzinfo else t.replace(tzinfo=timezone.utc) for t in rows}
+
     def skip_question(self, question_id: int) -> None:
         with Session(self.engine) as s:
             r = s.get(QuestionRow, question_id)
