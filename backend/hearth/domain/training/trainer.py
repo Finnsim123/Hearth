@@ -312,6 +312,18 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
     from .label_quality import confident_flags, suspect_multipliers, update_suspects
     w_suspect = suspect_multipliers(repo, person_id, feats.index)
 
+    # live champion for this node: positive-congruent anchor at fit time and
+    # the churn measure after (churn.py). Load failure just switches both off.
+    from .churn import churn_allows, churn_metrics, pct_weights
+    current = next((m for m in repo.models(person_id)
+                    if m.promoted and m.node == node), None)
+    champ_est = None
+    if current is not None:
+        try:
+            champ_est = store.load(current)
+        except Exception:
+            log.debug("champion load failed — PCT/churn off", exc_info=True)
+
     def _fit_fold(tm):
         e = make_estimator(cfg.model_family, **params)
         Xt, yt = feats[tm], labels[tm]
@@ -320,6 +332,9 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
             age_days = (end - Xt.index).total_seconds() / 86400
             w = np.asarray(0.5 ** (age_days / cfg.recency_half_life_days), dtype=float)
             w = w * w_suspect.reindex(Xt.index).fillna(1.0).to_numpy()
+            if champ_est is not None:
+                # PCT (Yan 2021): don't regress on what the live model gets right
+                w = w * pct_weights(champ_est, Xt, yt)
             e.fit(Xt, yt, sample_weight=w)
         else:
             e.fit(Xt, yt)
@@ -408,6 +423,22 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
         from ..features.evidence import evidence_profile
         metrics["evidence_profile"] = evidence_profile(imp, repo.bindings())
 
+    # churn vs the live model on the NEWEST val block: how much of the visible
+    # timeline this challenger would rewrite. The veto (churn.py) only bites
+    # when the rewrite is big AND the challenger isn't decisively better.
+    if champ_est is not None and current is not None:
+        try:
+            vm = folds[-1][1]
+            cm = churn_metrics(champ_est, est, feats[vm], labels[vm])
+            if cm:
+                metrics["churn"] = cm
+                allowed, why = churn_allows(metrics, current.metrics,
+                                            wilson_interval)
+                if not allowed:
+                    cm["veto"] = why
+        except Exception:
+            log.debug("churn measure failed", exc_info=True)
+
     stem = person_id if node == "root" else f"{person_id}-{node}"
     n_prior = len([m for m in repo.models(person_id) if m.node == node])
     version = f"{stem}-v{n_prior + 1}"
@@ -417,15 +448,16 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
     record.path = store.save(est, record)
     record = repo.save_model(record)
 
-    current = next((m for m in repo.models(person_id)
-                    if m.promoted and m.node == node), None)
-    if force or promotion_gate(record, current, cfg.promotion_margin):
+    veto = (metrics.get("churn") or {}).get("veto")
+    if force or (promotion_gate(record, current, cfg.promotion_margin)
+                 and not veto):
         repo.promote_model(record.id)
         record.promoted = True
         log.info("[%s] %s promoted (confirmed acc: %s)", person_id, version,
                  metrics.get("accuracy_confirmed"))
     else:
-        log.info("[%s] %s NOT promoted — gate failed", person_id, version)
+        log.info("[%s] %s NOT promoted — %s", person_id, version,
+                 veto or "gate failed")
     return record
 
 
@@ -482,6 +514,7 @@ def promotion_explain(new: ModelRecord, current: ModelRecord | None,
     if current is None:
         return {"promoted": True, "basis": "first",
                 "reason": "First model for this person — promoted by default."}
+    veto = (new.metrics.get("churn") or {}).get("veto")
     for key, n_key, lbl in (("accuracy_gold", "n_gold", "real-world"),
                             ("accuracy_confirmed", "n_confirmed", "confirmed")):
         n_new, n_cur = new.metrics.get(n_key, 0), current.metrics.get(n_key, 0)
@@ -489,11 +522,17 @@ def promotion_explain(new: ModelRecord, current: ModelRecord | None,
             new_lo, _ = wilson_interval(round(new.metrics[key] * n_new), n_new)
             cur_lo, _ = wilson_interval(round(current.metrics[key] * n_cur), n_cur)
             ok = new_lo >= cur_lo - margin
+            if ok and veto:
+                return {"promoted": False, "basis": "churn",
+                        "reason": f"Accuracy holds, but it {veto}."}
             return {"promoted": ok, "basis": lbl,
                     "reason": f"{lbl} accuracy CI lower bound {new_lo:.0%} "
                               f"{'≥' if ok else '<'} live {cur_lo:.0%} − margin {margin:.0%}"}
     a, b = new.metrics.get("accuracy_bootstrap"), current.metrics.get("accuracy_bootstrap")
     ok = a is None or b is None or a >= b - margin
+    if ok and veto:
+        return {"promoted": False, "basis": "churn",
+                "reason": f"Bootstrap agreement holds, but it {veto}."}
     return {"promoted": ok, "basis": "bootstrap",
             "reason": "Compared on bootstrap agreement (no confirmed labels yet) — "
                       f"{a if a is not None else '—'} vs live {b if b is not None else '—'}."}
