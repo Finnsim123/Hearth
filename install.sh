@@ -47,7 +47,9 @@ PLIST
 install_updater() {
   mkdir -p .hearth-shared
   local os script; os="$(hearth_os)"; script="$(pwd)/deploy/hearth-updater.sh"
-  if [[ "$os" == "linux" && -d /etc/cron.d ]] && command -v crontab >/dev/null; then
+  if [[ "$os" == "linux" && -d /etc/cron.d && -w /etc/cron.d ]] && command -v crontab >/dev/null; then
+    # -w guard: non-root the redirect would fail and set -e would abort the
+    # whole install before deploy; non-root falls through to the user crontab.
     echo "* * * * * root bash $script" > /etc/cron.d/hearth-updater
     chmod 644 /etc/cron.d/hearth-updater
     echo -e "${OK}✓${NC} in-app updates enabled (host updater cron installed)"
@@ -77,6 +79,7 @@ command -v docker >/dev/null || { echo "Docker is required: curl -fsSL https://g
 # ── .env: create with a generated secret if missing ─────────────────────────
 if [[ ! -f .env ]]; then
   cp .env.example .env
+  chmod 600 .env   # holds HEARTH_SECRET + the Influx admin token — owner-only
   SECRET="$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 40)"
   TOKEN="$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 40)"
   PASS="$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 20)"

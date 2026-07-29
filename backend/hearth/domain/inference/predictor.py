@@ -180,7 +180,8 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
             # top-down: the root said e.g. "home"; the home-node classifier
             # now picks among home's children (or "just home" = parent slug).
             # "home" and "eating" are simultaneously true — that's the point.
-            fine_row = child_probs[predicted].loc[ts]
+            node_key = predicted             # child_explains is keyed by the NODE
+            fine_row = child_probs[node_key].loc[ts]
             fine = str(fine_row.idxmax())
             coarse_confidence = confidence
             if fine != predicted:
@@ -188,7 +189,10 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                 predicted = fine
             confidence = float(fine_row.max())
             row = fine_row                  # alternatives/asking use siblings
-            active_explains = child_explains.get(predicted, explains)
+            # NB: look up by the node key, NOT the (possibly reassigned) fine
+            # label — otherwise the child's explanation is lost exactly when the
+            # child model changed the answer, the one case that matters.
+            active_explains = child_explains.get(node_key, explains)
         explanation: list[tuple[str, float]] = []
         evidence = None
         if version == RULES_VERSION:

@@ -18,7 +18,7 @@ defect.
 | Secret | Created | Stored | Form at rest | Touched by |
 |---|---|---|---|---|
 | `HEARTH_SECRET` | user, in `.env` | docker env only | plaintext env (root key) | `security.py` only |
-| Account passwords | first-boot wizard / Settings → Users | SQLite `users.password_hash` | **argon2id** (no plaintext, ever) | `security.py` |
+| Account passwords | first-boot wizard / Settings (change password) | SQLite `users.password_hash` | **argon2id** (no plaintext, ever) | `security.py` |
 | Browser sessions | login | HTTP-only cookie + SQLite `sessions` | random 256-bit id, **SHA-256 hash** in DB; cookie `Secure` (when TLS), `HttpOnly`, `SameSite=Lax` | `security.py` + auth middleware |
 | Hearth API tokens (HA integration etc.) | Settings → API tokens | SQLite `api_tokens.token_hash` | **SHA-256 hash**, shown once at mint, scoped, revocable | `security.py` |
 | Third-party tokens (HA, MQTT, InfluxDB, LLM) | wizard / Settings → Connections | SQLite `connections.token_encrypted` | **Fernet** (AES-128-CBC+HMAC), key derived from `HEARTH_SECRET` via HKDF | `security.py`; decrypted only inside the adapter that needs it, at call time |
@@ -30,17 +30,23 @@ values have `__repr__` redaction; tokens are masked `hrt_****…` in UI and logs
 
 ## Accounts
 
-- First boot: zero users → every route except `/api/auth/setup` and static
-  assets redirects to the create-admin screen. Setup is disabled forever after
-  the first user exists.
+- First boot: zero users → the API is closed except health/login/reset and the
+  wizard's setup surface (`/api/setup/complete` plus its probe endpoints —
+  `/api/ha/test`, `/api/ha/inventory`, `/api/influx/inspect`, `/api/tokens`,
+  triage/estimate previews). Those setup endpoints close the moment the first
+  user exists.
 - Passwords: argon2id with library defaults (memory-hard), per-hash salt,
   transparent rehash-on-login when parameters improve. Minimum length 10;
   no composition rules (NIST 800-63B).
-- Roles: `admin` (everything) and `member` (dashboard, inbox, own settings).
-  Household members can get their own login for inbox labeling — labels then
-  record *who* confirmed.
-- Sessions: server-side rows (revocable in Settings → Users), 30-day idle
-  expiry, rotation on login. Logout = row deletion, not just cookie clearing.
+- Roles: a `role` column (`admin`/`member`) exists on users and is returned by
+  `/api/auth/me`, but **no endpoint enforces it yet** — any logged-in user can
+  do anything. Role enforcement is post-v1 (see the last section); today the
+  role's value is that labels record *who* confirmed them.
+- Sessions: server-side rows with a fixed 30-day lifetime from creation (not a
+  sliding idle window). Each login mints a fresh session id; logout deletes the
+  row, not just the cookie. There is **no session-management UI** — revoking
+  someone else's session means deleting their `sessions` row in SQLite (or
+  changing the password via recovery, which revokes all sessions).
 - Login throttling: after 5 consecutive failures, per-account exponential
   backoff (capped 15 min) stored on the user row — refused *before* argon2 runs,
   so it also blunts the unauth CPU-flood lever. A success clears the counters.
@@ -54,12 +60,19 @@ values have `__repr__` redaction; tokens are masked `hrt_****…` in UI and logs
 
 - SPA: session cookie.
 - HA integration / external consumers: `Authorization: Bearer hrt_<token>`
-  checked against `api_tokens` by hash; scope `integration` grants
-  read-predictions + write-overrides + WS subscribe, nothing else. `readonly`
-  grants GETs only. Tokens carry no expiry by default but show last-used and
-  are one-click revocable.
+  checked against `api_tokens` by hash. `readonly` grants the read surface
+  (predictions, models, health, patterns…); `integration` grants the same reads
+  plus a narrow write set (feedback actions, train, inbox answers, cluster
+  naming, person pause/resume). The allow-lists live in `api/scopes.py`;
+  destructive endpoints (token mint, rollback, forget) are deliberately
+  unreachable by bearer token — session only. Tokens carry no expiry by default
+  but show last-used and are one-click revocable in Settings → API tokens.
 - The feedback webhook (`/api/feedback/action`) requires a scoped token too —
   shipped HA blueprint includes it in the rest_command.
+- Tokens minted during setup (the wizard's HA-integration step uses the open
+  `/api/tokens` endpoint) **remain valid after setup completes** — that's how
+  the integration keeps working. If you aborted a setup halfway, check
+  Settings → API tokens and revoke anything you don't recognise.
 
 ## Transport & deployment
 
@@ -144,10 +157,20 @@ Residual items that are deployment/ops concerns, not code holes:
   (pickle deserialization can execute code). The stored path is server-generated.
 - **`/data` permissions** follow the container umask; keep the volume off shared
   hosts — it holds the sqlite DB (hashes + Fernet ciphertexts) and model files.
+- **InfluxDB port 8086 is published to the LAN** by the default compose file
+  (so you can reach the Influx UI for backups/inspection). Anyone on the LAN
+  with the admin token in `.env` has full DB access. If only Hearth uses it,
+  delete the `ports:` mapping on the `influxdb` service — the containers talk
+  over the compose network regardless.
+- **The self-updater executes whatever `git pull` delivers.** The update path
+  (cron/launchd → `hearth-updater.sh` → `docker compose up --build`) trusts the
+  git remote; whoever can push to your configured remote/branch can run code on
+  the box. Pin the remote to a repo you control and protect its main branch.
 
 ## What we deliberately don't do (v1)
 
-OAuth/OIDC SSO, per-entity ACLs — homelab scope, tracked as post-v1 ideas.
-(TOTP 2FA *is* implemented — see the section above.) The architecture doesn't
-preclude the rest: auth is middleware + `security.py`, swappable without touching
-domain code.
+OAuth/OIDC SSO, per-entity ACLs, **role enforcement** (the `admin`/`member`
+distinction is stored but not checked), and a **session-management UI** — homelab
+scope, tracked as post-v1 ideas. (TOTP 2FA *is* implemented — see the section
+above.) The architecture doesn't preclude the rest: auth is middleware +
+`security.py`, swappable without touching domain code.

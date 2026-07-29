@@ -65,6 +65,72 @@ def population_stability_index(expected: pd.Series, actual: pd.Series, bins: int
     return float(np.sum((a - e) * np.log(a / e)))
 
 
+# ── blocked rolling-origin CV (Bergmeir & Benítez) ───────────────────────────
+# A single 7-day holdout is a tiny, high-variance sample — and every automated
+# decision (promotion gate, cadence, strikes, prune trials) keys off it. Blocked
+# rolling-origin folds use MORE of the data as out-of-sample evidence while
+# respecting time order: fold i trains on everything before its val block and
+# predicts the block after. Decision metrics pool the out-of-sample predictions
+# across folds (k/n stays meaningful for Wilson bounds); the SHIPPED model and
+# its calibration still come from the most recent fold only.
+from datetime import timedelta as _timedelta
+
+
+def rolling_origin_folds(index, end, val_days: int, n_folds: int = 3,
+                         min_train: int = 10, min_val: int = 5) -> list:
+    """[(train_mask, val_mask), …] oldest fold first; the LAST fold is today's
+    split (val = the most recent val_days). Folds that would leave too little
+    train or val data are dropped — a young install naturally gets 1 fold."""
+    folds = []
+    for i in range(n_folds, 0, -1):
+        val_end = end - _timedelta(days=(i - 1) * val_days)
+        val_start = val_end - _timedelta(days=val_days)
+        tm = index < val_start
+        vm = (index >= val_start) & (index < val_end)
+        if tm.sum() >= min_train and vm.sum() >= min_val:
+            folds.append((tm, vm))
+    return folds
+
+
+class PrefitProba:
+    """Adapter: pooled out-of-sample probabilities behaving like an estimator,
+    so evaluate_model can score CV-pooled predictions unchanged."""
+
+    def __init__(self, probs: pd.DataFrame) -> None:
+        self._p = probs
+        self.classes_ = list(probs.columns)
+
+    def predict_proba(self, X) -> pd.DataFrame:
+        return self._p.loc[X.index]
+
+
+def pooled_oos_predictions(fit_fn, feats, labels, provenance, gold, folds):
+    """Fit per fold (fit_fn(train_mask) → estimator), predict each fold's val
+    block, pool. Returns (probs, y, prov, gold, final_est) where final_est is
+    the LAST (most recent) fold's estimator — the one that ships. None when no
+    fold produced scoreable rows. Val rows with classes unseen in that fold's
+    train are dropped (can't be predicted, mustn't count against the model)."""
+    frames, ys, ps, gs = [], [], [], []
+    final_est = None
+    for tm, vm in folds:
+        est = fit_fn(tm)
+        final_est = est
+        yv = labels[vm]
+        keep = yv.isin(set(labels[tm].unique()))
+        Xv, yv = feats[vm][keep], yv[keep]
+        if Xv.empty:
+            continue
+        frames.append(est.predict_proba(Xv))
+        ys.append(yv)
+        ps.append(provenance[vm][keep])
+        gs.append(gold[vm][keep])
+    if not frames or final_est is None:
+        return None
+    cols = sorted(set().union(*[set(f.columns) for f in frames]))
+    probs = pd.concat([f.reindex(columns=cols, fill_value=0.0) for f in frames])
+    return probs, pd.concat(ys), pd.concat(ps), pd.concat(gs), final_est
+
+
 def evaluate_model(
     est: Estimator,
     X_val: pd.DataFrame,

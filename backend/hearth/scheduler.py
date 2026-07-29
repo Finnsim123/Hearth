@@ -334,12 +334,23 @@ def build_scheduler(deps: dict) -> AsyncIOScheduler:
                         await _scan()
 
                 while True:
+                    # gather() does NOT cancel siblings when one coroutine
+                    # raises — each crash+restart would leave the old _consume
+                    # alive on the same dirty event (duplicate scans). Create
+                    # explicit tasks and cancel BOTH before restarting.
+                    tasks = [asyncio.create_task(_watch()),
+                             asyncio.create_task(_consume())]
                     try:
-                        await asyncio.gather(_watch(), _consume())
+                        await asyncio.gather(*tasks)
                     except asyncio.CancelledError:
+                        for t in tasks:
+                            t.cancel()
                         raise
                     except Exception:
                         log.exception("registry watch crashed — restarting in 10 s")
+                        for t in tasks:
+                            t.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
                         await asyncio.sleep(10)
 
             deps["registry_coro"] = _registry_watch_forever   # started from main.py

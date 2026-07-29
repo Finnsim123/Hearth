@@ -77,7 +77,7 @@ async def current_activity(person: str | None = None) -> list[dict]:
         if not rows:
             out.append({"person": pid, "activity": "unknown", "note": "no recent prediction"})
             continue
-        last = rows[-1]
+        last = rows[0]        # /api/predictions is newest-first
         out.append({"person": pid,
                     "activity": last.get("smoothed") or last.get("predicted") or "unknown",
                     "confidence": _pct(last.get("confidence")),
@@ -196,7 +196,8 @@ async def pending_questions(person: str | None = None) -> list[dict]:
 async def advisories() -> list[dict]:
     """Active advisories — things Hearth wants you to know (a demoted sensor, a
     new device to integrate, coverage gaps, out-of-credit, …)."""
-    return await _get("/advisories")
+    data = await _get("/advisories")      # endpoint returns {advisories, events}
+    return data.get("advisories") or []
 
 
 # ── safe actions ─────────────────────────────────────────────────────────────

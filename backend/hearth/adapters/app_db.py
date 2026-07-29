@@ -621,9 +621,13 @@ class AppDb:
                                 metrics=json.loads(r.metrics_json), promoted=r.promoted)
                     for r in s.scalars(stmt).all()]
 
-    def promote_model(self, model_id: int) -> None:
+    def promote_model(self, model_id: int) -> bool:
+        """Promote one model; False when the id doesn't exist (router → 404,
+        not an AttributeError 500)."""
         with Session(self.engine) as s:
             r = s.get(ModelRow, model_id)
+            if r is None:
+                return False
             # one live model PER HIERARCHY NODE: promoting home-v3 must not
             # demote the root model (they answer different questions)
             for other in s.scalars(select(ModelRow).where(
@@ -632,6 +636,7 @@ class AppDb:
                 other.promoted = False
             r.promoted = True
             s.commit()
+            return True
 
     def save_cluster(self, c: ClusterCard) -> ClusterCard:
         with Session(self.engine) as s:

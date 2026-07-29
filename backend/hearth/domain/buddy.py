@@ -109,7 +109,8 @@ def buddy_state(repo, tsdb) -> dict:
     _SEED = {"scanning": ("setup:scanning", "Scanning your home", "Reading your entities", 0.2),
              "triaging": ("setup:triaging", "Sorting into groups", "Clustering what I found", 0.45),
              "mapping": ("setup:mapping", "Reading your sensors", "Giving each one a role", 0.7),
-             "writing_rules": ("setup:mapping", "Reading your sensors", "Writing your starter rules", 0.85)}
+             "writing_rules": ("setup:mapping", "Reading your sensors", "Writing your starter rules", 0.85),
+             "designing_features": ("setup:mapping", "Reading your sensors", "Designing feature recipes for your sensors", 0.92)}
     if (_get(repo, "fasttrack.pending") and sstage != "done"
             and (_get(repo, "seed.pending") or sstage in _SEED)):
         ph, title, detail, prog = _SEED.get(sstage, _SEED["scanning"])
@@ -136,13 +137,15 @@ def buddy_state(repo, tsdb) -> dict:
     # During initial onboarding this is masked by fast-track (its pending flag
     # is set), so it only surfaces for a deliberate re-map.
     seed = _get(repo, "seed.status") or {}
-    if seed.get("stage") in ("scanning", "mapping", "writing_rules"):
+    if seed.get("stage") in ("scanning", "mapping", "writing_rules", "designing_features"):
         copy = {"scanning": ("Re-reading your sensors",
                              "Taking a fresh look at everything Home Assistant exposes"),
                 "mapping": ("Re-mapping your sensors",
                             "Matching sensors to roles with your AI key"),
                 "writing_rules": ("Refreshing your rules",
-                                  "Writing smarter household rules from the new mapping")}
+                                  "Writing smarter household rules from the new mapping"),
+                "designing_features": ("Designing your features",
+                                       "Tailoring feature recipes to your sensors with your AI key")}
         title, detail = copy[seed["stage"]]
         return _state(f"remap:{seed['stage']}", "work", title, detail)
 

@@ -223,30 +223,38 @@ def train_person(person_id: str, tsdb, repo, store,
     return record
 
 
-def _flat_baseline_metrics(feats, leaf_labels, provenance, gold, train_mask,
+def _flat_baseline_metrics(feats, leaf_labels, provenance, gold, folds,
                            end, cfg: TrainingConfig) -> dict:
-    """Flat multiclass leaf model on the SAME split as the hierarchy root — the
-    silent control that tells us whether LCPN's extra complexity is paying off
-    (audit F3). Returns a compact metrics subdict, or {} if not learnable."""
-    y_train = leaf_labels[train_mask]
-    if y_train.nunique() < 2:
+    """Flat multiclass leaf model on the SAME rolling-origin folds as the
+    hierarchy root — the silent control that tells us whether LCPN's extra
+    complexity is paying off (audit F3). Pooled identically so the comparison
+    is apples-to-apples. Returns a compact metrics subdict, or {} if not
+    learnable."""
+    from .evaluate import PrefitProba, pooled_oos_predictions
+    if leaf_labels[folds[-1][0]].nunique() < 2:
         return {}
-    X_train = feats[train_mask]
-    X_val = feats[~train_mask]
-    y_val, prov_val = leaf_labels[~train_mask], provenance[~train_mask]
-    gold_val = gold[~train_mask]
-    keep = y_val.isin(set(y_train.unique()))
-    X_val, y_val, prov_val, gold_val = X_val[keep], y_val[keep], prov_val[keep], gold_val[keep]
-    if len(X_val) < 5:
+
+    def _fit_fold(tm):
+        e = make_estimator(cfg.model_family)
+        Xt, yt = feats[tm], leaf_labels[tm]
+        if e.supports_sample_weight:
+            age_days = (end - Xt.index).total_seconds() / 86400
+            w = 0.5 ** (age_days / cfg.recency_half_life_days)
+            e.fit(Xt, yt, sample_weight=w.to_numpy())
+        else:
+            e.fit(Xt, yt)
+        return e
+
+    try:
+        pooled = pooled_oos_predictions(_fit_fold, feats, leaf_labels,
+                                        provenance, gold, folds)
+    except Exception:
+        log.debug("flat baseline failed", exc_info=True)
         return {}
-    est = make_estimator(cfg.model_family)
-    if est.supports_sample_weight:
-        age_days = (end - X_train.index).total_seconds() / 86400
-        w = 0.5 ** (age_days / cfg.recency_half_life_days)
-        est.fit(X_train, y_train, sample_weight=w.to_numpy())
-    else:
-        est.fit(X_train, y_train)
-    m = evaluate_model(est, X_val, y_val, prov_val, gold_val)
+    if pooled is None:
+        return {}
+    probs, y_p, prov_p, gold_p, _ = pooled
+    m = evaluate_model(PrefitProba(probs), probs, y_p, prov_p, gold_p)
     # keep only the headline numbers — this is a comparison, not a shipped model
     return {k: m[k] for k in ("accuracy_gold", "accuracy_confirmed",
                               "accuracy_bootstrap", "n_gold", "n_confirmed")
@@ -270,34 +278,52 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
         log.info("[%s] %s-node: only one class present — skip", person_id, node)
         return None
 
-    cutoff = end - timedelta(days=cfg.val_days)
-    train_mask = feats.index < cutoff
-    if train_mask.sum() < cfg.min_train_windows // 2 or (~train_mask).sum() < 10:
-        train_mask = feats.index < feats.index[int(len(feats) * 0.75)]
-    if train_mask.sum() < 10 or (~train_mask).sum() < 5:
-        log.info("[%s] %s-node: split too small — skip", person_id, node)
-        return None
+    # Blocked rolling-origin folds (Bergmeir & Benítez): decision metrics pool
+    # out-of-sample predictions across up to 3 successive val blocks instead of
+    # trusting one tiny 7-day slice — stabilising the promotion gate, cadence
+    # streaks and strike rounds. A young install naturally degrades to 1 fold
+    # (= exactly the old behaviour); the SHIPPED model is the last fold's.
+    from .evaluate import (PrefitProba, pooled_oos_predictions,
+                           rolling_origin_folds)
+    folds = rolling_origin_folds(feats.index, end, cfg.val_days,
+                                 min_train=max(10, cfg.min_train_windows // 2),
+                                 min_val=5)
+    if not folds:                                  # legacy positional fallback
+        tm = feats.index < feats.index[int(len(feats) * 0.75)]
+        if tm.sum() < 10 or (~tm).sum() < 5:
+            log.info("[%s] %s-node: split too small — skip", person_id, node)
+            return None
+        folds = [(tm, ~tm)]
+    train_mask = folds[-1][0]                      # most recent fold = the ship split
     X_train, y_train = feats[train_mask], labels[train_mask]
-    X_val, y_val, prov_val = feats[~train_mask], labels[~train_mask], provenance[~train_mask]
-    gold_val = gold[~train_mask]
-
-    # classes missing from train can't be learned — drop from val for metrics
-    known = set(y_train.unique())
-    keep = y_val.isin(known)
-    X_val, y_val, prov_val, gold_val = X_val[keep], y_val[keep], prov_val[keep], gold_val[keep]
+    val_mask = folds[-1][1]
+    y_val = labels[val_mask]
+    keep = y_val.isin(set(y_train.unique()))
+    X_val, y_val = feats[val_mask][keep], y_val[keep]
 
     # tuning grid is RF-specific; other families train on their defaults for now
     params = (_hyperparams(repo, f"{person_id}.{node}", fset, X_train, y_train, force, cfg)
               if cfg.model_family == "random_forest" else {})
-    est = make_estimator(cfg.model_family, **params)
-    if est.supports_sample_weight:
-        age_days = (end - X_train.index).total_seconds() / 86400
-        weights = 0.5 ** (age_days / cfg.recency_half_life_days)
-        est.fit(X_train, y_train, sample_weight=weights.to_numpy())
-    else:
-        est.fit(X_train, y_train)
+
+    def _fit_fold(tm):
+        e = make_estimator(cfg.model_family, **params)
+        Xt, yt = feats[tm], labels[tm]
+        if e.supports_sample_weight:
+            age_days = (end - Xt.index).total_seconds() / 86400
+            w = 0.5 ** (age_days / cfg.recency_half_life_days)
+            e.fit(Xt, yt, sample_weight=w.to_numpy())
+        else:
+            e.fit(Xt, yt)
+        return e
+
+    pooled = pooled_oos_predictions(_fit_fold, feats, labels, provenance, gold, folds)
+    if pooled is None:
+        log.info("[%s] %s-node: no scoreable out-of-sample rows — skip", person_id, node)
+        return None
+    probs_p, y_p, prov_p, gold_p, est = pooled     # est = last fold's fit (ships)
     tz = repo.get_setting("timezone", "UTC") or "UTC"
-    metrics = evaluate_model(est, X_val, y_val, prov_val, gold_val, tz=tz)
+    metrics = evaluate_model(PrefitProba(probs_p), probs_p, y_p, prov_p, gold_p, tz=tz)
+    metrics["cv_folds"] = len(folds)
     metrics["n_train"] = int(len(X_train))
     metrics["feature_count"] = int(X_train.shape[1])
     metrics["validation_status"] = validation_status(
@@ -323,7 +349,7 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
             metrics["calibrated"] = True
     if baseline_labels is not None:
         bl = _flat_baseline_metrics(feats, baseline_labels, provenance, gold,
-                                    train_mask, end, cfg)
+                                    folds, end, cfg)
         if bl:
             metrics["flat_baseline"] = bl      # hierarchy must beat this (F3)
     if excluded:

@@ -259,6 +259,10 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(409, "No AI key configured")
         # preserve any members from an in-flight seed; a bare re-map needs none.
         repo.set_setting("seed.pending", repo.get_setting("seed.pending") or {"members": []})
+        # asking for an LLM remap IS the approval — without this, seed recomputes
+        # use_llm=False (a previous successful run cleared triage.approved) and
+        # the "retry" silently re-runs heuristics + re-raises the approval gate.
+        repo.set_setting("triage.approved", True)
         events = deps.get("events")
         if events is None:
             return {"ok": True, "restart": True,
@@ -369,6 +373,9 @@ def build_api_router(deps: dict) -> APIRouter:
         key = llm.get("key")
         advisor = None
         if key:
+            # SSRF guard: llm.url comes straight from the (pre-auth, SETUP_ONLY)
+            # request body and gets POSTed to — same gate as /ha/test etc.
+            _guard_url(llm.get("url") or "https://openrouter.ai/api/v1")
             class _AdHocRepo:                       # lend the unsaved key to the advisor
                 def __init__(self, real):
                     self._real = real
@@ -405,6 +412,7 @@ def build_api_router(deps: dict) -> APIRouter:
         from ..adapters.openrouter_llm import OpenRouterAdvisor
         from ..domain.onboarding.ideas import suggest_ideas
         if key:
+            _guard_url(llm.get("url") or "https://openrouter.ai/api/v1")   # SSRF
             class _AdHocRepo:
                 def __init__(self, real):
                     self._real, self._llm = real, {
@@ -1635,8 +1643,7 @@ def build_api_router(deps: dict) -> APIRouter:
                         "feature": feature, "model_use": model_use,
                         "room": b.room, "tier": tiers.get(b.name, 2),
                         "recent": b.name in recent,
-                        "device_id": _device_of(b.entity_id)[0],
-                        "device": _device_of(b.entity_id)[1],
+                        **dict(zip(("device_id", "device"), _device_of(b.entity_id))),
                         "diagnostic": _is_diagnostic(b)})
         # class balance from confirmed + bootstrap labels (stable 7-day window)
         classes: dict[str, int] = {}
@@ -1781,7 +1788,7 @@ def build_api_router(deps: dict) -> APIRouter:
             return {"persons": {}, "note": "InfluxDB not connected"}
         from datetime import datetime, timedelta, timezone
         end = datetime.now(timezone.utc)
-        start = end - timedelta(hours=min(hours, 24 * 30))
+        start = end - timedelta(hours=max(1, min(hours, 24 * 30)))
         # `person` is interpolated into a Flux query downstream and is reachable
         # by an integration-scope bearer token — only ever query KNOWN person
         # ids (defence in depth alongside read_predictions' own escaping).
@@ -1997,7 +2004,8 @@ def build_api_router(deps: dict) -> APIRouter:
 
     @api.post("/models/{model_id}/promote")
     def promote(model_id: int) -> dict:
-        repo.promote_model(model_id)
+        if not repo.promote_model(model_id):
+            raise HTTPException(404, "unknown model")
         return {"ok": True}
 
     @api.post("/models/rollback")

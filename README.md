@@ -98,7 +98,7 @@ prints exactly where to go:
 ```
   Install is complete.
 
-  Go to:  http://192.168.1.241:8420  to set up your Hearth instance
+  Go to:  http://192.168.1.50:8420  to set up your Hearth instance
 ```
 
 That address is your own machine's LAN IP. Hearth listens on every interface, so

@@ -140,6 +140,28 @@ async def run_seed(repo, events) -> None:
             except Exception:
                 log.exception("LLM rule proposal failed — templates only")
 
+        # Feature architect (Phase 3): with an approved LLM, design the
+        # executable FeatureSpec at setup too. Previously this only ran when
+        # entities were ADDED later (integrate.py), so a fresh install trained
+        # on generic transforms until the first device change — the exact moment
+        # the architect helps most is day one. Same catalog → validated-spec →
+        # merge path as integrate; failure keeps the heuristic defaults.
+        if use_llm:
+            _status(repo, "designing_features", entities=len(shortlist))
+            try:
+                from ..features.transforms import active_mode
+                from .integrate import merge_feature_spec
+                from .inventory import build_catalog, stats_consent
+                catalog = build_catalog(shortlist, share_stats=stats_consent(repo))
+                spec = await advisor.propose_feature_spec(
+                    catalog, repo.activities(), mode=active_mode(repo))
+                if spec is not None and (spec.features or spec.selections):
+                    repo.set_setting(
+                        "feature_spec",
+                        merge_feature_spec(repo.get_setting("feature_spec"), spec))
+            except Exception:
+                log.exception("LLM feature design failed — default transforms only")
+
         # Gate bookkeeping: if there's a key but we deferred the LLM pass, flag
         # that the bubble cloud is awaiting the user's go-ahead. An approved run
         # clears both flags so the gate doesn't re-trigger next boot.

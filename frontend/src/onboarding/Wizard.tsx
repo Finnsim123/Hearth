@@ -1,5 +1,5 @@
 /**
- * Onboarding wizard — 10 steps, resumable (localStorage), every step explains
+ * Onboarding wizard — 11 steps, resumable (localStorage), every step explains
  * itself before asking for anything. Spec: docs/UI_SPEC.md §1.
  * All steps are wired to real endpoints (HA test, inventory scan, Influx
  * inspection, token minting, setup completion + fast track).
@@ -69,7 +69,18 @@ export default function Wizard() {
     }
   }, []);
   useEffect(() => {
-    localStorage.setItem(STORE, JSON.stringify({ step, data: { ...data, account: { ...data.account, password: "", confirm: "" } } }));
+    // NO secrets in localStorage — not the password, and equally not the HA
+    // long-lived token, external Influx token, or LLM key (they'd sit in
+    // cleartext forever if the wizard is abandoned). A resumed session already
+    // restarts at step 1, so the user re-enters them as they re-walk the steps.
+    const scrubbed = {
+      ...data,
+      account: { ...data.account, password: "", confirm: "" },
+      ha: { ...data.ha, token: "" },
+      influx: { ...data.influx, token: "" },
+      llmKey: "",
+    };
+    localStorage.setItem(STORE, JSON.stringify({ step, data: scrubbed }));
   }, [step, data]);
 
   const next = () => setStep((s) => Math.min(s + 1, TOTAL));
