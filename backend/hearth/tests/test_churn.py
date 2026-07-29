@@ -81,3 +81,13 @@ def test_no_measurement_never_deadlocks():
 def test_churny_without_comparable_labels_is_held():
     ok, why = churn_allows({"churn": {"churn": 0.5}}, {}, wilson_interval)
     assert not ok and "enough labels" in why
+
+
+def test_broken_champion_is_not_protected():
+    """Seen live (alex-v10): the veto must stand down when the incumbent's own
+    CI lower bound proves nothing — 0%-gold timelines don't deserve defending."""
+    new = {"accuracy_gold": 0.0, "n_gold": 6,
+           "churn": {"churn": 0.39, "nfr": 0.1, "pfr": 0.1, "n": 300}}
+    cur = {"accuracy_gold": 0.0, "n_gold": 6}
+    ok, why = churn_allows(new, cur, wilson_interval)
+    assert ok and why == ""

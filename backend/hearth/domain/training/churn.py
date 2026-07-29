@@ -42,6 +42,10 @@ log = logging.getLogger(__name__)
 CHURN_MAX = 0.25       # tolerated rewrite share for a merely-adequate challenger
 DECISIVE_GAIN = 0.02   # CI-lower-bound gain that buys the right to churn
 PCT_BOOST = 1.25       # weight boost on champion-correct training windows
+CHAMPION_FLOOR = 0.05  # a champion whose OWN CI lower bound sits below this has
+                       # demonstrated nothing — there is no working timeline to
+                       # protect, so the veto stands down (seen live: v10 held
+                       # back for disagreeing 39% with a 0%-gold incumbent)
 
 
 def churn_metrics(champ_est, new_est, X: pd.DataFrame, y: pd.Series) -> dict:
@@ -91,6 +95,8 @@ def churn_allows(new_metrics: dict, cur_metrics: dict,
         if n_new and n_cur:
             new_lo, _ = wilson(round(new_metrics[key] * n_new), n_new)
             cur_lo, _ = wilson(round(cur_metrics[key] * n_cur), n_cur)
+            if cur_lo < CHAMPION_FLOOR:
+                return True, ""    # incumbent proves ~nothing — nothing to protect
             if new_lo >= cur_lo + DECISIVE_GAIN:
                 return True, ""
             return False, (f"would rewrite {churn:.0%} of the recent timeline "

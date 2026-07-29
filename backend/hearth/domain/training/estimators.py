@@ -98,12 +98,15 @@ class _SklearnEstimator:
         return {c: float(v) for c, v in zip(self.columns, imp)}
 
     def _align(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Inference rows may miss/add columns vs training — align hard."""
-        out = X.copy()
-        for c in self.columns:
-            if c not in out.columns:
-                out[c] = 0.0
-        return out[self.columns]
+        """Inference rows may miss/add columns vs training — align hard.
+        Missing columns land in ONE concat, not per-column inserts: with 600+
+        features the insert loop fragments the frame and pandas floods the
+        logs with PerformanceWarnings on every predict."""
+        missing = [c for c in self.columns if c not in X.columns]
+        if missing:
+            X = pd.concat(
+                [X, pd.DataFrame(0.0, index=X.index, columns=missing)], axis=1)
+        return X[self.columns]
 
     def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> None:
         self.columns = list(X.columns)
