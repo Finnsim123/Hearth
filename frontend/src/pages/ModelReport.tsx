@@ -41,6 +41,9 @@ type Metrics = {
                   reliability?: { conf: number; acc: number; n: number }[] };
   flat_baseline?: { accuracy_gold?: number; accuracy_confirmed?: number };
   excluded_features?: string[];
+  conformal?: { qhat: number; alpha: number; n_cal: number;
+                avg_set_size: number; coverage_cal: number;
+                basis?: "human" | "all" };
 };
 type Model = {
   id: number; person_id: string; version: string; algo: string;
@@ -180,6 +183,20 @@ function PersonReport({ person, models, cap, insight, drift, first }: {
                 mine > flat + 0.005 ? "the hierarchy is pulling its weight."
                 : mine < flat - 0.005 ? "the flat model does better; the hierarchy isn't helping here."
                 : "the flat model does just as well; the hierarchy isn't adding anything yet."}
+            </p>
+          )}
+
+          {mt.conformal && (
+            <p style={{ marginTop: 10, marginBottom: 0, fontSize: 12, color: DIM }}>
+              <b style={{ color: INK }}>How sure is "sure"?</b> Calibrated so a shortlist of
+              likely activities contains the truth {pct(1 - mt.conformal.alpha, 0)} of the
+              time; the shortlist averages <b style={{ color: INK }}>{mt.conformal.avg_set_size.toFixed(1)}</b> option{mt.conformal.avg_set_size === 1 ? "" : "s"} (closer
+              to 1 = more decisive), with {pct(mt.conformal.coverage_cal, 0)} coverage achieved
+              in calibration. An empty shortlist publishes “unknown” instead of a guess.
+              {" "}Calibrated on {mt.conformal.n_cal} {
+                mt.conformal.basis === "human"
+                  ? "human-confirmed answers."
+                  : "windows, rule-labelled ones included — treat as approximate until more answers arrive."}
             </p>
           )}
 
