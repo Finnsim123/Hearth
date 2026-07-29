@@ -24,8 +24,10 @@ log = logging.getLogger(__name__)
 
 def _person_setting_keys(person_id: str) -> list[str]:
     """Settings entries scoped to a single person — cleared on forget."""
-    return [f"transitions.{person_id}", f"override.{person_id}",
-            f"drift.{person_id}", f"capability.{person_id}"]
+    return [f"transitions.{person_id}", f"durations.{person_id}",
+            f"override.{person_id}", f"drift.{person_id}",
+            f"capability.{person_id}", f"labels.suspects.{person_id}",
+            f"selection.dropped.{person_id}"]
 
 
 def forget_person(repo, tsdb, person_id: str, *, drop_bindings: bool = True) -> dict:

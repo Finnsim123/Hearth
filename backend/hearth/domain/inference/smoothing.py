@@ -84,6 +84,78 @@ def learn_transitions_by_daypart(labels, tz: str = "UTC") -> dict:
     return out
 
 
+# ── duration awareness (HSMM-lite) ─────────────────────────────────────────
+# A plain HMM's self-transition is CONSTANT: after 20 minutes of "cooking" the
+# prior to stay is the same as after 3 hours — so either blips survive (prior
+# too weak) or real transitions lag (prior too strong). Semi-Markov models fix
+# this by modeling state DURATION explicitly; van Kasteren et al. (2010) showed
+# duration modeling beats plain HMMs on exactly this kind of home-sensor data.
+# Full HSMM inference is overkill here — the cheap form is a duration-dependent
+# diagonal: replace the matrix's self-transition with 1 − h(d), where h(d) is
+# the empirical hazard (P(run ends now | lasted d)) from the household's OWN
+# completed runs, and rescale the off-diagonal proportionally.
+
+MAX_RUN = 48        # run-length cap: 24 h of 30-min windows
+MIN_RUNS = 5        # completed runs needed before a hazard is trusted
+HAZARD_ALPHA = 1.0  # Laplace smoothing on the hazard estimate
+STAY_MIN, STAY_MAX = 0.05, 0.98   # the diagonal never hits 0 or 1
+
+
+def learn_durations(labels) -> dict:
+    """Completed-run-length histogram per activity from the 30-min label grid:
+    {activity: {str(d): count}}. A run only counts when its END is observed
+    (the label changed on a contiguous grid); runs cut off by a gap or the
+    series edge are censored — dropping them biases durations slightly short,
+    which errs toward LESS stickiness, the safe direction for blip control."""
+    idx = labels.index
+    out: dict[str, dict[str, int]] = {}
+    run_label, run_len = None, 0
+    for i in range(len(labels)):
+        lab = labels.iloc[i]
+        contiguous = i > 0 and (idx[i] - idx[i - 1]).total_seconds() == 1800
+        if run_label is not None and contiguous and lab == run_label:
+            run_len = min(run_len + 1, MAX_RUN)
+            continue
+        if run_label is not None and contiguous and lab != run_label:
+            # observed end -> the completed run votes
+            hist = out.setdefault(str(run_label), {})
+            hist[str(run_len)] = hist.get(str(run_len), 0) + 1
+        # gap (not contiguous) -> censored: the old run is discarded unseen
+        run_label, run_len = lab, 1
+    return out          # the final, still-open run is censored too
+
+
+def duration_hazard(hist: dict, run_len: int) -> float | None:
+    """h(d) = P(run ends at d | lasted ≥ d), Laplace-smoothed. None when the
+    activity has too few completed runs — caller keeps the stationary prior."""
+    try:
+        counts = {int(d): int(c) for d, c in hist.items()}
+    except Exception:
+        return None
+    if sum(counts.values()) < MIN_RUNS:
+        return None
+    ends_now = counts.get(run_len, 0)
+    survivors = sum(c for d, c in counts.items() if d >= run_len)
+    # beyond the longest observed run: survivors=0 -> h = α/2α = 0.5, steady
+    # pressure to leave rather than a hard eviction
+    return (ends_now + HAZARD_ALPHA) / (survivors + 2 * HAZARD_ALPHA)
+
+
+def duration_adjusted_row(mat_row: dict, prev_state: str, hazard: float) -> dict:
+    """Transition row with the diagonal set from the hazard (1−h, clamped) and
+    the off-diagonal rescaled proportionally — leave probability grows as the
+    run outlives its typical duration, and WHERE it goes still follows the
+    learned matrix."""
+    stay = min(max(1.0 - hazard, STAY_MIN), STAY_MAX)
+    off = {c: v for c, v in mat_row.items() if c != prev_state}
+    off_total = sum(off.values())
+    if off_total <= 0:
+        return mat_row
+    out = {c: (1.0 - stay) * v / off_total for c, v in off.items()}
+    out[prev_state] = stay
+    return out
+
+
 def _is_daypart(trans: dict) -> bool:
     """True if `trans` is daypart-keyed ({daypart: matrix}) vs a flat matrix."""
     sample = next(iter(trans.values()), None)
@@ -100,19 +172,27 @@ def _select_matrix(trans: dict, daypart) -> dict:
 
 
 def transition_filter(probs_row, prev_state: str | None, trans: dict | None,
-                      daypart=None):
+                      daypart=None, durations: dict | None = None,
+                      run_len: int | None = None):
     """One forward-filter step: classifier probs × learned prior given the
     previous state (mixed with uniform). Accepts a flat matrix OR a daypart-keyed
-    one (then `daypart` picks the time-conditioned matrix). Returns a
-    renormalized copy."""
+    one (then `daypart` picks the time-conditioned matrix). With `durations`
+    (learn_durations output) and `run_len` (windows already spent in
+    prev_state) the self-transition becomes duration-dependent (HSMM-lite).
+    Returns a renormalized copy."""
     if not trans:
         return probs_row
     mat = _select_matrix(trans, daypart)
     if prev_state not in mat:
         return probs_row
+    mat_row = mat[prev_state]
+    if durations and run_len:
+        h = duration_hazard(durations.get(prev_state) or {}, min(run_len, MAX_RUN))
+        if h is not None:
+            mat_row = duration_adjusted_row(mat_row, prev_state, h)
     classes = list(probs_row.index)
     n = len(classes)
-    prior = [(1 - UNIFORM_MIX) * mat[prev_state].get(c, 1.0 / n)
+    prior = [(1 - UNIFORM_MIX) * mat_row.get(c, 1.0 / n)
              + UNIFORM_MIX / n for c in classes]
     blended = probs_row * prior
     total = float(blended.sum())

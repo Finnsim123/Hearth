@@ -108,6 +108,7 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
         version = RULES_VERSION
 
     trans = repo.get_setting(f"transitions.{person_id}") or None
+    durations = repo.get_setting(f"durations.{person_id}") or None
     from ..markers import apply_marker_prior, marker_fired, markers_for
     markers = markers_for(repo, person_id)
     tz_name = repo.get_setting("timezone", "UTC") or "UTC"
@@ -146,7 +147,10 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                 prev.window_ts.replace(tzinfo=timezone.utc)
             if abs((ts.to_pydatetime() - prev_ts).total_seconds() - 1800) < 1:
                 prev_state = prev.parent or prev.predicted
-                # learned transition prior (stationary, daypart-keyed)
+                # learned transition prior (stationary, daypart-keyed). With
+                # duration stats the self-transition also DECAYS as the run
+                # outlives the household's typical duration for that activity
+                # (HSMM-lite, smoothing.py) — blips die, marathons end.
                 if trans:
                     from ..features.pipeline import _bucket
                     from .smoothing import transition_filter
@@ -154,8 +158,21 @@ def predict_person(person_id: str, tsdb, repo, store) -> list[Prediction]:
                         local_hour = ts.tz_convert(ZoneInfo(tz_name)).hour
                     except Exception:
                         local_hour = ts.hour
+                    run_len = None
+                    if durations:
+                        # walk newest-first history while the state holds and
+                        # the 30-min grid stays contiguous
+                        run_len, cursor = 1, prev_ts
+                        for p in history[1:]:
+                            p_ts = p.window_ts if p.window_ts.tzinfo else \
+                                p.window_ts.replace(tzinfo=timezone.utc)
+                            if abs((cursor - p_ts).total_seconds() - 1800) > 1 \
+                                    or (p.parent or p.predicted) != prev_state:
+                                break
+                            run_len, cursor = run_len + 1, p_ts
                     row = transition_filter(row, prev_state, trans,
-                                            daypart=int(_bucket(int(local_hour))))
+                                            daypart=int(_bucket(int(local_hour))),
+                                            durations=durations, run_len=run_len)
                 # transition markers: an OBSERVED, time-localised trigger (alarm,
                 # coffee) sharply boosts P(from→to) so the published state switches
                 # cleanly at the right window. Markers are never classifier labels.
@@ -239,7 +256,10 @@ def _apply_smoothing(history, predicted, confidence) -> str:
 
 
 def _history(tsdb, person_id: str, now: datetime) -> list:
-    raw = tsdb.read_predictions(person_id, now - timedelta(hours=3), now)
+    # 12 h look-back: the duration-aware filter measures how long the current
+    # activity run has lasted, and 3 h capped every run at 6 windows (a censored
+    # run length understates the hazard). 12 h ≈ 24 rows — still cheap.
+    raw = tsdb.read_predictions(person_id, now - timedelta(hours=12), now)
     out = []
     for r in raw:
         out.append(Prediction(person_id=person_id, window_ts=datetime.fromisoformat(r["time"]),

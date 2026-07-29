@@ -204,10 +204,14 @@ def train_person(person_id: str, tsdb, repo, store,
         # time-conditioned transition matrices (audit F6): the forward filter
         # auto-detects the daypart structure and falls back to "all" when no
         # daypart is supplied, so this stays compatible with the flat consumer.
-        from ..inference.smoothing import learn_transitions_by_daypart
+        from ..inference.smoothing import (learn_durations,
+                                           learn_transitions_by_daypart)
         tz = repo.get_setting("timezone", "UTC") or "UTC"
         repo.set_setting(f"transitions.{person_id}",
                          learn_transitions_by_daypart(coarse_labels, tz))
+        # run-length histograms for the duration-aware filter (HSMM-lite):
+        # how long this household's activities actually last
+        repo.set_setting(f"durations.{person_id}", learn_durations(coarse_labels))
 
     for parent in parents_with_children(activities):
         fine = fine_label_series(labels, parent, pmap)
