@@ -36,6 +36,22 @@ MIN_CONFIRMED_FOR_VALIDATED = 30  # below this a model is "provisional", not
                                   # exist to measure it non-circularly (audit §3).
 
 
+def class_balance_weights(y, cap: float = 8.0):
+    """Per-sample inverse-frequency weights (sklearn's 'balanced' form:
+    n / (n_classes * count_class)), capped so a rare class can't dominate,
+    then normalized to mean 1 so multiplying into the recency × suspect × PCT
+    product doesn't change the total weight mass. Rationale: with 795 'home'
+    vs 104 'sleeping' windows an error-minimizing forest just writes the
+    minority class off — the live symptom was sleeping's all-zero confusion
+    column while its bed/sleep features sat at ~0 importance."""
+    import numpy as np
+    counts = y.value_counts()
+    n, k = len(y), max(1, y.nunique())
+    w = y.map(lambda c: n / (k * counts[c])).clip(upper=cap).to_numpy(dtype=float)
+    m = w.mean()
+    return w / m if m > 0 else w
+
+
 @dataclass(frozen=True)
 class TrainingConfig:
     """Every training behaviour knob in one place, so they are DATA (editable in
@@ -48,6 +64,11 @@ class TrainingConfig:
     tune_min_windows: int = TUNE_MIN_WINDOWS
     tune_every_days: int = TUNE_EVERY_DAYS
     min_confirmed_for_validated: int = MIN_CONFIRMED_FOR_VALIDATED
+    class_balance_cap: float = 8.0   # inverse-frequency class weights, capped
+                                     # (0 = off). Without this a random forest
+                                     # simply never predicts a 100-window class
+                                     # sitting next to an 800-window one — seen
+                                     # live as sleeping's all-zero column.
     promotion_margin: float = 0.02   # confirmed-accuracy CI slack tolerated before
                                      # a new model is rejected as a regression
     model_family: str = "random_forest"   # random_forest | gradient_boosting | logistic
@@ -257,9 +278,14 @@ def _flat_baseline_metrics(feats, leaf_labels, provenance, gold, folds,
         e = make_estimator(cfg.model_family)
         Xt, yt = feats[tm], leaf_labels[tm]
         if e.supports_sample_weight:
+            import numpy as np
             age_days = (end - Xt.index).total_seconds() / 86400
-            w = 0.5 ** (age_days / cfg.recency_half_life_days)
-            e.fit(Xt, yt, sample_weight=w.to_numpy())
+            w = np.asarray(0.5 ** (age_days / cfg.recency_half_life_days), dtype=float)
+            if cfg.class_balance_cap:
+                # same balancing as the main fit — the baseline comparison
+                # must not be won or lost on weighting differences
+                w = w * class_balance_weights(yt, cfg.class_balance_cap)
+            e.fit(Xt, yt, sample_weight=w)
         else:
             e.fit(Xt, yt)
         return e
@@ -354,6 +380,8 @@ def _fit_node(person_id: str, node: str, feats, labels, provenance, gold,
             if champ_est is not None:
                 # PCT (Yan 2021): don't regress on what the live model gets right
                 w = w * pct_weights(champ_est, Xt, yt)
+            if cfg.class_balance_cap:
+                w = w * class_balance_weights(yt, cfg.class_balance_cap)
             e.fit(Xt, yt, sample_weight=w)
         else:
             e.fit(Xt, yt)
