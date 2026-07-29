@@ -139,6 +139,21 @@ def train_person(person_id: str, tsdb, repo, store,
 
     feats = tsdb.read_features(person_id, fset, start, end)
     if len(feats) < cfg.min_train_windows:
+        # likely an fset change (new device integrated, power mode flipped):
+        # history windows exist only under the OLD hash. Rebuild the training
+        # range under the active hash, then re-read — otherwise training goes
+        # dark for hours and the first model back is fit on a sliver.
+        from ..features.pipeline import ensure_history
+        try:
+            built = ensure_history(tsdb, repo, person_id, start, end,
+                                   have=len(feats), need=cfg.min_train_windows)
+            if built:
+                feats = tsdb.read_features(person_id, fset, start, end)
+                log.info("[%s] rebuilt %d windows under the active feature set",
+                         person_id, built)
+        except Exception:
+            log.exception("feature-history rebuild failed for %s", person_id)
+    if len(feats) < cfg.min_train_windows:
         log.info("[%s] %d windows < %d — skip", person_id, len(feats), cfg.min_train_windows)
         return None
 

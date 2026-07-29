@@ -468,6 +468,49 @@ def build_windows(tsdb, repo, person_id: str, start: datetime, end: datetime,
     return feats
 
 
+def ensure_history(tsdb, repo, person_id: str, start, end, *,
+                   have: int = 0, need: int = 100,
+                   chunk_days: int = 7, stride_min: int = 30) -> int:
+    """Backfill feature windows under the ACTIVE feature-set version.
+
+    Any feature-spec change (approving a new device via integrate, flipping
+    the power mode, adding a composite) changes the fset hash — and windows
+    are stored per hash, so ALL history instantly stops counting for training:
+    build_latest_windows only builds forward from now−2h, the trainer sees
+    <min windows and skips, and the first model to clear the bar again is
+    trained on hours, not months. This rebuilds the training range from raw
+    history, chunked like the fast track so peak memory stays flat.
+
+    Cold-start guard: only persons with a PROMOTED model qualify — they have
+    provably trained before, so this is a rebuild, not fabrication. A fresh
+    install with no raw history must keep skipping (empty-window models are
+    worse than no model).
+    """
+    if have >= need:
+        return 0
+    try:
+        if not any(m.promoted for m in repo.models(person_id)):
+            return 0
+    except Exception:
+        return 0
+    from math import ceil
+    span_days = max(1, ceil((end - start).total_seconds() / 86400))
+    n_chunks = ceil(span_days / chunk_days)
+    built = 0
+    log.info("[%s] rebuilding %d day(s) of feature history under the active "
+             "feature set (%d chunks)", person_id, span_days, n_chunks)
+    for ci in range(n_chunks):
+        cstart = start + timedelta(days=ci * chunk_days)
+        cstop = min(cstart + timedelta(days=chunk_days), end)
+        try:
+            built += len(build_windows(tsdb, repo, person_id, cstart, cstop,
+                                       stride_min))
+        except Exception:
+            log.exception("history rebuild chunk %d/%d failed for %s",
+                          ci + 1, n_chunks, person_id)
+    return built
+
+
 def build_latest_windows(tsdb, repo) -> None:
     """Scheduler entrypoint: build any complete-but-unwritten windows for every
     enabled person, then heartbeat."""
