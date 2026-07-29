@@ -939,6 +939,56 @@ const ASK_FIELDS: { key: string; label: string; hint: string; step: number }[] =
     hint: "Unanswered questions disappear from the inbox after this long." },
 ];
 
+/** Vacation / do-not-disturb: point Hearth at any HA boolean; while it's ON,
+ *  every phone push is muted. Predictions and the Inbox keep working. */
+function MuteCard() {
+  const [entity, setEntity] = useState("");
+  const [muted, setMuted] = useState(false);
+  const [state, setState] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    fetch("/api/notify/mute").then(j)
+      .then((r) => { setEntity(r.entity || ""); setMuted(!!r.muted); setState(r.state ?? null); })
+      .catch(() => {});
+  }, []);
+  const save = async () => {
+    setSaving(true); setMsg("");
+    try {
+      const r = await post("/api/notify/mute", { entity: entity.trim() }).then(j);
+      setMuted(!!r.muted); setState(r.state ?? null);
+      setMsg(r.warning ? r.warning
+        : !r.entity ? "Cleared — pushes always go out."
+        : r.muted ? "Saved — and it's ON right now, so pushes are muted."
+        : `Saved — currently ${r.state ?? "off"}, pushes go out normally.`);
+    } catch { setMsg("Couldn't save — is the backend up?"); }
+    setSaving(false);
+  };
+  return (
+    <Card title="Vacation & do-not-disturb"
+          sub="Pick any Home Assistant toggle (a vacation mode, guest mode…). While it's on, Hearth sends no phone notifications — questions wait quietly in the Inbox, predictions and automations keep running.">
+      {muted && (
+        <p style={{ margin: 0, fontSize: 13, color: "var(--accent)", fontWeight: 500 }}>
+          Muted right now — {entity} is on. No pushes until it turns off.
+        </p>
+      )}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input placeholder="input_boolean.vacation_mode" value={entity}
+               onChange={(e) => setEntity(e.target.value)}
+               style={{ flex: 1, minWidth: 220 }} />
+        <button className="btn btn-secondary" disabled={saving} onClick={save}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+      {msg && <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{msg}</span>}
+      <p style={{ margin: 0, fontSize: 11.5, color: "var(--text-dim)" }}>
+        Fail-open by design: if Hearth can't read the entity, it sends rather than
+        going silently mute. Leave empty to disable. State now: {state ?? "—"}.
+      </p>
+    </Card>
+  );
+}
+
 function AdvancedAsking() {
   const [open, setOpen] = useState(false);
   const [pol, setPol] = useState<Record<string, number> | null>(null);
@@ -1583,7 +1633,7 @@ function ConnectionsSection() {
 
 function SectionBody({ section }: { section: SectionKey }) {
   switch (section) {
-    case "household": return (<><Household /><NewsletterDesign /><AdvancedAsking /></>);
+    case "household": return (<><Household /><MuteCard /><NewsletterDesign /><AdvancedAsking /></>);
     case "model": return (<><FeaturePower /><ModelFamily /><ModelBehaviour /><OutputPolicy /><AdvancedTraining /></>);
     case "data": return (<><FoundationalFacts /><TransitionMarkers /><DataRetention /><TrainingWindow /></>);
     case "privacy": return <StatsConsent />;

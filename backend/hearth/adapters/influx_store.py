@@ -238,7 +238,18 @@ class InfluxStore:
                 p = p.tag("person", binding.person_id)
             points.append(p.field(field, value))
         if points:
-            self.write_api.write(bucket=RAW_BUCKET, record=points)
+            try:
+                self.write_api.write(bucket=RAW_BUCKET, record=points)
+            except Exception as exc:
+                # 422 "partial write: dropped N points outside retention policy":
+                # the in-policy points WERE written — only ones older than the raw
+                # bucket's retention were dropped, and those can never land. A
+                # history import spanning the boundary must not abort on this.
+                body = str(getattr(exc, "body", "") or exc)
+                if getattr(exc, "status", None) == 422 and "partial write" in body:
+                    log.debug("raw write: %s", body.strip()[:200])
+                else:
+                    raise
 
     def purge_person(self, person_id: str) -> None:
         """Irreversibly delete every series tagged to this person — the raw history

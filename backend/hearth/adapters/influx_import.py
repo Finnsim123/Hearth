@@ -27,6 +27,20 @@ log = logging.getLogger(__name__)
 CHUNK_DAYS = 30
 
 
+def retention_floor(repo, end: datetime) -> datetime:
+    """The oldest timestamp hearth_raw will still ACCEPT (its retention lower
+    bound, plus an hour of safety margin — the bound moves while we import).
+    Importing anything older is pointless: Influx drops it with a 422 partial
+    write. Every import window must be clamped to this."""
+    from .influx_store import DEFAULT_RAW_RETENTION_DAYS
+    try:
+        days = int(repo.get_setting("retention.days", DEFAULT_RAW_RETENTION_DAYS)
+                   or DEFAULT_RAW_RETENTION_DAYS)
+    except Exception:
+        days = DEFAULT_RAW_RETENTION_DAYS
+    return end - timedelta(days=days) + timedelta(hours=1)
+
+
 def _frames(store: InfluxStore, flux: str) -> pd.DataFrame:
     df = store.query_api.query_data_frame(flux)
     if isinstance(df, list):

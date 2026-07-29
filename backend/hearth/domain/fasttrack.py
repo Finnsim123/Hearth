@@ -37,7 +37,8 @@ async def run_fast_track(repo, tsdb, store, notifier=None, events=None) -> None:
     source_bucket = pending.get("source_bucket")
 
     from ..adapters.influx_import import (
-        earliest_source_time, import_history, import_recorder_history)
+        earliest_source_time, import_history, import_recorder_history,
+        retention_floor)
     if recorder:
         days = int(pending.get("days", 10))
         start = end - timedelta(days=days)
@@ -52,6 +53,13 @@ async def run_fast_track(repo, tsdb, store, notifier=None, events=None) -> None:
         if cap_days:
             start = max(start, end - timedelta(days=cap_days))
         log.info("fast track: importing from %s", source_bucket)
+    # hearth_raw only RETAINS ~90 days — anything older is rejected by Influx
+    # (422 partial write) and can never land, so don't even ask the source for it.
+    floor = retention_floor(repo, end)
+    if start < floor:
+        log.info("fast track: clamping import start %s → %s (raw retention)",
+                 start.date(), floor.date())
+        start = floor
     span_days = max(1, (end - start).days)
 
     try:

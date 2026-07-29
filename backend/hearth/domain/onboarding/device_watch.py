@@ -91,15 +91,32 @@ async def scan_new_nodes(repo, events, notifier=None) -> dict:
 
 
 async def _push(repo, notifier, candidates) -> None:
+    """One ACTIONABLE notification per new device (capped at 3 per scan): tap
+    "Use it" to bind its useful entities, "Not now" to remember the skip — no
+    need to open Hearth. Action ids HEARTH_DEV_<id>_yes|no ride the existing
+    integration tap-forward to /api/feedback/action; first tap wins (the decide
+    core is idempotent). The deep link still lands on /sensors for the full view."""
     if not candidates:
         return
-    names = ", ".join(c["name"] for c in candidates[:3])
-    one = len(candidates) == 1
-    title = "New device Hearth can use"
-    msg = f"{names} — open Hearth to add {'it' if one else 'them'} to your predictions."
+    base = (repo.get_setting("hearth_base_url", "") or "").rstrip("/")
     try:
-        for p in repo.persons():
-            if getattr(p, "notify_system", False):
-                await notifier.notify(p, title, msg)
+        recipients = [p for p in repo.persons() if getattr(p, "notify_system", False)]
+        for c in candidates[:3]:
+            n_ent = len(c.get("entities") or [])
+            detail = c.get("detail") or ""
+            msg = (f"{detail + ' — ' if detail else ''}{n_ent} useful "
+                   f"sensor{'s' if n_ent != 1 else ''}. Use it for predictions?")
+            data = {
+                "actions": [
+                    {"action": f"HEARTH_DEV_{c['id']}_yes", "title": "✓ Use it"},
+                    {"action": f"HEARTH_DEV_{c['id']}_no", "title": "Not now"},
+                ],
+                "tag": f"hearth_dev_{c['id']}",
+                "persistent": False,
+            }
+            if base:
+                data["url"] = f"{base}/sensors"
+            for p in recipients:
+                await notifier.notify(p, f"New device: {c['name']}", msg, data)
     except Exception:
         log.exception("new-device push failed")

@@ -977,6 +977,34 @@ def build_api_router(deps: dict) -> APIRouter:
         repo.save_person(person)
         return {"avatar": person.avatar}
 
+    @api.get("/notify/mute")
+    async def notify_mute_get() -> dict:
+        """The push-mute entity (vacation/guest mode) + whether it's muting NOW."""
+        from ..adapters.ha_rest import MUTE_SETTING, ha_entity_state
+        entity = repo.get_setting(MUTE_SETTING) or ""
+        state = await ha_entity_state(repo, entity) if entity else None
+        return {"entity": entity, "state": state,
+                "muted": (state or "").lower() == "on"}
+
+    @api.post("/notify/mute")
+    async def notify_mute_set(body: dict) -> dict:
+        """Set (or clear, with empty) the HA entity that mutes all phone pushes
+        while it reads 'on'. Predictions, questions and the Inbox keep working —
+        only the pushes stop."""
+        from ..adapters.ha_rest import MUTE_SETTING, ha_entity_state
+        entity = (body.get("entity") or "").strip()
+        if entity and "." not in entity:
+            raise HTTPException(400, "that doesn't look like an HA entity id")
+        repo.set_setting(MUTE_SETTING, entity)
+        state = await ha_entity_state(repo, entity) if entity else None
+        if entity and state is None:
+            # saved, but be honest that Hearth can't read it right now
+            return {"ok": True, "entity": entity, "state": None, "muted": False,
+                    "warning": "saved, but I can't read that entity from Home "
+                               "Assistant right now — check the id"}
+        return {"ok": True, "entity": entity, "state": state,
+                "muted": (state or "").lower() == "on"}
+
     @api.post("/persons/{person_id}/forget")
     async def forget_person_ep(person_id: str, body: dict | None = None) -> dict:
         """Remove & forget a member who's left — a genuine erasure of everything
@@ -1226,16 +1254,14 @@ def build_api_router(deps: dict) -> APIRouter:
         from ..domain.onboarding.device_watch import scan_new_nodes
         return await scan_new_nodes(repo, events, deps.get("notifier"))
 
-    @api.post("/hierarchy/decide")
-    async def hierarchy_decide(body: dict) -> dict:
-        """Answer a new-device offer: integrate (bind its useful entities + it folds
-        into the next retrain) or skip (remembered, not re-asked)."""
-        nid = (body.get("id") or "").strip()
-        decision = (body.get("decision") or "").strip()
-        if not nid or decision not in ("integrate", "skip"):
-            raise HTTPException(400, "id and decision (integrate|skip) required")
+    async def _decide_node(nid: str, decision: str) -> dict:
+        """Shared core of the new-device answer — called by the Sensors page
+        (POST /hierarchy/decide) AND by the notification's Yes/No buttons
+        (via /feedback/action). Idempotent: an already-decided node no-ops."""
         pending = repo.get_setting("ha.pending_nodes") or []
         node = next((p for p in pending if p.get("id") == nid), None)
+        if node is None:
+            return {"ok": True, "note": "already decided"}
         from ..domain.advisories import clear_advisory
         from ..domain.events import record_event
         from ..domain.hierarchy import set_decision
@@ -1251,7 +1277,7 @@ def build_api_router(deps: dict) -> APIRouter:
             from ..domain.onboarding.advisor import _slugify, is_bindable, suggest_role
             taken = {b.name for b in repo.bindings()}
             have = {b.entity_id for b in repo.bindings()}
-            for eid in (node.get("entities", []) if node else []):
+            for eid in node.get("entities", []):
                 e = by_id.get(eid)
                 if not e or eid in have:
                     continue
@@ -1268,11 +1294,21 @@ def build_api_router(deps: dict) -> APIRouter:
                 bound += 1
         repo.set_setting("ha.pending_nodes", [p for p in pending if p.get("id") != nid])
         clear_advisory(repo, f"newnode:{nid}")
-        name = node.get("name") if node else nid
+        name = node.get("name") or nid
         record_event(repo, "device_" + ("integrated" if decision == "integrate" else "skipped"),
                      f"{'Integrated' if decision == 'integrate' else 'Skipped'} {name}",
                      f"{bound} sensor(s) added." if bound else "")
-        return {"ok": True, "decision": decision, "bound": bound}
+        return {"ok": True, "decision": decision, "bound": bound, "name": name}
+
+    @api.post("/hierarchy/decide")
+    async def hierarchy_decide(body: dict) -> dict:
+        """Answer a new-device offer: integrate (bind its useful entities + it folds
+        into the next retrain) or skip (remembered, not re-asked)."""
+        nid = (body.get("id") or "").strip()
+        decision = (body.get("decision") or "").strip()
+        if not nid or decision not in ("integrate", "skip"):
+            raise HTTPException(400, "id and decision (integrate|skip) required")
+        return await _decide_node(nid, decision)
 
     @api.get("/hierarchy")
     async def hierarchy_tree() -> dict:
@@ -1797,7 +1833,8 @@ def build_api_router(deps: dict) -> APIRouter:
             raise HTTPException(409, "Connect InfluxDB first")
         from datetime import datetime, timedelta, timezone
 
-        from ..adapters.influx_import import earliest_source_time, import_history
+        from ..adapters.influx_import import (
+            earliest_source_time, import_history, retention_floor)
         bucket = body.get("source_bucket")
         if not bucket:
             raise HTTPException(400, "missing 'source_bucket'")
@@ -1807,6 +1844,9 @@ def build_api_router(deps: dict) -> APIRouter:
             start = earliest_source_time(tsdb, bucket) or end - timedelta(days=90)
         else:
             start = end - timedelta(days=days)
+        # hearth_raw only retains ~90 days — older points are rejected (422), so
+        # clamp instead of asking for history that can never be stored.
+        start = max(start, retention_floor(repo, end))
         results = import_history(tsdb, bucket, repo.bindings(), start, end)
         return {"imported": results, "span_days": max(1, (end - start).days)}
 
@@ -2258,6 +2298,14 @@ def build_api_router(deps: dict) -> APIRouter:
         is the No/Other escape: it supersedes this question and pushes a FOLLOW-UP
         notification with the next batch of options, repeating until one is picked."""
         action = str(body.get("action", ""))
+        # ── new-device offer: "HEARTH_DEV_<device_id>_yes|no" — the notification's
+        # Yes/No buttons decide without opening Hearth (same core as the UI path).
+        if action.startswith("HEARTH_DEV_"):
+            rest = action[len("HEARTH_DEV_"):]
+            nid, _, verdict = rest.rpartition("_")
+            if not nid or verdict not in ("yes", "no"):
+                raise HTTPException(400, "malformed device action")
+            return await _decide_node(nid, "integrate" if verdict == "yes" else "skip")
         parts = action.split("_")
         if len(parts) != 3 or parts[0] != "HEARTH":
             raise HTTPException(400, "not a hearth action")

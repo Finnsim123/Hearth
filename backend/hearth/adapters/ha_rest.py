@@ -11,6 +11,7 @@ ask():    dynamic actionable questions (phrasing engine). Action ids carry the
 from __future__ import annotations
 
 import logging
+import time
 
 import aiohttp
 
@@ -20,6 +21,27 @@ from ..domain.schemas import Person, Question
 
 log = logging.getLogger(__name__)
 
+MUTE_SETTING = "notify.mute_entity"     # HA entity id; state "on" = mute pushes
+_MUTE_CACHE_S = 60.0                    # don't hammer HA before every push
+
+
+async def ha_entity_state(repo, entity_id: str) -> str | None:
+    """Read one entity's current state via HA's REST API; None on any failure."""
+    conn = repo.get_connection("ha")
+    if conn is None or not entity_id:
+        return None
+    url = f"{conn['url'].rstrip('/')}/api/states/{entity_id}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url,
+                                   headers={"Authorization": f"Bearer {conn['token']}"},
+                                   timeout=aiohttp.ClientTimeout(10)) as r:
+                r.raise_for_status()
+                return str((await r.json()).get("state"))
+    except Exception as exc:
+        log.debug("state read for %s failed: %s", entity_id, exc)
+        return None
+
 
 class HaRestNotifier:
     """Implements domain.ports.Notifier."""
@@ -27,8 +49,30 @@ class HaRestNotifier:
     def __init__(self, repo, base_url: str = "") -> None:
         self.repo = repo
         self.base_url = base_url  # Hearth's own URL for deep links (settings)
+        self._mute_at = 0.0       # monotonic ts of the last mute check
+        self._mute_val = False
+
+    async def _muted(self) -> bool:
+        """True while the configured mute entity (vacation mode, guest mode, …)
+        reads 'on'. FAIL OPEN: unreadable/missing entity → not muted — a missed
+        push is annoying; silently-dead notifications break trust. Cached 60 s.
+        Only phone pushes are muted; fire_event (automations) never is."""
+        entity = self.repo.get_setting(MUTE_SETTING) or ""
+        if not entity:
+            return False
+        now = time.monotonic()
+        if now - self._mute_at < _MUTE_CACHE_S:
+            return self._mute_val
+        state = await ha_entity_state(self.repo, entity)
+        self._mute_at = now
+        self._mute_val = (state or "").lower() == "on"
+        return self._mute_val
 
     async def _post_notify(self, service: str, payload: dict) -> bool:
+        if await self._muted():
+            log.info("push suppressed — mute entity is on (%s)",
+                     self.repo.get_setting(MUTE_SETTING))
+            return False
         conn = self.repo.get_connection("ha")
         if conn is None:
             return False
