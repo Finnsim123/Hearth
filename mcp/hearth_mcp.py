@@ -197,7 +197,9 @@ async def advisories() -> list[dict]:
     """Active advisories — things Hearth wants you to know (a demoted sensor, a
     new device to integrate, coverage gaps, out-of-credit, …)."""
     data = await _get("/advisories")      # endpoint returns {advisories, events}
-    return data.get("advisories") or []
+    if isinstance(data, dict):            # unwrap the envelope; FastMCP validates
+        return data.get("advisories") or []   # the annotated list[dict] strictly
+    return data
 
 
 # ── safe actions ─────────────────────────────────────────────────────────────

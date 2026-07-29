@@ -186,14 +186,15 @@ function PersonReport({ person, models, cap, insight, drift, first }: {
             </p>
           )}
 
-          {mt.conformal && (
+          {mt.conformal != null && mt.conformal.avg_set_size != null
+            && mt.conformal.coverage_cal != null && mt.conformal.alpha != null && (
             <p style={{ marginTop: 10, marginBottom: 0, fontSize: 12, color: DIM }}>
               <b style={{ color: INK }}>How sure is "sure"?</b> Calibrated so a shortlist of
               likely activities contains the truth {pct(1 - mt.conformal.alpha, 0)} of the
               time; the shortlist averages <b style={{ color: INK }}>{mt.conformal.avg_set_size.toFixed(1)}</b> option{mt.conformal.avg_set_size === 1 ? "" : "s"} (closer
               to 1 = more decisive), with {pct(mt.conformal.coverage_cal, 0)} coverage achieved
               in calibration. An empty shortlist publishes “unknown” instead of a guess.
-              {" "}Calibrated on {mt.conformal.n_cal} {
+              {" "}Calibrated on {mt.conformal.n_cal ?? "—"} {
                 mt.conformal.basis === "human"
                   ? "human-confirmed answers."
                   : "windows, rule-labelled ones included — treat as approximate until more answers arrive."}
@@ -438,15 +439,26 @@ export default function ModelReport() {
 
   const ready = models !== null;
 
-  // Print by copying the rendered sheet into a FRESH blank window with only a
-  // minimal shell — no app stylesheet, no React, nothing inherited. The report
-  // is styled entirely inline, so the copy is complete; this sidesteps every
-  // SPA/global-CSS × browser-paginator interaction (which produced blank PDFs).
+  // Print by copying the rendered sheet into a HIDDEN same-origin IFRAME with
+  // only a minimal shell — no app stylesheet, no React, nothing inherited. The
+  // report is styled entirely inline, so the copy is complete; this sidesteps
+  // every SPA/global-CSS × browser-paginator interaction (blank PDFs). r4:
+  // iframe instead of window.open — popups are BLOCKED whenever print isn't
+  // user-gesture-initiated (the ?autoPrint timer, some Safari configs), and
+  // the old fallback was plain window.print() on the SPA, i.e. exactly the
+  // blank-page path this function exists to avoid. Iframes need no permission.
   const printClean = () => {
     const sheet = document.querySelector(".sheet");
-    const w = sheet ? window.open("", "_blank") : null;
-    if (!sheet || !w) { window.print(); return; }        // popup blocked → fallback
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+    if (!sheet) { window.print(); return; }
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    Object.assign(frame.style, { position: "fixed", right: "0", bottom: "0",
+                                 width: "0", height: "0", border: "0" });
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument ?? frame.contentWindow?.document;
+    if (!doc) { frame.remove(); window.print(); return; }
+    doc.open();
+    doc.write(`<!doctype html><html><head><meta charset="utf-8">
 <title>Hearth — Model Report</title>
 <style>
   @page { margin: 15mm; }
@@ -460,9 +472,20 @@ export default function ModelReport() {
       -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   tr { break-inside: avoid !important; page-break-inside: avoid !important; }
 </style></head><body>${sheet.outerHTML}</body></html>`);
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 400);
+    doc.close();
+    // let the iframe lay out, then print IT (the parent page never prints);
+    // keep the frame around long enough for the dialog to finish reading it
+    setTimeout(() => {
+      try {
+        frame.contentWindow!.focus();
+        frame.contentWindow!.print();
+      } catch {
+        frame.remove();
+        window.print();
+        return;
+      }
+      setTimeout(() => frame.remove(), 60000);
+    }, 400);
   };
 
   useEffect(() => {
@@ -505,7 +528,7 @@ export default function ModelReport() {
         display: "flex", alignItems: "center", gap: 12, padding: "10px 16px",
         background: "#fff", borderBottom: `1px solid ${LINE}` }}>
         <strong style={{ color: INK }}>Model Report</strong>
-        <span style={{ fontSize: 12.5, color: DIM }}>Save as PDF to keep or share. (r3)</span>
+        <span style={{ fontSize: 12.5, color: DIM }}>Save as PDF to keep or share. (r4)</span>
         <button onClick={printClean} style={{ marginLeft: "auto", cursor: "pointer",
           background: ACCENT, color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px",
           fontSize: 13, fontWeight: 600 }}>Print / Save PDF</button>
