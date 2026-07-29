@@ -79,8 +79,12 @@ def _looks_direct(entity_id: str) -> bool:
     if is_noise({"entity_id": entity_id, "domain": domain}):
         return False
     obj = entity_id.split(".", 1)[-1].lower()
-    # ambient-metric names are exactly what we're steering AWAY from
-    if re.search(r"temp|humid|vocht|lucht|co2|pressure|druk|lux|illum", obj):
+    # ambient-metric names are exactly what we're steering AWAY from — incl.
+    # light-LEVEL sensors (brightness/illuminance): a room being bright is
+    # ambient drift, not a human doing something (seen live: the audit kept
+    # proposing a *_brightness binary as the "direct" fix for an air monitor)
+    if re.search(r"temp|humid|vocht|lucht|co2|pressure|druk|lux|illum|"
+                 r"bright|helder|luminance", obj):
         return False
     return True
 
@@ -93,13 +97,18 @@ def audit_bindings(repo, importance: dict[str, float]) -> list[dict]:
     {kind: "exclude_ambient", …}                        — appliance telemetry with
                                                           no usable sibling
     Never mutates anything."""
-    bindings = [b for b in repo.bindings() if b.enabled]
+    all_bindings = repo.bindings()
+    bindings = [b for b in all_bindings if b.enabled]
     if not bindings or not importance:
         return []
     tiers = binding_tiers(bindings)
     reliance = reliance_by_binding(importance, bindings)
     by_name = {b.name: b for b in bindings}
-    bound_eids = {b.entity_id for b in bindings}
+    # candidates must exclude EVERY known binding, disabled ones included — a
+    # disabled binding means we already tried that entity (or pruning benched
+    # it); re-proposing it every audit round is thrash (seen live: a pruned
+    # brightness binary re-suggested daily as the "fix")
+    bound_eids = {b.entity_id for b in all_bindings}
     ent_dev = repo.get_setting("ha.entity_device") or {}
     dev_ents = _device_entities(repo)
     from .hierarchy import load_device_catalog
@@ -137,7 +146,41 @@ def audit_bindings(repo, importance: dict[str, float]) -> list[dict]:
                         f"{share:.0%} of the model's attention — noise it should stop "
                         f"training on."),
             })
-    return findings
+    return _merge_by_device(findings)
+
+
+def _merge_by_device(findings: list[dict]) -> list[dict]:
+    """One card per (device, kind), not one per feature family — a device with
+    co2 + temperature + pm25 bindings produced three near-identical findings
+    with the same fix (seen live). The primary keeps the strongest reliance;
+    the merged card lists every sibling family and sums the attention share,
+    and apply_finding retires them all in one tap (also_binding_ids)."""
+    merged: dict[tuple, dict] = {}
+    out: list[dict] = []
+    for f in findings:
+        key = (f.get("device_id"), f.get("kind"))
+        if not f.get("device_id") or key not in merged:
+            if f.get("device_id"):
+                merged[key] = f
+            f["also_binding_ids"] = []
+            f["also_names"] = []
+            out.append(f)
+            continue
+        prime = merged[key]
+        prime["also_binding_ids"].append(f["binding_id"])
+        prime["also_names"].append(f["binding_name"])
+        prime["reliance"] = round(prime["reliance"] + f["reliance"], 4)
+        names = ", ".join([prime["binding_name"]] + prime["also_names"])
+        if prime["kind"] == "bind_sibling":
+            prime["why"] = (f"the model leans on {names} "
+                            f"({prime['reliance']:.0%} of its attention combined) — "
+                            f"ambient telemetry of “{prime.get('device') or 'this device'}”. "
+                            f"The same device has a direct signal that isn't being used.")
+        else:
+            prime["why"] = (f"{names} are appliance telemetry yet carry "
+                            f"{prime['reliance']:.0%} of the model's attention combined — "
+                            f"noise it should stop training on.")
+    return sorted(out, key=lambda f: -f.get("reliance", 0.0))
 
 
 def apply_finding(repo, finding: dict, candidate: str | None = None) -> dict:
@@ -184,6 +227,13 @@ def apply_finding(repo, finding: dict, candidate: str | None = None) -> dict:
         bound = repo.save_binding(nb)
 
     repo.save_binding(ambient.model_copy(update={"model_excluded": True}))
+    # a merged per-device finding retires EVERY listed sibling family at once
+    excluded_names = [ambient.name]
+    for bid in finding.get("also_binding_ids") or []:
+        sib = next((b for b in repo.bindings() if b.id == bid), None)
+        if sib is not None and not sib.model_excluded:
+            repo.save_binding(sib.model_copy(update={"model_excluded": True}))
+            excluded_names.append(sib.name)
 
     # retire the finding + tidy the advisory
     left = [f for f in (repo.get_setting("audit.findings") or [])
@@ -195,12 +245,12 @@ def apply_finding(repo, finding: dict, candidate: str | None = None) -> dict:
         if not left:
             advisories.clear_advisory(repo, "bindaudit")
         detail = (f"bound {bound.entity_id} as {bound.role.value}, " if bound else "") \
-            + f"stopped training on {ambient.name}"
+            + f"stopped training on {', '.join(excluded_names)}"
         events.record_event(repo, "binding_audit",
                             f"Fixed a wrong-sensor reliance ({ambient.name})", detail)
     except Exception:
         log.debug("apply_finding: event/advisory failed", exc_info=True)
-    return {"ok": True, "excluded": ambient.name,
+    return {"ok": True, "excluded": excluded_names,
             "bound": {"entity_id": bound.entity_id, "role": bound.role.value,
                       "name": bound.name} if bound else None}
 

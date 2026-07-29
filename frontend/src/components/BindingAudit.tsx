@@ -42,9 +42,10 @@ export default function BindingAudit() {
         body: JSON.stringify({ binding_id: f.binding_id, kind: f.kind,
           candidate: choice[f.binding_id] ?? f.candidates[0] ?? null }),
       }).then(j);
+      const ex = Array.isArray(r.excluded) ? r.excluded.join(", ") : r.excluded;
       setDone((d) => ({ ...d, [f.binding_id]:
-        r.bound ? `Bound ${r.bound.entity_id} · stopped training on ${r.excluded}`
-                : `Stopped training on ${r.excluded}`
+        r.bound ? `Bound ${r.bound.entity_id} · stopped training on ${ex}`
+                : `Stopped training on ${ex}`
         + (r.retraining ? " · retraining…" : "") }));
     } catch {
       setDone((d) => ({ ...d, [f.binding_id]: "Couldn't apply — check the Sensors list." }));
