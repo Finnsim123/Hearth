@@ -265,7 +265,7 @@ function StepInflux({ d, set, next, back }: StepProps) {
 
         {i.mode === "external" && (
           <>
-            <Field label="InfluxDB URL"><input placeholder="http://192.168.1.240:8086" value={i.url} onChange={(e) => { setTest("idle"); setInspect(null); set("influx", { ...i, url: e.target.value }); }} /></Field>
+            <Field label="InfluxDB URL"><input placeholder="http://192.168.1.101:8086" value={i.url} onChange={(e) => { setTest("idle"); setInspect(null); set("influx", { ...i, url: e.target.value }); }} /></Field>
             <Field label="Organization"><input placeholder="homelab" value={i.org} onChange={(e) => set("influx", { ...i, org: e.target.value })} /></Field>
             <Field label="API token" hint="Needs read/write. InfluxDB UI → Load Data → API Tokens.">
               <input type="password" value={i.token} onChange={(e) => { setTest("idle"); setInspect(null); set("influx", { ...i, token: e.target.value }); }} />

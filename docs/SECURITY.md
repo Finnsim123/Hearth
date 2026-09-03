@@ -22,6 +22,7 @@ defect.
 | Browser sessions | login | HTTP-only cookie + SQLite `sessions` | random 256-bit id, **SHA-256 hash** in DB; cookie `Secure` (when TLS), `HttpOnly`, `SameSite=Lax` | `security.py` + auth middleware |
 | Hearth API tokens (HA integration etc.) | Settings → API tokens | SQLite `api_tokens.token_hash` | **SHA-256 hash**, shown once at mint, scoped, revocable | `security.py` |
 | Third-party tokens (HA, MQTT, InfluxDB, LLM) | wizard / Settings → Connections | SQLite `connections.token_encrypted` | **Fernet** (AES-128-CBC+HMAC), key derived from `HEARTH_SECRET` via HKDF | `security.py`; decrypted only inside the adapter that needs it, at call time |
+| Bundled MQTT broker password | `install.sh`, into `.env` | docker env only | plaintext env; hashed into the broker's `passwd` file (`mosquitto_passwd`) at container start | mosquitto container; entered into Hearth as an `mqtt` connection like any other third-party token |
 | Model artifacts | training | `/data/models` volume | not secret, but volume-scoped | ModelStore |
 
 Never stored anywhere: plaintext passwords, plaintext API tokens after mint,
@@ -157,6 +158,15 @@ Residual items that are deployment/ops concerns, not code holes:
   (pickle deserialization can execute code). The stored path is server-generated.
 - **`/data` permissions** follow the container umask; keep the volume off shared
   hosts — it holds the sqlite DB (hashes + Fernet ciphertexts) and model files.
+- **The bundled MQTT broker requires a password.** `install.sh` generates
+  `MQTT_PASSWORD` into `.env` and the container hashes it into a passwd file as
+  user `hearth` at boot; `allow_anonymous` is `false`. This matters because port
+  1883 *is* published to the LAN — reaching external hubs (Homey, Node-RED,
+  openHAB, HA) is the whole point of the profile — and the topics carry
+  per-person activity state (home / asleep / cooking) and accept commands. An
+  anonymous broker would publish the household's movements to every device on
+  the network. Rotate by editing `.env` and restarting; the passwd file is
+  rebuilt each start. (The profile is opt-in: `docker compose --profile mqtt`.)
 - **InfluxDB port 8086 is published to the LAN** by the default compose file
   (so you can reach the Influx UI for backups/inspection). Anyone on the LAN
   with the admin token in `.env` has full DB access. If only Hearth uses it,

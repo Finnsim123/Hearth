@@ -83,12 +83,23 @@ if [[ ! -f .env ]]; then
   SECRET="$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 40)"
   TOKEN="$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 40)"
   PASS="$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 20)"
+  MQTT_PASS="$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 20)"
   # Always provision the bundled InfluxDB's admin token + password; the wizard
   # decides whether Hearth actually USES it or an external instance.
   sed -i.bak -e "s|^HEARTH_SECRET=.*|HEARTH_SECRET=${SECRET}|" \
              -e "s|^INFLUX_TOKEN=.*|INFLUX_TOKEN=${TOKEN}|" \
-             -e "s|^INFLUX_PASSWORD=.*|INFLUX_PASSWORD=${PASS}|" .env && rm -f .env.bak
+             -e "s|^INFLUX_PASSWORD=.*|INFLUX_PASSWORD=${PASS}|" \
+             -e "s|^MQTT_PASSWORD=.*|MQTT_PASSWORD=${MQTT_PASS}|" .env && rm -f .env.bak
   echo -e "${OK}✓${NC} .env created (secrets generated)"
+fi
+
+# ── bundled MQTT broker password (compose profile "mqtt") ───────────────────
+# Backfilled for .env files written before this setting existed. The broker is
+# published to the LAN, so it must not accept anonymous clients — no password,
+# no broker.
+if ! grep -q '^MQTT_PASSWORD=' .env 2>/dev/null; then
+  echo "MQTT_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 20)" >> .env
+  echo -e "${OK}✓${NC} MQTT broker password generated (user \"hearth\", stored in .env)"
 fi
 
 # ── in-app updates: register the host updater (per-OS) ──────────────────────

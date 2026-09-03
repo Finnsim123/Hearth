@@ -102,7 +102,7 @@ entry under `mcpServers` (keep any existing servers — merge, don't overwrite):
 ```
 
 Use `http://localhost:8420` if Claude Desktop runs on the same machine as Hearth;
-otherwise the host's LAN IP (e.g. `http://192.168.1.50:8420`). To merge safely
+otherwise the host's LAN IP (e.g. `http://192.168.1.100:8420`). To merge safely
 into an existing config from the terminal:
 
 ```bash

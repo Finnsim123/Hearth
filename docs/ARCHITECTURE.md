@@ -246,7 +246,7 @@ curriculum as labels accumulate.
 
 Primary channel is a thin **custom HA integration** (`integration/` in this
 repo, distributed via HACS) — the Frigate model. UX: in HA, *Add integration →
-Hearth → enter host (e.g. `192.168.1.50:8420`) + API token* (generated on
+Hearth → enter host (e.g. `192.168.1.100:8420`) + API token* (generated on
 Hearth's Settings page). The config flow validates against `/api/health`,
 discovers the household, and creates a proper device per member with entities:
 

@@ -71,10 +71,34 @@ services:
     volumes:
       - mosquitto-data:/mosquitto/data
       # Mosquitto 2.x with NO config binds 127.0.0.1 + rejects anonymous —
-      # unreachable even from the hearth container. This opens listener 1883.
+      # unreachable even from the hearth container. This opens listener 1883
+      # and requires the "hearth" user.
       - ./deploy/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    environment:
+      # Generated into .env by install.sh (backfilled on every run, so existing
+      # installs pick one up too). Not `:?` on purpose: a hard parse error here
+      # would break `docker compose up` for the whole stack, including the
+      # self-updater, even for people who never enable this profile.
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+    # Hash the password into a passwd file at boot, then hand off to mosquitto.
+    # -c recreates the file each start, so rotating MQTT_PASSWORD just works.
+    # This overrides `command`, NOT `entrypoint`, on purpose: the image's
+    # /docker-entrypoint.sh chowns /mosquitto to the mosquitto user before
+    # exec'ing us, and skipping that breaks persistence on the data volume.
+    command:
+      - /bin/sh
+      - -c
+      - |
+        [ -n "$$MQTT_PASSWORD" ] || {
+          echo "MQTT_PASSWORD is not set. Run: bash install.sh (generates one into .env)" >&2
+          exit 1
+        }
+        /usr/bin/mosquitto_passwd -b -c /mosquitto/config/passwd hearth "$$MQTT_PASSWORD"
+        chown mosquitto:mosquitto /mosquitto/config/passwd
+        chmod 600 /mosquitto/config/passwd
+        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
     ports:
-      - "1883:1883"
+      - "1883:1883"          # LAN-published so external hubs can subscribe
 
 volumes:
   influxdb-data:
