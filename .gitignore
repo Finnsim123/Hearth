@@ -10,3 +10,4 @@ frontend/dist/
 *.tsbuildinfo
 .DS_Store
 .hearth-shared/
+.claude/settings.local.json
